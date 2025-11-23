@@ -1,319 +1,454 @@
 {
   "computers": [
     {
-      "name": "HQ-WKS-01",
-      "ou": "OU=Workstations,OU=Operations,OU=HQ,OU=Sites",
-      "description": "HQ user workstation 01",
-      "osVersion": "Windows 10 Enterprise",
-      "tags": [ "workstation", "hq" ]
-    },
-    {
-      "name": "HQ-WKS-02",
-      "ou": "OU=Workstations,OU=Operations,OU=HQ,OU=Sites",
-      "description": "HQ user workstation 02",
-      "osVersion": "Windows 10 Enterprise",
-      "tags": [ "workstation", "hq" ]
-    },
-    {
-      "name": "HQ-WKS-03",
-      "ou": "OU=Workstations,OU=Operations,OU=HQ,OU=Sites",
-      "description": "HQ user workstation 03",
-      "osVersion": "Windows 10 Enterprise",
-      "tags": [ "workstation", "hq" ]
-    },
-    {
-      "name": "HQ-WKS-04",
-      "ou": "OU=Workstations,OU=Operations,OU=HQ,OU=Sites",
-      "description": "HQ user workstation 04",
-      "osVersion": "Windows 10 Enterprise",
-      "tags": [ "workstation", "hq" ]
-    },
-    {
-      "name": "HQ-WKS-05",
-      "ou": "OU=Workstations,OU=Operations,OU=HQ,OU=Sites",
-      "description": "HQ user workstation 05",
-      "osVersion": "Windows 10 Enterprise",
-      "tags": [ "workstation", "hq" ]
-    },
-    {
-      "name": "HQ-WKS-06",
-      "ou": "OU=Workstations,OU=Operations,OU=HQ,OU=Sites",
-      "description": "HQ user workstation 06",
-      "osVersion": "Windows 10 Enterprise",
-      "tags": [ "workstation", "hq" ]
-    },
-    {
-      "name": "HQ-WKS-07",
-      "ou": "OU=Workstations,OU=Operations,OU=HQ,OU=Sites",
-      "description": "HQ user workstation 07",
-      "osVersion": "Windows 10 Enterprise",
-      "tags": [ "workstation", "hq" ]
-    },
-    {
-      "name": "HQ-WKS-08",
-      "ou": "OU=Workstations,OU=Operations,OU=HQ,OU=Sites",
-      "description": "HQ user workstation 08",
-      "osVersion": "Windows 10 Enterprise",
-      "tags": [ "workstation", "hq" ]
-    },
-    {
-      "name": "HQ-WKS-09",
-      "ou": "OU=Workstations,OU=Operations,OU=HQ,OU=Sites",
-      "description": "HQ user workstation 09",
-      "osVersion": "Windows 10 Enterprise",
-      "tags": [ "workstation", "hq" ]
-    },
-    {
-      "name": "HQ-WKS-10",
-      "ou": "OU=Workstations,OU=Operations,OU=HQ,OU=Sites",
-      "description": "HQ user workstation 10",
-      "osVersion": "Windows 10 Enterprise",
-      "tags": [ "workstation", "hq" ]
-    },
-    {
-      "name": "HQ-FS-01",
-      "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
-      "description": "HQ file server 01",
-      "osVersion": "Windows Server 2019",
-      "tags": [ "server", "app", "file" ]
-    },
-    {
-      "name": "HQ-FS-02",
-      "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
-      "description": "HQ file server 02",
-      "osVersion": "Windows Server 2019",
-      "tags": [ "server", "app", "file" ]
-    },
-    {
-      "name": "HQ-SQL-01",
-      "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
-      "description": "HQ SQL server 01",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "database" ]
-    },
-    {
-      "name": "HQ-SQL-02",
-      "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
-      "description": "HQ SQL server 02",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "database" ]
-    },
-    {
-      "name": "HQ-EX-01",
-      "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
-      "description": "HQ Exchange Server",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "mail" ]
-    },
-    {
-      "name": "HQ-EX-02",
-      "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
-      "description": "HQ Exchange Server",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "mail" ]
-    },
-    {
-      "name": "HQ-EX-03",
-      "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
-      "description": "HQ Exchange Server",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "mail" ]
-    },
-    {
-      "name": "DL-EX-01",
-      "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
-      "description": "Dallas Exchange Server",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "mail" ]
-    },
-    {
-      "name": "DL-EX-02",
-      "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
-      "description": "Dallas Exchange Server",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "mail" ]
-    },
-    {
-      "name": "DL-EX-03",
-      "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
-      "description": "Dallas Exchange Server",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "mail" ]
-    },
-    {
-      "name": "AM-EX-01",
-      "ou": "OU=Servers,OU=IT-Core,OU=Amsterdam,OU=Sites",
-      "description": "Amsterdam Exchange Server",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "mail" ]
-    },
-    {
-      "name": "AM-EX-02",
-      "ou": "OU=Servers,OU=IT-Core,OU=Amsterdam,OU=Sites",
-      "description": "Amsterdam Exchange Server",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "mail" ]
-    },
-    {
-      "name": "AM-EX-03",
-      "ou": "OU=Servers,OU=IT-Core,OU=Amsterdam,OU=Sites",
-      "description": "Amsterdam Exchange Server",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "mail" ]
-    },
-    {
-      "name": "ML-EX-01",
-      "ou": "OU=Servers,OU=Operations,OU=Malibu,OU=Sites",
-      "description": "Malibu Exchange Server",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "mail" ]
-    },
-    {
-      "name": "ML-EX-02",
-      "ou": "OU=Servers,OU=Operations,OU=Malibu,OU=Sites",
-      "description": "Malibu Exchange Server",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "mail" ]
-    },
-    {
-      "name": "NG-EX-01",
-      "ou": "OU=Servers,OU=IT-Core,OU=Nagasaki,OU=Sites",
-      "description": "Nagasaki Exchange Server",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "mail" ]
-    },
-    {
-      "name": "NG-EX-02",
-      "ou": "OU=Servers,OU=IT-Core,OU=Nagasaki,OU=Sites",
-      "description": "Nagasaki Exchange Server",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "mail" ]
-    },
-    {
-      "name": "NG-EX-03",
-      "ou": "OU=Servers,OU=IT-Core,OU=Nagasaki,OU=Sites",
-      "description": "Nagasaki Exchange Server",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "app", "mail" ]
+      "name": "STK-DC-01",
+      "ou": "OU=Servers,OU=Operations,OU=HQ,OU=Sites",
+      "description": "Primary Domain Controller - HQ",
+      "type": "Domain Controller",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R640",
+      "mac": "14:18:77:3A:2B:C1"
     },
     {
       "name": "STK-DC-02",
-      "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
-      "description": "HQ Domain Controller",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "dc" ]
+      "ou": "OU=Servers,OU=Operations,OU=HQ,OU=Sites",
+      "description": "Secondary Domain Controller - HQ",
+      "type": "Domain Controller",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R640",
+      "mac": "14:18:77:3A:2B:C2"
     },
     {
       "name": "STK-DC-03",
-      "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
-      "description": "HQ Domain Controller",
-      "osVersion": "Windows Server 2012 R2",
-      "tags": [ "server", "dc" ]
+      "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
+      "description": "Domain Controller - Dallas",
+      "type": "Domain Controller",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R640",
+      "mac": "14:18:77:4F:8E:D1"
     },
     {
       "name": "STK-DC-04",
-      "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
-      "description": "HQ Domain Controller",
-      "osVersion": "Windows Server 2019",
-      "tags": [ "server", "dc" ]
+      "ou": "OU=Servers,OU=Operations,OU=Nagasaki,OU=Sites",
+      "description": "Domain Controller - Nagasaki",
+      "type": "Domain Controller",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R640",
+      "mac": "14:18:77:6B:1C:A1"
     },
     {
       "name": "STK-DC-05",
+      "ou": "OU=Servers,OU=Operations,OU=Amsterdam,OU=Sites",
+      "description": "Domain Controller - Amsterdam",
+      "type": "Domain Controller",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R640",
+      "mac": "14:18:77:8A:4D:E1"
+    },
+    {
+      "name": "HQ-FS-01",
+      "ou": "OU=Servers,OU=Operations,OU=HQ,OU=Sites",
+      "description": "File Server 01 - HQ",
+      "type": "File Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R740xd",
+      "mac": "14:18:77:3A:5F:11"
+    },
+    {
+      "name": "HQ-FS-02",
+      "ou": "OU=Servers,OU=Operations,OU=HQ,OU=Sites",
+      "description": "File Server 02 - HQ",
+      "type": "File Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R740xd",
+      "mac": "14:18:77:3A:5F:12"
+    },
+    {
+      "name": "HQ-NMS-01",
+      "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
+      "description": "Network Management Server - HQ",
+      "type": "Network Management",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:3A:7C:31"
+    },
+    {
+      "name": "HQ-WSU-01",
+      "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
+      "description": "WSUS Server - Americas",
+      "type": "WSUS",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:3A:9D:51"
+    },
+    {
+      "name": "HQ-DB-01",
+      "ou": "OU=Servers,OU=Operations,OU=HQ,OU=Sites",
+      "description": "Database Server 01 - HQ",
+      "type": "Database Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R750",
+      "mac": "14:18:77:3A:8B:21"
+    },
+    {
+      "name": "HQ-DB-02",
+      "ou": "OU=Servers,OU=Operations,OU=HQ,OU=Sites",
+      "description": "Database Server 02 - HQ",
+      "type": "Database Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R750",
+      "mac": "14:18:77:3A:8B:22"
+    },
+    {
+      "name": "HQ-WEB-01",
+      "ou": "OU=Servers,OU=Operations,OU=HQ,OU=Sites",
+      "description": "Web Server 01 - HQ",
+      "type": "Web Server",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:3A:4E:41"
+    },
+    {
+      "name": "HQ-WEB-02",
+      "ou": "OU=Servers,OU=Operations,OU=HQ,OU=Sites",
+      "description": "Web Server 02 - HQ",
+      "type": "Web Server",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:3A:4E:42"
+    },
+    {
+      "name": "HQ-APP-01",
+      "ou": "OU=Servers,OU=Operations,OU=HQ,OU=Sites",
+      "description": "Application Server 01 - HQ",
+      "type": "Application Server",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:3A:6D:61"
+    },
+    {
+      "name": "HQ-APP-02",
+      "ou": "OU=Servers,OU=Operations,OU=HQ,OU=Sites",
+      "description": "Application Server 02 - HQ",
+      "type": "Application Server",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:3A:6D:62"
+    },
+    {
+      "name": "DAL-FS-01",
+      "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
+      "description": "File Server 01 - Dallas",
+      "type": "File Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R740xd",
+      "mac": "14:18:77:4F:5A:11"
+    },
+    {
+      "name": "DAL-FS-02",
+      "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
+      "description": "File Server 02 - Dallas",
+      "type": "File Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R740xd",
+      "mac": "14:18:77:4F:5A:12"
+    },
+    {
+      "name": "DAL-NMS-01",
+      "ou": "OU=Servers,OU=IT-Core,OU=Dallas,OU=Sites",
+      "description": "Network Management Server - Dallas",
+      "type": "Network Management",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:4F:7B:31"
+    },
+    {
+      "name": "DAL-DB-01",
+      "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
+      "description": "Database Server 01 - Dallas",
+      "type": "Database Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R750",
+      "mac": "14:18:77:4F:8C:21"
+    },
+    {
+      "name": "DAL-DB-02",
+      "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
+      "description": "Database Server 02 - Dallas",
+      "type": "Database Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R750",
+      "mac": "14:18:77:4F:8C:22"
+    },
+    {
+      "name": "MAL-FS-01",
       "ou": "OU=Servers,OU=Operations,OU=Malibu,OU=Sites",
-      "description": "Malibu Domain Controller",
-      "osVersion": "Windows Server 2019",
-      "tags": [ "server", "dc" ]
+      "description": "File Server 01 - Malibu",
+      "type": "File Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R740xd",
+      "mac": "14:18:77:2C:5E:11"
     },
     {
-      "name": "STK-DC-06",
+      "name": "MAL-FS-02",
       "ou": "OU=Servers,OU=Operations,OU=Malibu,OU=Sites",
-      "description": "Malibu Domain Controller",
-      "osVersion": "Windows Server 2019",
-      "tags": [ "server", "dc" ]
+      "description": "File Server 02 - Malibu",
+      "type": "File Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R740xd",
+      "mac": "14:18:77:2C:5E:12"
     },
     {
-      "name": "STK-DC-07",
+      "name": "MAL-NMS-01",
       "ou": "OU=Servers,OU=Operations,OU=Malibu,OU=Sites",
-      "description": "Malibu Domain Controller",
-      "osVersion": "Windows Server 2019",
-      "tags": [ "server", "dc" ]
+      "description": "Network Management Server - Malibu",
+      "type": "Network Management",
+      "os": "Windows Server 2025",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R660",
+      "mac": "14:18:77:2C:7A:31"
     },
     {
-      "name": "STK-DC-08",
-      "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
-      "description": "Dallas Domain Controller",
-      "osVersion": "Windows Server 2008 R2",
-      "tags": [ "server", "dc" ]
+      "name": "MAL-DB-01",
+      "ou": "OU=Servers,OU=Operations,OU=Malibu,OU=Sites",
+      "description": "Database Server 01 - Malibu",
+      "type": "Database Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R750",
+      "mac": "14:18:77:2C:8D:21"
     },
     {
-      "name": "STK-DC-09",
-      "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
-      "description": "Dallas Domain Controller",
-      "osVersion": "Windows Server 2008 R2",
-      "tags": [ "server", "dc" ]
+      "name": "MAL-DB-02",
+      "ou": "OU=Servers,OU=Operations,OU=Malibu,OU=Sites",
+      "description": "Database Server 02 - Malibu",
+      "type": "Database Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R750",
+      "mac": "14:18:77:2C:8D:22"
     },
     {
-      "name": "STK-DC-10",
-      "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
-      "description": "Dallas Domain Controller",
-      "osVersion": "Windows Server 2019",
-      "tags": [ "server", "dc" ]
+      "name": "MAL-DB-03",
+      "ou": "OU=Servers,OU=Development,OU=Malibu,OU=Sites",
+      "description": "Database Server 03 - Malibu Development",
+      "type": "Database Server",
+      "os": "Windows Server 2025",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R760",
+      "mac": "14:18:77:2C:8D:23"
     },
     {
-      "name": "STK-DC-11",
-      "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
-      "description": "Dallas Domain Controller",
-      "osVersion": "Windows Server 2019",
-      "tags": [ "server", "dc" ]
+      "name": "MAL-DB-04",
+      "ou": "OU=Servers,OU=Development,OU=Malibu,OU=Sites",
+      "description": "Database Server 04 - Malibu Development",
+      "type": "Database Server",
+      "os": "Windows Server 2025",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R760",
+      "mac": "14:18:77:2C:8D:24"
     },
     {
-      "name": "STK-DC-12",
+      "name": "MAL-APP-01",
+      "ou": "OU=Servers,OU=Development,OU=Malibu,OU=Sites",
+      "description": "Application Server 01 - Malibu",
+      "type": "Application Server",
+      "os": "Windows Server 2025",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R660",
+      "mac": "14:18:77:2C:6F:61"
+    },
+    {
+      "name": "MAL-APP-02",
+      "ou": "OU=Servers,OU=Development,OU=Malibu,OU=Sites",
+      "description": "Application Server 02 - Malibu",
+      "type": "Application Server",
+      "os": "Windows Server 2025",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R660",
+      "mac": "14:18:77:2C:6F:62"
+    },
+    {
+      "name": "NAG-FS-01",
+      "ou": "OU=Servers,OU=Operations,OU=Nagasaki,OU=Sites",
+      "description": "File Server 01 - Nagasaki",
+      "type": "File Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R740xd",
+      "mac": "14:18:77:6B:5C:11"
+    },
+    {
+      "name": "NAG-FS-02",
+      "ou": "OU=Servers,OU=Operations,OU=Nagasaki,OU=Sites",
+      "description": "File Server 02 - Nagasaki",
+      "type": "File Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R740xd",
+      "mac": "14:18:77:6B:5C:12"
+    },
+    {
+      "name": "NAG-NMS-01",
       "ou": "OU=Servers,OU=IT-Core,OU=Nagasaki,OU=Sites",
-      "description": "Nagasaki Domain Controller",
-      "osVersion": "Windows Server 2016",
-      "tags": [ "server", "dc" ]
+      "description": "Network Management Server - Nagasaki",
+      "type": "Network Management",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:6B:7D:31"
     },
     {
-      "name": "STK-DC-13",
+      "name": "NAG-WSU-01",
       "ou": "OU=Servers,OU=IT-Core,OU=Nagasaki,OU=Sites",
-      "description": "Nagasaki Domain Controller",
-      "osVersion": "Windows Server 2016",
-      "tags": [ "server", "dc" ]
+      "description": "WSUS Server - Asia Pacific",
+      "type": "WSUS",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:6B:9E:51"
     },
     {
-      "name": "STK-DC-14",
-      "ou": "OU=Servers,OU=IT-Core,OU=Nagasaki,OU=Sites",
-      "description": "Nagasaki Domain Controller",
-      "osVersion": "Windows Server 2016",
-      "tags": [ "server", "dc" ]
+      "name": "NAG-DB-01",
+      "ou": "OU=Servers,OU=Operations,OU=Nagasaki,OU=Sites",
+      "description": "Database Server 01 - Nagasaki",
+      "type": "Database Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R750",
+      "mac": "14:18:77:6B:8E:21"
     },
     {
-      "name": "STK-DC-15",
+      "name": "NAG-DB-02",
+      "ou": "OU=Servers,OU=Operations,OU=Nagasaki,OU=Sites",
+      "description": "Database Server 02 - Nagasaki",
+      "type": "Database Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R750",
+      "mac": "14:18:77:6B:8E:22"
+    },
+    {
+      "name": "AMS-FS-01",
+      "ou": "OU=Servers,OU=Operations,OU=Amsterdam,OU=Sites",
+      "description": "File Server 01 - Amsterdam",
+      "type": "File Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R740xd",
+      "mac": "14:18:77:8A:5B:11"
+    },
+    {
+      "name": "AMS-FS-02",
+      "ou": "OU=Servers,OU=Operations,OU=Amsterdam,OU=Sites",
+      "description": "File Server 02 - Amsterdam",
+      "type": "File Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R740xd",
+      "mac": "14:18:77:8A:5B:12"
+    },
+    {
+      "name": "AMS-NMS-01",
       "ou": "OU=Servers,OU=IT-Core,OU=Amsterdam,OU=Sites",
-      "description": "Amsterdam Domain Controller",
-      "osVersion": "Windows Server 2016",
-      "tags": [ "server", "dc" ]
+      "description": "Network Management Server - Amsterdam",
+      "type": "Network Management",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:8A:7E:31"
     },
     {
-      "name": "STK-DC-16",
+      "name": "AMS-WSU-01",
       "ou": "OU=Servers,OU=IT-Core,OU=Amsterdam,OU=Sites",
-      "description": "Amsterdam Domain Controller",
-      "osVersion": "Windows Server 2016",
-      "tags": [ "server", "dc" ]
+      "description": "WSUS Server - Europe",
+      "type": "WSUS",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:8A:9F:51"
     },
     {
-      "name": "STK-DC-17",
-      "ou": "OU=Servers,OU=IT-Core,OU=Amsterdam,OU=Sites",
-      "description": "Amsterdam Domain Controller",
-      "osVersion": "Windows Server 2016",
-      "tags": [ "server", "dc" ]
+      "name": "AMS-DB-01",
+      "ou": "OU=Servers,OU=Operations,OU=Amsterdam,OU=Sites",
+      "description": "Database Server 01 - Amsterdam",
+      "type": "Database Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R750",
+      "mac": "14:18:77:8A:8F:21"
     },
     {
-      "name": "STK-DC-18",
-      "ou": "OU=Servers,OU=IT-Core,OU=Amsterdam,OU=Sites",
-      "description": "Amsterdam Domain Controller",
-      "osVersion": "Windows Server 2016",
-      "tags": [ "server", "dc" ]
+      "name": "AMS-DB-02",
+      "ou": "OU=Servers,OU=Operations,OU=Amsterdam,OU=Sites",
+      "description": "Database Server 02 - Amsterdam",
+      "type": "Database Server",
+      "os": "Windows Server 2019",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R750",
+      "mac": "14:18:77:8A:8F:22"
+    },
+    {
+      "name": "AMS-WEB-01",
+      "ou": "OU=Servers,OU=Operations,OU=Amsterdam,OU=Sites",
+      "description": "Web Server 01 - Amsterdam",
+      "type": "Web Server",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:8A:4F:41"
+    },
+    {
+      "name": "AMS-WEB-02",
+      "ou": "OU=Servers,OU=Operations,OU=Amsterdam,OU=Sites",
+      "description": "Web Server 02 - Amsterdam",
+      "type": "Web Server",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:8A:4F:42"
+    },
+    {
+      "name": "AMS-APP-01",
+      "ou": "OU=Servers,OU=Operations,OU=Amsterdam,OU=Sites",
+      "description": "Application Server 01 - Amsterdam",
+      "type": "Application Server",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:8A:6E:61"
+    },
+    {
+      "name": "AMS-APP-02",
+      "ou": "OU=Servers,OU=Operations,OU=Amsterdam,OU=Sites",
+      "description": "Application Server 02 - Amsterdam",
+      "type": "Application Server",
+      "os": "Windows Server 2022",
+      "manufacturer": "Dell",
+      "model": "PowerEdge R650",
+      "mac": "14:18:77:8A:6E:62"
     }
   ]
 }
