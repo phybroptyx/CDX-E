@@ -1,179 +1,253 @@
+<#
+.SYNOPSIS
+    Generate structure.json from exercise_template.json
+
+.DESCRIPTION
+    Reads an exercise-specific template file and generates the complete
+    AD structure configuration (sites, subnets, site links, OUs) for
+    deployment by ad_deploy.ps1.
+
+.PARAMETER ExercisesRoot
+    Root directory containing exercise folders (default: .\EXERCISES)
+
+.PARAMETER ExerciseName
+    Name of the exercise (e.g., CHILLED_ROCKET)
+
+.PARAMETER TemplateFileName
+    Name of the template file to read (default: exercise_template.json)
+
+.PARAMETER OutputFileName
+    Name of the output file to create (default: structure.json)
+
+.PARAMETER Force
+    Overwrite existing structure.json without prompting
+
+.NOTES
+    This script is called by ad_deploy.ps1 with -GenerateStructure flag,
+    or can be run standalone to regenerate structure files.
+#>
+
+[CmdletBinding()]
 param(
     [string]$ExercisesRoot = ".\EXERCISES",
+    
     [Parameter(Mandatory)]
-    [string]$ExerciseName
+    [string]$ExerciseName,
+    
+    [string]$TemplateFileName = "exercise_template.json",
+    
+    [string]$OutputFileName = "structure.json",
+    
+    [switch]$Force
 )
 
-# Resolve output path
+Write-Host "=====================================================" -ForegroundColor Cyan
+Write-Host "     Structure Generator - Template Processor       " -ForegroundColor Cyan
+Write-Host "=====================================================" -ForegroundColor Cyan
+Write-Host ""
+
+# ---------------------------------------------------------------------------
+# Resolve paths
+# ---------------------------------------------------------------------------
 $exercisePath = Join-Path -Path $ExercisesRoot -ChildPath $ExerciseName
 if (-not (Test-Path $exercisePath)) {
+    Write-Host "[Generator] Creating exercise folder: $exercisePath" -ForegroundColor Yellow
     New-Item -ItemType Directory -Path $exercisePath -Force | Out-Null
 }
 
-$structureJsonPath = Join-Path -Path $exercisePath -ChildPath "structure.json"
+$templatePath = Join-Path -Path $exercisePath -ChildPath $TemplateFileName
+$outputPath   = Join-Path -Path $exercisePath -ChildPath $OutputFileName
 
-Write-Host "[Generator] Writing structure.json to: $structureJsonPath" -ForegroundColor Cyan
+Write-Host "Exercise Path : $exercisePath"
+Write-Host "Template File : $TemplateFileName"
+Write-Host "Output File   : $OutputFileName"
+Write-Host ""
 
-# ---------------------------
-# 1. AD Sites & Subnets
-# ---------------------------
+# ---------------------------------------------------------------------------
+# Validate template exists
+# ---------------------------------------------------------------------------
+if (-not (Test-Path $templatePath)) {
+    throw "Template file not found: $templatePath`n`nPlease create an exercise_template.json file for this exercise."
+}
 
-$sites = @(
-    @{
-        name        = "StarkTower-NYC"
-        description = "Stark Industries Global Headquarters, New York City, USA"
-    },
-    @{
-        name        = "Malibu-Mansion"
-        description = "Tony Stark's primary residence and private lab, Malibu, CA, USA"
-    },
-    @{
-        name        = "Dallas-Branch"
-        description = "Stark Industries U.S. Manufacturing and Operations Center, Dallas, TX, USA"
-    },
-    @{
-        name        = "Nagasaki-Facility"
-        description = "Stark Industries Overseas R&D and Weapons Facility, Nagasaki, Japan"
-    },
-    @{
-        name        = "Amsterdam-Hub"
-        description = "Stark Industries European Administration and Logistics Hub, Amsterdam, Netherlands"
+# ---------------------------------------------------------------------------
+# Check if output already exists
+# ---------------------------------------------------------------------------
+if ((Test-Path $outputPath) -and -not $Force) {
+    $overwrite = Read-Host "Output file already exists. Overwrite? (Y/N)"
+    if ($overwrite -notin @("Y", "y", "Yes", "YES")) {
+        Write-Host "[Generator] Aborted by user." -ForegroundColor Yellow
+        return
     }
-)
+}
 
-$subnets = @(
-    @{
-        cidr     = "66.218.180.0/22"
-        site     = "StarkTower-NYC"
-        location = "New York, USA"
-    },
-    @{
-        cidr     = "4.150.216.0/22"
-        site     = "Malibu-Mansion"
-        location = "Malibu, CA, USA"
-    },
-    @{
-        cidr     = "50.222.72.0/22"
-        site     = "Dallas-Branch"
-        location = "Dallas, TX, USA"
-    },
-    @{
-        cidr     = "14.206.0.0/22"
-        site     = "Nagasaki-Facility"
-        location = "Nagasaki, Japan"
-    },
-    @{
-        cidr     = "37.74.124.0/22"
-        site     = "Amsterdam-Hub"
-        location = "Amsterdam, Netherlands"
+# ---------------------------------------------------------------------------
+# Load and parse template
+# ---------------------------------------------------------------------------
+Write-Host "[Generator] Loading template from: $templatePath" -ForegroundColor Cyan
+
+try {
+    $template = Get-Content -Path $templatePath -Raw | ConvertFrom-Json
+}
+catch {
+    throw "Failed to parse template JSON: $_"
+}
+
+Write-Host "[Generator] Template loaded: $($template._meta.exerciseName)" -ForegroundColor Green
+Write-Host "              Description: $($template._meta.description)" -ForegroundColor DarkGray
+Write-Host ""
+
+# ---------------------------------------------------------------------------
+# Build Sites array
+# ---------------------------------------------------------------------------
+Write-Host "[Generator] Processing sites..." -ForegroundColor Cyan
+
+$sites = @()
+foreach ($site in $template.sites) {
+    $sites += @{
+        name        = $site.name
+        description = $site.description
     }
-)
+    Write-Host "  + Site: $($site.name)" -ForegroundColor DarkGreen
+}
 
-$sitelinks = @(
-    @{
-        name                    = "US-Backbone-Link"
-        sites                   = @("StarkTower-NYC", "Dallas-Branch", "Malibu-Mansion")
-        cost                    = 50
-        replicationIntervalMins = 15
-    },
-    @{
-        name                    = "Transatlantic-Link"
-        sites                   = @("StarkTower-NYC", "Amsterdam-Hub")
-        cost                    = 90
-        replicationIntervalMins = 60
-    },
-    @{
-        name                    = "PAC-Link"
-        sites                   = @("StarkTower-NYC", "Nagasaki-Facility")
-        cost                    = 110
-        replicationIntervalMins = 120
-    },
-    @{
-        name                    = "EU-APAC-Link"
-        sites                   = @("Amsterdam-Hub", "Nagasaki-Facility")
-        cost                    = 120
-        replicationIntervalMins = 120
+# ---------------------------------------------------------------------------
+# Build Subnets array
+# ---------------------------------------------------------------------------
+Write-Host "`n[Generator] Processing subnets..." -ForegroundColor Cyan
+
+$subnets = @()
+foreach ($site in $template.sites) {
+    if ($template.advancedOptions.createSiteSubnets -eq $false) {
+        Write-Host "  [Skipped] Subnet creation disabled in template" -ForegroundColor DarkGray
+        break
     }
-)
+    
+    $subnets += @{
+        cidr     = $site.subnet.cidr
+        site     = $site.name
+        location = $site.subnet.location
+    }
+    Write-Host "  + Subnet: $($site.subnet.cidr) -> $($site.name)" -ForegroundColor DarkGreen
+}
 
-# ---------------------------
-# 2. OU Tree (Sites / Depts / Sub-OUs)
-# ---------------------------
+# ---------------------------------------------------------------------------
+# Build Site Links array
+# ---------------------------------------------------------------------------
+Write-Host "`n[Generator] Processing site links..." -ForegroundColor Cyan
+
+$sitelinks = @()
+foreach ($link in $template.siteLinks) {
+    if ($template.advancedOptions.createSiteLinks -eq $false) {
+        Write-Host "  [Skipped] Site link creation disabled in template" -ForegroundColor DarkGray
+        break
+    }
+    
+    $sitelinks += @{
+        name                    = $link.name
+        sites                   = @($link.sites)
+        cost                    = $link.cost
+        replicationIntervalMins = $link.replicationIntervalMins
+    }
+    Write-Host "  + Link: $($link.name) [Cost: $($link.cost), Sites: $($link.sites.Count)]" -ForegroundColor DarkGreen
+}
+
+# ---------------------------------------------------------------------------
+# Build OU hierarchy
+# ---------------------------------------------------------------------------
+Write-Host "`n[Generator] Building OU hierarchy..." -ForegroundColor Cyan
 
 $ous = @()
+$orgStructure = $template.organizationalStructure
 
-# Root "Sites" OU
+# Root "Sites" OU (or custom name from template)
+$rootOUName = $orgStructure.rootOU
+$rootOUDesc = $orgStructure.rootOUDescription
+
 $ous += [pscustomobject]@{
-    name        = "Sites"
+    name        = $rootOUName
     parent_dn   = ""
-    description = "Top-level container for all site-specific OUs"
+    description = $rootOUDesc
 }
+Write-Host "  + Root OU: $rootOUName" -ForegroundColor DarkGreen
 
-# Site → Departments mapping
-# IT-Core only at HQ, Nagasaki, Amsterdam
-# HQ has extra departments: HR, Legal, Gov-Liaison
-$siteDefinitions = @{
-    "HQ"        = @("Operations", "IT-Core", "Ops-Support", "HR", "Legal", "Gov-Liaison", "Engineering", "Engineering Development", "QA", "CAD")
-    "Dallas"    = @("Operations", "IT-Core", "Ops-Support", "Engineering", "Engineering Development", "QA", "CAD")
-    "Malibu"    = @("Operations", "Development")
-    "Nagasaki"  = @("Operations", "IT-Core", "Ops-Support", "Engineering", "Engineering Development", "QA")
-    "Amsterdam" = @("Operations", "IT-Core", "Ops-Support", "Engineering", "Engineering Development", "QA")
-}
-
-# Sub-OUs under each department (unique per department)
-$departmentSubOUs = @(
-    "Workstations",
-    "Servers",
-    "Users",
-    "Groups",
-    "ServiceAccounts",
-    "Resources"
-)
-
-foreach ($siteName in $siteDefinitions.Keys) {
-
-    # Site OU under OU=Sites
+# Process each site mapping
+foreach ($siteKey in $orgStructure.siteMappings.PSObject.Properties.Name) {
+    $siteMapping = $orgStructure.siteMappings.$siteKey
+    
+    Write-Host "`n  Processing Site: $siteKey" -ForegroundColor Cyan
+    
+    # Site OU under root
     $ous += [pscustomobject]@{
-        name        = $siteName
-        parent_dn   = "OU=Sites"
-        description = "$siteName logical OU"
+        name        = $siteKey
+        parent_dn   = "OU=$rootOUName"
+        description = "$siteKey site OU (linked to $($siteMapping.siteName))"
     }
-
-    foreach ($dept in $siteDefinitions[$siteName]) {
-
-        $deptParentDn = "OU=$siteName,OU=Sites"
-
-        # Department OU
+    Write-Host "    + OU: $siteKey" -ForegroundColor DarkGreen
+    
+    # Department OUs under each site
+    foreach ($dept in $siteMapping.departments) {
+        $deptParentDn = "OU=$siteKey,OU=$rootOUName"
+        
         $ous += [pscustomobject]@{
             name        = $dept
             parent_dn   = $deptParentDn
-            description = "$dept department at $siteName"
+            description = "$dept department at $siteKey"
         }
-
-        # Sub-OUs per department
-        foreach ($subOu in $departmentSubOUs) {
+        Write-Host "      + Dept: $dept" -ForegroundColor DarkGreen
+        
+        # Sub-OUs under each department
+        foreach ($subOU in $orgStructure.departmentSubOUs) {
             $ous += [pscustomobject]@{
-                name        = $subOu
+                name        = $subOU
                 parent_dn   = "OU=$dept,$deptParentDn"
-                description = "$subOu for $dept at $siteName"
+                description = "$subOU for $dept at $siteKey"
             }
+            Write-Host "        - SubOU: $subOU" -ForegroundColor DarkGray
         }
     }
 }
 
-# ---------------------------
-# 3. Combine into structure object and write JSON
-# ---------------------------
+# ---------------------------------------------------------------------------
+# Assemble final structure object
+# ---------------------------------------------------------------------------
+Write-Host "`n[Generator] Assembling structure object..." -ForegroundColor Cyan
 
 $structure = [ordered]@{
-    sites     = $sites
-    subnets   = $subnets
-    sitelinks = $sitelinks
-    ous       = $ous
+    _generated = @{
+        timestamp    = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+        exerciseName = $ExerciseName
+        templateFile = $TemplateFileName
+        generator    = "generate_structure.ps1 v2.0"
+    }
+    sites      = $sites
+    subnets    = $subnets
+    sitelinks  = $sitelinks
+    ous        = $ous
 }
 
-$structure |
-    ConvertTo-Json -Depth 6 |
-    Set-Content -Encoding UTF8 $structureJsonPath
+# ---------------------------------------------------------------------------
+# Write output JSON
+# ---------------------------------------------------------------------------
+Write-Host "[Generator] Writing structure.json to: $outputPath" -ForegroundColor Cyan
 
-Write-Host "[Generator] structure.json generated." -ForegroundColor Green
+try {
+    $structure | ConvertTo-Json -Depth 8 | Set-Content -Path $outputPath -Encoding UTF8
+    Write-Host "[Generator] ✓ Structure file generated successfully!" -ForegroundColor Green
+}
+catch {
+    throw "Failed to write output file: $_"
+}
+
+# ---------------------------------------------------------------------------
+# Summary report
+# ---------------------------------------------------------------------------
+Write-Host "`n=====================================================" -ForegroundColor Cyan
+Write-Host "                  Generation Summary                 " -ForegroundColor Cyan
+Write-Host "=====================================================" -ForegroundColor Cyan
+Write-Host "Sites      : $($sites.Count)" -ForegroundColor White
+Write-Host "Subnets    : $($subnets.Count)" -ForegroundColor White
+Write-Host "Site Links : $($sitelinks.Count)" -ForegroundColor White
+Write-Host "OUs        : $($ous.Count)" -ForegroundColor White
+Write-Host "=====================================================" -ForegroundColor Cyan
+Write-Host ""
