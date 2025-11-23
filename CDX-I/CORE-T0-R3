@@ -1,0 +1,26 @@
+configure
+set system host-name 'CORE-T0-R3'
+set system time-zone 'Asia/Tokyo'
+set system domain-name 'cdx.lab'
+set service ntp server 46.244.164.88
+set service ssh port 2022
+set interfaces ethernet eth0 description 'Management'
+set interfaces ethernet eth0 address dhcp
+set interfaces ethernet eth1 description 'Tier 0 Gateway - ASIA-PAC'
+set interfaces ethernet eth1 address 45.127.172.19/28
+set interfaces ethernet eth1 address 193.232.136.33/28
+set interfaces ethernet eth1 address 185.1.8.82/28
+set interfaces ethernet eth1 address 103.140.210.120/28
+set interfaces ethernet eth2 description 'to EUR-AF'
+set interfaces ethernet eth2 address 46.127.232.118/30
+set interfaces ethernet eth3 description 'to AMERICAS'
+set interfaces ethernet eth3 address 46.127.232.114/30
+set protocols ospf parameters router-id 45.127.172.19
+set protocols ospf area 0 network 45.127.172.16/28
+set protocols ospf area 0 network 193.232.136.32/28
+set protocols ospf area 0 network 185.1.8.80/28
+set protocols ospf area 0 network 103.140.210.112/28
+set protocols ospf area 0 network 46.127.232.116/30
+set protocols ospf area 0 network 46.127.232.112/30
+commit
+save

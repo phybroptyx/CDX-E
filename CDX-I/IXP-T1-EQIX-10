@@ -1,0 +1,59 @@
+configure
+set system host-name 'IXP-T1-EQIX-10'
+set system time-zone 'Asia/Seoul'
+set system domain-name 'cdx.lab'
+set service ntp server 46.244.164.88
+set service ssh port 2022
+set interfaces ethernet eth0 description 'Management'
+set interfaces ethernet eth0 address dhcp
+set interfaces ethernet eth1 address 27.160.0.79/12
+set interfaces ethernet eth1 description 'Tier 1 Regional Gateway - Seoul'
+set interfaces ethernet eth1 address 14.206.0.63/20
+set interfaces ethernet eth1 address 27.35.192.66/21
+set interfaces ethernet eth1 address 14.45.80.39/21
+set interfaces ethernet eth1 address 61.70.0.51/15
+set interfaces ethernet eth1 address 27.109.154.115/23
+set interfaces ethernet eth1 address 1.3.0.7/16
+set interfaces ethernet eth1 address 14.224.0.78/15
+set interfaces ethernet eth1 address 59.192.0.3/10
+set interfaces ethernet eth1 address 42.204.0.31/14
+set interfaces ethernet eth1 address 42.192.0.74/15
+set interfaces ethernet eth1 address 61.165.0.117/16
+set interfaces ethernet eth1 address 36.249.0.114/19
+set interfaces ethernet eth1 address 175.45.176.69/23
+set interfaces ethernet eth1 address 202.72.96.5/30
+set interfaces ethernet eth1 address 60.255.0.187/16
+set interfaces ethernet eth1 address 49.120.0.87/23
+set interfaces ethernet eth1 address 43.0.0.16/9
+set interfaces ethernet eth1 address 57.92.80.19/20
+set interfaces ethernet eth1 address 60.56.240.98/20
+set interfaces ethernet eth1 address 49.100.0.88/17
+set interfaces ethernet eth1 address 59.179.160.58/19
+set interfaces ethernet eth2 address 103.140.210.122/28
+set interfaces ethernet eth2 description 'to TIER 0'
+set protocols ospf parameters router-id 27.160.0.79
+set protocols ospf area 0 network 103.140.210.112/28
+set protocols ospf area 10 network 27.160.0.0/12
+set protocols ospf area 10 network 14.206.0.0/20
+set protocols ospf area 10 network 27.35.192.0/21
+set protocols ospf area 10 network 14.45.80.0/21
+set protocols ospf area 10 network 61.70.0.0/15
+set protocols ospf area 10 network 27.109.154.0/23
+set protocols ospf area 10 network 1.3.0.0/16
+set protocols ospf area 10 network 14.224.0.0/15
+set protocols ospf area 10 network 59.192.0.0/10
+set protocols ospf area 10 network 42.204.0.0/14
+set protocols ospf area 10 network 42.192.0.0/15
+set protocols ospf area 10 network 61.165.0.0/16
+set protocols ospf area 10 network 36.249.0.0/19
+set protocols ospf area 10 network 175.45.176.0/23
+set protocols ospf area 10 network 202.72.96.4/30
+set protocols ospf area 10 network 60.255.0.0/16
+set protocols ospf area 10 network 49.120.0.0/23
+set protocols ospf area 10 network 43.0.0.0/9
+set protocols ospf area 10 network 57.92.80.0/20
+set protocols ospf area 10 network 60.56.240.0/20
+set protocols ospf area 10 network 49.100.0.0/17
+set protocols ospf area 10 network 59.179.160.0/19
+commit
+save

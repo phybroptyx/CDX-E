@@ -1,0 +1,57 @@
+configure
+set system host-name 'IXP-T1-EQIX-8'
+set system time-zone 'Asia/Dubai'
+set system domain-name 'cdx.lab'
+set service ntp server 46.244.164.88
+set service ssh port 2022
+set interfaces ethernet eth0 description 'Management'
+set interfaces ethernet eth0 address dhcp
+set interfaces ethernet eth1 address 5.195.0.122/16
+set interfaces ethernet eth1 description 'Tier 1 Regional Gateway - Dubai'
+set interfaces ethernet eth1 address 31.29.64.73/19
+set interfaces ethernet eth1 address 57.12.0.41/16
+set interfaces ethernet eth1 address 37.211.6.42/23
+set interfaces ethernet eth1 address 37.208.224.98/22
+set interfaces ethernet eth1 address 37.186.32.79/19
+set interfaces ethernet eth1 address 62.201.205.37/24
+set interfaces ethernet eth1 address 37.131.12.13/22
+set interfaces ethernet eth1 address 50.119.0.58/16
+set interfaces ethernet eth1 address 37.205.116.54/24
+set interfaces ethernet eth1 address 37.56.28.85/22
+set interfaces ethernet eth1 address 37.34.134.93/23
+set interfaces ethernet eth1 address 37.40.28.146/22
+set interfaces ethernet eth1 address 63.168.168.143/23
+set interfaces ethernet eth1 address 5.246.96.55/19
+set interfaces ethernet eth1 address 24.239.204.197/22
+set interfaces ethernet eth1 address 31.44.128.31/22
+set interfaces ethernet eth1 address 57.88.160.28/20
+set interfaces ethernet eth1 address 37.237.16.46/20
+set interfaces ethernet eth1 address 57.88.144.45/20
+set interfaces ethernet eth1 address 62.56.128.137/21
+set interfaces ethernet eth2 address 185.1.8.84/28
+set interfaces ethernet eth2 description 'to TIER 0'
+set protocols ospf parameters router-id 5.195.0.122
+set protocols ospf area 0 network 185.1.8.80/28
+set protocols ospf area 8 network 31.29.64.0/19
+set protocols ospf area 8 network 57.12.0.0/16
+set protocols ospf area 8 network 37.211.6.0/23
+set protocols ospf area 8 network 37.208.224.0/22
+set protocols ospf area 8 network 37.186.32.0/19
+set protocols ospf area 8 network 62.201.205.0/24
+set protocols ospf area 8 network 37.131.12.0/22
+set protocols ospf area 8 network 50.119.0.0/16
+set protocols ospf area 8 network 37.205.116.0/24
+set protocols ospf area 8 network 37.56.28.0/22
+set protocols ospf area 8 network 37.34.134.0/23
+set protocols ospf area 8 network 37.40.28.0/22
+set protocols ospf area 8 network 63.168.168.0/23
+set protocols ospf area 8 network 5.246.96.0/19
+set protocols ospf area 8 network 24.239.204.0/22
+set protocols ospf area 8 network 31.44.128.0/22
+set protocols ospf area 8 network 57.88.160.0/20
+set protocols ospf area 8 network 37.237.16.0/20
+set protocols ospf area 8 network 57.88.144.0/20
+set protocols ospf area 8 network 62.56.128.0/21
+set protocols ospf area 8 network 5.195.0.0/16
+commit
+save

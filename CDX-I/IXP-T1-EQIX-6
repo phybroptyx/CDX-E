@@ -1,0 +1,83 @@
+configure
+set system host-name 'IXP-T1-EQIX-6'
+set system time-zone 'Europe/Berlin'
+set system domain-name 'cdx.lab'
+set service ntp server 46.244.164.88
+set service ssh port 2022
+set interfaces ethernet eth0 description 'Management'
+set interfaces ethernet eth0 address dhcp
+set interfaces ethernet eth1 address 18.194.0.22/15
+set interfaces ethernet eth1 description 'Tier 1 Regional Gateway - Frankfurt'
+set interfaces ethernet eth1 address 41.57.128.54/18
+set interfaces ethernet eth1 address 53.0.0.88/10
+set interfaces ethernet eth1 address 31.169.128.41/17
+set interfaces ethernet eth1 address 46.168.0.28/16
+set interfaces ethernet eth1 address 46.74.192.90/23
+set interfaces ethernet eth1 address 5.179.200.85/21
+set interfaces ethernet eth1 address 37.120.192.18/19
+set interfaces ethernet eth1 address 37.32.128.60/20
+set interfaces ethernet eth1 address 41.219.0.52/18
+set interfaces ethernet eth1 address 41.88.0.87/16
+set interfaces ethernet eth1 address 41.208.64.77/19
+set interfaces ethernet eth1 address 41.95.0.204/16
+set interfaces ethernet eth1 address 41.206.64.10/19
+set interfaces ethernet eth1 address 46.244.164.194/22
+set interfaces ethernet eth1 address 41.58.0.81/18
+set interfaces ethernet eth1 address 41.243.192.152/18
+set interfaces ethernet eth1 address 41.195.0.43/16
+set interfaces ethernet eth1 address 41.24.224.109/19
+set interfaces ethernet eth1 address 41.72.160.107/19
+set interfaces ethernet eth1 address 37.220.192.88/18
+set interfaces ethernet eth1 address 198.41.0.18/24
+set interfaces ethernet eth1 address 199.9.14.25/24
+set interfaces ethernet eth1 address 192.33.4.79/24
+set interfaces ethernet eth1 address 199.7.9.4/24
+set interfaces ethernet eth1 address 192.203.230.102/24
+set interfaces ethernet eth1 address 192.5.5.210/24
+set interfaces ethernet eth1 address 192.112.36.97/24
+set interfaces ethernet eth1 address 198.97.190.84/24
+set interfaces ethernet eth1 address 192.36.148.47/24
+set interfaces ethernet eth1 address 192.58.128.76/24
+set interfaces ethernet eth1 address 193.0.14.81/24
+set interfaces ethernet eth1 address 199.7.83.92/24
+set interfaces ethernet eth2 address 185.1.102.74/28
+set interfaces ethernet eth2 address 202.12.27.116/24
+set interfaces ethernet eth2 description 'to TIER 0'
+set protocols ospf parameters router-id 18.194.0.22
+set protocols ospf area 0 network 185.1.102.64/28
+set protocols ospf area 6 network 18.194.0.0/15
+set protocols ospf area 6 network 41.57.128.0/18
+set protocols ospf area 6 network 53.0.0.0/10
+set protocols ospf area 6 network 31.169.128.0/17
+set protocols ospf area 6 network 46.168.0.0/16
+set protocols ospf area 6 network 46.74.192.0/23
+set protocols ospf area 6 network 5.179.200.0/21
+set protocols ospf area 6 network 37.120.192.0/19
+set protocols ospf area 6 network 37.32.128.0/20
+set protocols ospf area 6 network 41.219.0.0/18
+set protocols ospf area 6 network 41.88.0.0/16
+set protocols ospf area 6 network 41.208.64.0/19
+set protocols ospf area 6 network 41.95.0.0/16
+set protocols ospf area 6 network 41.206.64.0/19
+set protocols ospf area 6 network 46.244.164.0/22
+set protocols ospf area 6 network 41.58.0.0/18
+set protocols ospf area 6 network 41.243.192.0/18
+set protocols ospf area 6 network 41.195.0.0/16
+set protocols ospf area 6 network 41.24.224.0/19
+set protocols ospf area 6 network 41.72.160.0/19
+set protocols ospf area 6 network 37.220.192.0/18
+set protocols ospf area 6 network 198.41.0.0/24
+set protocols ospf area 6 network 199.9.14.0/24
+set protocols ospf area 6 network 192.33.4.0/24
+set protocols ospf area 6 network 199.7.9.0/24
+set protocols ospf area 6 network 192.203.230.0/24
+set protocols ospf area 6 network 192.5.5.0/24
+set protocols ospf area 6 network 192.112.36.0/24
+set protocols ospf area 6 network 198.97.190.0/24
+set protocols ospf area 6 network 192.36.148.0/24
+set protocols ospf area 6 network 192.58.128.0/24
+set protocols ospf area 6 network 193.0.14.0/24
+set protocols ospf area 6 network 199.7.83.0/24
+set protocols ospf area 6 network 202.12.27.0/24
+commit
+save
