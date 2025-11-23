@@ -1,62 +1,106 @@
 configure
+
+########################################
+# System Identity / Base Services
+########################################
+
 set system host-name 'IXP-T1-EQIX-5'
-set system time-zone 'America/Toronto'
 set system domain-name 'cdx.lab'
-set service ntp server 46.244.164.88
-set service ssh port 2022
+set system time-zone 'America/Toronto'
+
+set service ntp server '46.244.164.88'
+set service ssh port '2022'
+
+########################################
+# Interfaces
+# eth0: Management
+########################################
+
+# eth0: Management (DHCP from lab management network)
 set interfaces ethernet eth0 description 'Management'
-set interfaces ethernet eth0 address dhcp
-set interfaces ethernet eth1 address 64.99.32.172/19
+set interfaces ethernet eth0 address 'dhcp'
+
+# eth1: Tier-1 Regional Gateway – Toronto (Multiple Regional / ISP Peering Blocks)
 set interfaces ethernet eth1 description 'Tier 1 Regional Gateway - Toronto'
-set interfaces ethernet eth1 address 66.46.176.126/21
-set interfaces ethernet eth1 address 4.174.128.91/17
-set interfaces ethernet eth1 address 206.131.208.42/20
-set interfaces ethernet eth1 address 13.111.0.87/16
-set interfaces ethernet eth1 address 129.6.15.89/24
-set interfaces ethernet eth1 address 4.202.0.179/16
-set interfaces ethernet eth1 address 66.218.176.125/20
-set interfaces ethernet eth1 address 67.163.104.79/21
-set interfaces ethernet eth1 address 4.152.0.102/17
-set interfaces ethernet eth1 address 4.150.0.86/15
-set interfaces ethernet eth1 address 38.38.136.124/21
-set interfaces ethernet eth1 address 47.0.0.76/13
-set interfaces ethernet eth1 address 40.69.96.28/19
-set interfaces ethernet eth1 address 4.140.0.67/15
-set interfaces ethernet eth1 address 56.0.0.83/18
-set interfaces ethernet eth1 address 64.79.0.31/19
-set interfaces ethernet eth1 address 50.193.224.27/22
-set interfaces ethernet eth1 address 8.224.168.191/21
-set interfaces ethernet eth1 address 24.31.48.22/23
-set interfaces ethernet eth1 address 66.39.0.19/16
-set interfaces ethernet eth1 address 65.15.108.37/22
-set interfaces ethernet eth1 address 104.238.230.17/24
-set interfaces ethernet eth2 address 198.32.181.104/28
+set interfaces ethernet eth1 address '64.99.32.172/19'
+set interfaces ethernet eth1 address '66.46.176.126/21'
+set interfaces ethernet eth1 address '4.174.128.91/17'
+set interfaces ethernet eth1 address '206.131.208.42/20'
+set interfaces ethernet eth1 address '13.111.0.87/16'
+set interfaces ethernet eth1 address '129.6.15.89/24'
+set interfaces ethernet eth1 address '4.202.0.179/16'
+set interfaces ethernet eth1 address '66.218.176.125/20'
+set interfaces ethernet eth1 address '67.163.104.79/21'
+set interfaces ethernet eth1 address '4.152.0.102/17'
+set interfaces ethernet eth1 address '4.150.0.86/15'
+set interfaces ethernet eth1 address '38.38.136.124/21'
+set interfaces ethernet eth1 address '47.0.0.76/13'
+set interfaces ethernet eth1 address '40.69.96.28/19'
+set interfaces ethernet eth1 address '4.140.0.67/15'
+set interfaces ethernet eth1 address '56.0.0.83/18'
+set interfaces ethernet eth1 address '64.79.0.31/19'
+set interfaces ethernet eth1 address '50.193.224.27/22'
+set interfaces ethernet eth1 address '8.224.168.191/21'
+set interfaces ethernet eth1 address '24.31.48.22/23'
+set interfaces ethernet eth1 address '66.39.0.19/16'
+set interfaces ethernet eth1 address '65.15.108.37/22'
+set interfaces ethernet eth1 address '104.238.230.17/24'
+
+# eth2: Upstream to Tier-0
 set interfaces ethernet eth2 description 'to TIER 0'
-set protocols ospf parameters router-id 64.99.32.172
-set protocols ospf area 0 network 198.32.181.96/28
-set protocols ospf area 5 network 37.19.100.128/28
-set protocols ospf area 5 network 64.99.32.0/19
-set protocols ospf area 5 network 66.46.176.0/21
-set protocols ospf area 5 network 4.174.128.0/17
-set protocols ospf area 5 network 206.131.208.0/20
-set protocols ospf area 5 network 129.6.15.0/24
-set protocols ospf area 5 network 13.111.0.0/16
-set protocols ospf area 5 network 4.202.0.0/16
-set protocols ospf area 5 network 66.218.176.0/20
-set protocols ospf area 5 network 67.163.104.0/21
-set protocols ospf area 5 network 4.152.0.0/17
-set protocols ospf area 5 network 4.150.0.0/15
-set protocols ospf area 5 network 38.38.136.0/21
-set protocols ospf area 5 network 47.0.0.0/13
-set protocols ospf area 5 network 40.69.96.0/19
-set protocols ospf area 5 network 4.140.0.0/15
-set protocols ospf area 5 network 56.0.0.0/18
-set protocols ospf area 5 network 64.79.0.0/19
-set protocols ospf area 5 network 50.193.224.0/22
-set protocols ospf area 5 network 8.224.168.0/21
-set protocols ospf area 5 network 24.31.48.0/23
-set protocols ospf area 5 network 66.39.0.0/16
-set protocols ospf area 5 network 65.15.108.0/22
-set protocols ospf area 5 network 104.238.230.0/24
+set interfaces ethernet eth2 address '198.32.181.104/28'
+
+########################################
+# Static Routing
+########################################
+# (None – Tier-1 router participates in OSPF only)
+########################################
+
+########################################
+# OSPF – Tier-1 Regional IXP (Toronto)
+# - Area 0: Link to Tier-0
+# - Area 5: Toronto Regional Peering Blocks
+# - Router-ID based on primary Toronto address
+########################################
+
+# Router-ID for this Tier-1 IXP
+set protocols ospf parameters router-id '64.99.32.172'
+
+# Tier-0 transit network (Area 0)
+set protocols ospf area 0 network '198.32.181.96/28'
+
+# Toronto regional peering networks (Area 5)
+set protocols ospf area 5 network '37.19.100.128/28'
+set protocols ospf area 5 network '64.99.32.0/19'
+set protocols ospf area 5 network '66.46.176.0/21'
+set protocols ospf area 5 network '4.174.128.0/17'
+set protocols ospf area 5 network '206.131.208.0/20'
+set protocols ospf area 5 network '129.6.15.0/24'
+set protocols ospf area 5 network '13.111.0.0/16'
+set protocols ospf area 5 network '4.202.0.0/16'
+set protocols ospf area 5 network '66.218.176.0/20'
+set protocols ospf area 5 network '67.163.104.0/21'
+set protocols ospf area 5 network '4.152.0.0/17'
+set protocols ospf area 5 network '4.150.0.0/15'
+set protocols ospf area 5 network '38.38.136.0/21'
+set protocols ospf area 5 network '47.0.0.0/13'
+set protocols ospf area 5 network '40.69.96.0/19'
+set protocols ospf area 5 network '4.140.0.0/15'
+set protocols ospf area 5 network '56.0.0.0/18'
+set protocols ospf area 5 network '64.79.0.0/19'
+set protocols ospf area 5 network '50.193.224.0/22'
+set protocols ospf area 5 network '8.224.168.0/21'
+set protocols ospf area 5 network '24.31.48.0/23'
+set protocols ospf area 5 network '66.39.0.0/16'
+set protocols ospf area 5 network '65.15.108.0/22'
+set protocols ospf area 5 network '104.238.230.0/24'
+
+########################################
+# NAT
+# (None – Tier-1 regional gateway is purely routed)
+########################################
+# (Intentionally no "set nat ..." statements)
+
 commit
 save
+exit

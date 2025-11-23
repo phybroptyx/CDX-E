@@ -1,57 +1,101 @@
 configure
+
+########################################
+# System Identity / Base Services
+########################################
+
 set system host-name 'IXP-T1-EQIX-2'
-set system time-zone 'Europe/Amsterdam'
 set system domain-name 'cdx.lab'
-set service ntp server 46.244.164.88
-set service ssh port 2022
+set system time-zone 'Europe/Amsterdam'
+
+set service ntp server '46.244.164.88'
+set service ssh port '2022'
+
+########################################
+# Interfaces
+# eth0: Management
+########################################
+
+# eth0: Management (DHCP from lab management network)
 set interfaces ethernet eth0 description 'Management'
-set interfaces ethernet eth0 address dhcp
-set interfaces ethernet eth1 address 62.125.32.119/19
+set interfaces ethernet eth0 address 'dhcp'
+
+# eth1: Tier-1 Regional Gateway – Amsterdam (Multiple Regional / ISP Peering Blocks)
 set interfaces ethernet eth1 description 'Tier 1 Regional Gateway - Amsterdam'
-set interfaces ethernet eth1 address 2.16.4.55/23
-set interfaces ethernet eth1 address 17.70.0.72/15
-set interfaces ethernet eth1 address 46.132.0.89/17
-set interfaces ethernet eth1 address 46.132.192.17/18
-set interfaces ethernet eth1 address 57.86.128.73/17
-set interfaces ethernet eth1 address 62.247.0.44/16
-set interfaces ethernet eth1 address 23.78.32.178/19
-set interfaces ethernet eth1 address 44.144.0.102/17
-set interfaces ethernet eth1 address 31.160.0.173/17
-set interfaces ethernet eth1 address 62.213.192.96/21
-set interfaces ethernet eth1 address 62.209.0.52/17
-set interfaces ethernet eth1 address 57.67.224.14/19
-set interfaces ethernet eth1 address 62.59.128.99/20
-set interfaces ethernet eth1 address 31.204.128.67/20
-set interfaces ethernet eth1 address 62.242.0.50/19
-set interfaces ethernet eth1 address 37.74.0.87/16
-set interfaces ethernet eth1 address 5.23.56.21/21
-set interfaces ethernet eth1 address 31.47.64.45/21
-set interfaces ethernet eth1 address 44.161.204.29/23
-set interfaces ethernet eth1 address 46.151.96.58/21
-set interfaces ethernet eth2 address 185.1.112.37/28
+set interfaces ethernet eth1 address '62.125.32.119/19'
+set interfaces ethernet eth1 address '2.16.4.55/23'
+set interfaces ethernet eth1 address '17.70.0.72/15'
+set interfaces ethernet eth1 address '46.132.0.89/17'
+set interfaces ethernet eth1 address '46.132.192.17/18'
+set interfaces ethernet eth1 address '57.86.128.73/17'
+set interfaces ethernet eth1 address '62.247.0.44/16'
+set interfaces ethernet eth1 address '23.78.32.178/19'
+set interfaces ethernet eth1 address '44.144.0.102/17'
+set interfaces ethernet eth1 address '31.160.0.173/17'
+set interfaces ethernet eth1 address '62.213.192.96/21'
+set interfaces ethernet eth1 address '62.209.0.52/17'
+set interfaces ethernet eth1 address '57.67.224.14/19'
+set interfaces ethernet eth1 address '62.59.128.99/20'
+set interfaces ethernet eth1 address '31.204.128.67/20'
+set interfaces ethernet eth1 address '62.242.0.50/19'
+set interfaces ethernet eth1 address '37.74.0.87/16'
+set interfaces ethernet eth1 address '5.23.56.21/21'
+set interfaces ethernet eth1 address '31.47.64.45/21'
+set interfaces ethernet eth1 address '44.161.204.29/23'
+set interfaces ethernet eth1 address '46.151.96.58/21'
+
+# eth2: Upstream to Tier-0
 set interfaces ethernet eth2 description 'to TIER 0'
-set protocols ospf parameters router-id 62.125.32.119
-set protocols ospf area 0 network 185.1.112.32/28
-set protocols ospf area 2 network 62.125.32.0/19
-set protocols ospf area 2 network 2.16.4.0/23
-set protocols ospf area 2 network 17.70.0.0/15
-set protocols ospf area 2 network 46.132.0.0/17
-set protocols ospf area 2 network 46.132.192.0/18
-set protocols ospf area 2 network 57.86.128.0/17
-set protocols ospf area 2 network 62.247.0.0/16
-set protocols ospf area 2 network 23.78.32.0/19
-set protocols ospf area 2 network 44.144.0.0/17
-set protocols ospf area 2 network 31.160.0.0/17
-set protocols ospf area 2 network 62.213.192.0/21
-set protocols ospf area 2 network 62.209.0.0/17
-set protocols ospf area 2 network 57.67.224.0/19
-set protocols ospf area 2 network 62.59.128.0/20
-set protocols ospf area 2 network 31.204.128.0/20
-set protocols ospf area 2 network 62.242.0.0/19
-set protocols ospf area 2 network 37.74.0.0/16
-set protocols ospf area 2 network 5.23.56.0/21
-set protocols ospf area 2 network 31.47.64.0/21
-set protocols ospf area 2 network 44.161.204.0/23
-set protocols ospf area 2 network 46.151.96.0/21
+set interfaces ethernet eth2 address '185.1.112.37/28'
+
+########################################
+# Static Routing
+########################################
+# (None – Tier-1 router participates in OSPF only)
+########################################
+
+########################################
+# OSPF – Tier-1 Regional IXP (Amsterdam)
+# - Area 0: Link to Tier-0
+# - Area 2: Amsterdam Regional Peering Blocks
+# - Router-ID based on primary Amsterdam address
+########################################
+
+# Router-ID for this Tier-1 IXP
+set protocols ospf parameters router-id '62.125.32.119'
+
+# Tier-0 transit network (Area 0)
+set protocols ospf area 0 network '185.1.112.32/28'
+
+# Amsterdam regional peering networks (Area 2)
+set protocols ospf area 2 network '62.125.32.0/19'
+set protocols ospf area 2 network '2.16.4.0/23'
+set protocols ospf area 2 network '17.70.0.0/15'
+set protocols ospf area 2 network '46.132.0.0/17'
+set protocols ospf area 2 network '46.132.192.0/18'
+set protocols ospf area 2 network '57.86.128.0/17'
+set protocols ospf area 2 network '62.247.0.0/16'
+set protocols ospf area 2 network '23.78.32.0/19'
+set protocols ospf area 2 network '44.144.0.0/17'
+set protocols ospf area 2 network '31.160.0.0/17'
+set protocols ospf area 2 network '62.213.192.0/21'
+set protocols ospf area 2 network '62.209.0.0/17'
+set protocols ospf area 2 network '57.67.224.0/19'
+set protocols ospf area 2 network '62.59.128.0/20'
+set protocols ospf area 2 network '31.204.128.0/20'
+set protocols ospf area 2 network '62.242.0.0/19'
+set protocols ospf area 2 network '37.74.0.0/16'
+set protocols ospf area 2 network '5.23.56.0/21'
+set protocols ospf area 2 network '31.47.64.0/21'
+set protocols ospf area 2 network '44.161.204.0/23'
+set protocols ospf area 2 network '46.151.96.0/21'
+
+########################################
+# NAT
+# (None – Tier-1 regional gateway is purely routed)
+########################################
+# (Intentionally no "set nat ..." statements)
+
 commit
 save
+exit

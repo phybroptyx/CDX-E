@@ -1,57 +1,101 @@
 configure
+
+########################################
+# System Identity / Base Services
+########################################
+
 set system host-name 'IXP-T1-EQIX-9'
-set system time-zone 'Brazil/East'
 set system domain-name 'cdx.lab'
-set service ntp server 46.244.164.88
-set service ssh port 2022
+set system time-zone 'Brazil/East'
+
+set service ntp server '46.244.164.88'
+set service ssh port '2022'
+
+########################################
+# Interfaces
+# eth0: Management
+########################################
+
+# eth0 – Management (DHCP from lab management network)
 set interfaces ethernet eth0 description 'Management'
-set interfaces ethernet eth0 address dhcp
-set interfaces ethernet eth1 address 32.59.16.9/20
+set interfaces ethernet eth0 address 'dhcp'
+
+# eth1 – Tier-1 Regional Gateway (Rio de Janeiro)
 set interfaces ethernet eth1 description 'Tier 1 Regional Gateway - Rio de Janeiro'
-set interfaces ethernet eth1 address 32.59.184.126/21
-set interfaces ethernet eth1 address 67.230.59.42/24
-set interfaces ethernet eth1 address 66.249.152.125/22
-set interfaces ethernet eth1 address 54.232.0.78/15
-set interfaces ethernet eth1 address 45.4.184.91/22
-set interfaces ethernet eth1 address 23.75.112.121/20
-set interfaces ethernet eth1 address 24.232.168.73/22
-set interfaces ethernet eth1 address 66.60.0.69/18
-set interfaces ethernet eth1 address 57.74.160.154/19
-set interfaces ethernet eth1 address 66.231.64.64/20
-set interfaces ethernet eth1 address 57.74.224.17/19
-set interfaces ethernet eth1 address 64.213.56.123/21
-set interfaces ethernet eth1 address 45.226.64.53/22
-set interfaces ethernet eth1 address 23.220.64.39/20
-set interfaces ethernet eth1 address 57.76.0.137/17
-set interfaces ethernet eth1 address 63.110.122.58/23
-set interfaces ethernet eth1 address 57.91.32.73/20
-set interfaces ethernet eth1 address 67.206.208.116/20
-set interfaces ethernet eth1 address 57.91.64.121/20
-set interfaces ethernet eth1 address 57.91.96.87/20
-set interfaces ethernet eth2 address 64.191.232.135/28
+set interfaces ethernet eth1 address '32.59.16.9/20'
+set interfaces ethernet eth1 address '32.59.184.126/21'
+set interfaces ethernet eth1 address '67.230.59.42/24'
+set interfaces ethernet eth1 address '66.249.152.125/22'
+set interfaces ethernet eth1 address '54.232.0.78/15'
+set interfaces ethernet eth1 address '45.4.184.91/22'
+set interfaces ethernet eth1 address '23.75.112.121/20'
+set interfaces ethernet eth1 address '24.232.168.73/22'
+set interfaces ethernet eth1 address '66.60.0.69/18'
+set interfaces ethernet eth1 address '57.74.160.154/19'
+set interfaces ethernet eth1 address '66.231.64.64/20'
+set interfaces ethernet eth1 address '57.74.224.17/19'
+set interfaces ethernet eth1 address '64.213.56.123/21'
+set interfaces ethernet eth1 address '45.226.64.53/22'
+set interfaces ethernet eth1 address '23.220.64.39/20'
+set interfaces ethernet eth1 address '57.76.0.137/17'
+set interfaces ethernet eth1 address '63.110.122.58/23'
+set interfaces ethernet eth1 address '57.91.32.73/20'
+set interfaces ethernet eth1 address '67.206.208.116/20'
+set interfaces ethernet eth1 address '57.91.64.121/20'
+set interfaces ethernet eth1 address '57.91.96.87/20'
+
+# eth2 – Upstream to Tier-0
 set interfaces ethernet eth2 description 'to TIER 0'
-set protocols ospf parameters router-id 32.59.16.9
-set protocols ospf area 0 network 64.191.232.128/28
-set protocols ospf area 9 network 32.59.16.0/20
-set protocols ospf area 9 network 32.59.184.0/21
-set protocols ospf area 9 network 67.230.59.0/24
-set protocols ospf area 9 network 66.249.152.0/22
-set protocols ospf area 9 network 54.232.0.0/15
-set protocols ospf area 9 network 45.4.184.0/22
-set protocols ospf area 9 network 23.75.112.0/20
-set protocols ospf area 9 network 24.232.168.0/22
-set protocols ospf area 9 network 66.60.0.0/18
-set protocols ospf area 9 network 57.74.160.0/19
-set protocols ospf area 9 network 66.231.64.0/20
-set protocols ospf area 9 network 57.74.224.0/19
-set protocols ospf area 9 network 64.213.56.0/21
-set protocols ospf area 9 network 45.226.64.0/22
-set protocols ospf area 9 network 23.220.64.0/20
-set protocols ospf area 9 network 57.76.0.0/17
-set protocols ospf area 9 network 63.110.122.0/23
-set protocols ospf area 9 network 57.91.32.0/20
-set protocols ospf area 9 network 67.206.208.0/20
-set protocols ospf area 9 network 57.91.64.0/20
-set protocols ospf area 9 network 57.91.96.0/20
+set interfaces ethernet eth2 address '64.191.232.135/28'
+
+########################################
+# Static Routing
+########################################
+# (None – Tier-1 router participates in OSPF only)
+########################################
+
+########################################
+# OSPF – Tier-1 Regional IXP (Rio de Janeiro)
+# - Area 0: Link to Tier-0
+# - Area 9: Rio Regional Peering Blocks
+# - Router-ID sourced from primary Rio address
+########################################
+
+# Router-ID for this Tier-1 IXP
+set protocols ospf parameters router-id '32.59.16.9'
+
+# Tier-0 transit network (Area 0)
+set protocols ospf area 0 network '64.191.232.128/28'
+
+# Rio regional peering networks (Area 9)
+set protocols ospf area 9 network '32.59.16.0/20'
+set protocols ospf area 9 network '32.59.184.0/21'
+set protocols ospf area 9 network '67.230.59.0/24'
+set protocols ospf area 9 network '66.249.152.0/22'
+set protocols ospf area 9 network '54.232.0.0/15'
+set protocols ospf area 9 network '45.4.184.0/22'
+set protocols ospf area 9 network '23.75.112.0/20'
+set protocols ospf area 9 network '24.232.168.0/22'
+set protocols ospf area 9 network '66.60.0.0/18'
+set protocols ospf area 9 network '57.74.160.0/19'
+set protocols ospf area 9 network '66.231.64.0/20'
+set protocols ospf area 9 network '57.74.224.0/19'
+set protocols ospf area 9 network '64.213.56.0/21'
+set protocols ospf area 9 network '45.226.64.0/22'
+set protocols ospf area 9 network '23.220.64.0/20'
+set protocols ospf area 9 network '57.76.0.0/17'
+set protocols ospf area 9 network '63.110.122.0/23'
+set protocols ospf area 9 network '57.91.32.0/20'
+set protocols ospf area 9 network '67.206.208.0/20'
+set protocols ospf area 9 network '57.91.64.0/20'
+set protocols ospf area 9 network '57.91.96.0/20'
+
+########################################
+# NAT
+# (None – Tier-1 regional gateway is purely routed)
+########################################
+# (Intentionally no NAT configuration)
+
 commit
 save
+exit
