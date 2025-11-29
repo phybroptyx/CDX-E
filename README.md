@@ -8,6 +8,26 @@ This framework is **scenario-agnostic**, meaning the same `ad_deploy.ps1` file c
 
 **New in v2.0:** The structure generator now uses a **template-driven architecture**, separating topology definitions (stored in `exercise_template.json`) from generation logic. This makes creating new exercises faster and more maintainable.
 
+**New in v2.1:** The deployment engine now supports **hardware metadata storage** for computer objects, enabling asset tracking and inventory management without requiring schema modifications or Exchange extensionAttribute usage.
+
+---
+
+## 1.1. What's New in v2.1
+
+**Hardware Metadata Storage** (2025-11-28)
+
+The deployment engine now supports storing hardware attributes (manufacturer, model, service tag) for computer objects:
+
+- **Storage Method**: JSON-encoded data in AD "info" attribute
+- **Exchange-Safe**: No conflicts with Exchange extensionAttribute fields
+- **No Schema Changes**: Uses existing AD schema
+- **Optional**: Works with or without hardware data in computers.json
+- **Idempotent**: Safe to re-run; updates changed hardware info automatically
+
+> **Backward Compatibility:** The hardware info enhancement is **completely optional**. Existing computers.json files without hardware fields will continue to work perfectly. The deployment engine automatically detects and uses hardware data when present, and gracefully ignores it when absent. No changes to existing configurations are required.
+
+See Section 6.1 (computers.json format) for implementation details.
+
 ---
 
 ## 2. Folder Layout
@@ -15,21 +35,29 @@ This framework is **scenario-agnostic**, meaning the same `ad_deploy.ps1` file c
 Recommended structure:
 
 ```
-ad_deploy.ps1              # Main AD deployment script
+ad_deploy.ps1              # Main AD deployment script (v2.1 with hardware info)
 generate_structure.ps1     # Topology generator (reads templates)
 
 EXERCISES/
 ├── CHILLED_ROCKET/        # Example scenario folder
-│   ├── exercise_template.json  # NEW: Topology definition (sites, OUs, departments)
+│   ├── exercise_template.json  # Topology definition (sites, OUs, departments)
 │   ├── structure.json          # Generated: AD Sites, Subnets, Site Links, OU structure
 │   ├── services.json           # DNS Zones and other service configuration
 │   ├── users.json              # User accounts, group memberships
-│   ├── computers.json          # Computer objects (pre-staged)
+│   ├── computers.json          # Computer objects (pre-staged, optionally with hardware info)
 │   ├── gpo.json                # Group Policy Objects and linked targets
 │   └── README.md               # (Optional) Scenario notes
 └── <OTHER_SCENARIO>/
     ├── exercise_template.json  # Different topology for this scenario
     └── ...
+
+UTILITIES/                  # Optional utility scripts (v2.1)
+├── hardware_info_utility_scripts.ps1       # Hardware management functions
+└── Test-HardwareInfoImplementation.ps1     # Validation test suite
+
+DOCUMENTATION/             # Optional documentation (v2.1)
+├── IMPLEMENTATION_GUIDE.md                 # Hardware info deployment guide
+└── (other documentation files)
 ```
 
 ---
@@ -87,8 +115,11 @@ If deploying a **new forest**, the script will:
    - Creates GPOs
    - Links GPOs to target OUs with enforcement settings
 
-7. **Computer Accounts**
+7. **Computer Accounts** _(Enhanced in v2.1)_
    - Pre-stages computer objects in specified OUs
+   - Stores hardware metadata (manufacturer, model, service_tag) if provided
+   - Updates hardware info if changed on re-run (idempotent)
+   - Displays hardware information during deployment
 
 8. **User Accounts**
    - Creates users with full attributes (address, phone, title, etc.)
@@ -159,67 +190,86 @@ The following files must be present under the selected exercise folder:
 
 | File                     | Purpose                                          | Generated? |
 |--------------------------|--------------------------------------------------|------------|
-| `exercise_template.json` | **NEW:** Topology blueprint (sites, OUs, depts)  | Manual     |
-| `structure.json`         | AD Sites/Subnets, SiteLinks, OU hierarchy        | Generated  |
-| `services.json`          | DNS zones, forwarders, NTP servers               | Manual     |
-| `users.json`             | Users, attributes, and group membership          | Manual     |
-| `computers.json`         | Pre-staged computer objects                      | Manual     |
-| `gpo.json`               | GPOs and OU link targets                         | Manual     |
+| `exercise_template.json` | Topology blueprint (sites, OUs, departments)    | Manual     |
+| `structure.json`         | AD Sites, Subnets, Site Links, OU structure     | Auto       |
+| `services.json`          | DNS Zones and other service configuration       | Manual     |
+| `users.json`             | User accounts, group memberships                | Manual     |
+| `computers.json`         | Computer objects (pre-staged, optionally with hardware info) | Manual |
+| `gpo.json`               | Group Policy Objects and linked targets         | Manual     |
 
-> ⚠️ JSON must be free of comments (`//`) and trailing commas.  
-> OUs must be specified in **relative DN format** (e.g., `"OU=Users,OU=HQ,OU=Sites"`), not full DN.
+---
 
-### exercise_template.json Structure
+### 6.1. computers.json Format _(Enhanced in v2.1)_
 
-This new file defines the **topology blueprint** for your exercise:
+The `computers.json` file defines computer objects to be created in Active Directory.
+
+#### Basic Format (v2.0)
 
 ```json
 {
-  "_meta": {
-    "exerciseName": "CHILLED_ROCKET",
-    "description": "Exercise description",
-    "version": "1.0"
-  },
-  "sites": [
+  "computers": [
     {
-      "name": "StarkTower-NYC",
-      "description": "HQ location",
-      "subnet": {
-        "cidr": "66.218.180.0/22",
-        "location": "New York, USA"
-      }
+      "name": "HQ-IT-WS001",
+      "ou": "OU=Workstations,OU=IT-Core,OU=HQ,OU=Sites",
+      "description": "IT Department Workstation"
     }
-  ],
-  "siteLinks": [
-    {
-      "name": "US-Backbone-Link",
-      "sites": ["StarkTower-NYC", "Dallas-Branch"],
-      "cost": 50,
-      "replicationIntervalMins": 15
-    }
-  ],
-  "organizationalStructure": {
-    "rootOU": "Sites",
-    "rootOUDescription": "Top-level container",
-    "siteMappings": {
-      "HQ": {
-        "siteName": "StarkTower-NYC",
-        "departments": ["Operations", "IT-Core", "Engineering"]
-      }
-    },
-    "departmentSubOUs": [
-      "Workstations", "Servers", "Users", "Groups"
-    ]
-  }
+  ]
 }
 ```
 
-**Benefits:**
-- **Human-readable** topology definition
-- **Version-controlled** as data, not code
-- **Reusable** across similar exercises
-- **Self-documenting** exercise structure
-- **Easy to modify** without editing PowerShell
+#### Enhanced Format (v2.1 - Hardware Info)
+
+```json
+{
+  "computers": [
+    {
+      "name": "HQ-IT-WS001",
+      "ou": "OU=Workstations,OU=IT-Core,OU=HQ,OU=Sites",
+      "description": "IT Department Workstation",
+      "manufacturer": "HP EliteDesk",
+      "model": "HP EliteDesk 800 G9",
+      "service_tag": "ABC123XY"
+    }
+  ]
+}
+```
+
+#### Hardware Fields (Optional - v2.1)
+
+- **`manufacturer`** - Hardware manufacturer (e.g., "Dell", "HP", "Lenovo")
+- **`model`** - Specific model name or number
+- **`service_tag`** - Service tag, serial number, or asset tag
+
+**Storage:** Hardware data is stored as JSON in the AD computer object's "info" attribute:
+```json
+{"manufacturer":"HP EliteDesk","model":"HP EliteDesk 800 G9","serviceTag":"ABC123XY"}
+```
+
+#### Query Examples
+
+**PowerShell - Direct Query:**
+```powershell
+# Retrieve hardware info from AD
+$computer = Get-ADComputer "HQ-IT-WS001" -Properties info
+$hardware = $computer.info | ConvertFrom-Json
+Write-Host "Manufacturer: $($hardware.manufacturer)"
+Write-Host "Model: $($hardware.model)"
+Write-Host "Service Tag: $($hardware.serviceTag)"
+```
+
+**Using Utility Functions:**
+```powershell
+# Load utility scripts
+. .\UTILITIES\hardware_info_utility_scripts.ps1
+
+# Query single computer
+Get-ComputerHardwareInfo -ComputerName "HQ-IT-WS001"
+
+# Export all hardware to CSV
+Get-AllComputerHardware -ExportCSV "inventory.csv"
+```
+
+> **Note:** Hardware fields are completely optional. The deployment engine works with or without them.
 
 ---
 
@@ -270,6 +320,7 @@ notepad ".\EXERCISES\NEW_EXERCISE\exercise_template.json"
 # Script will:
 # - Detect existing domain
 # - Deploy all configuration (sites, OUs, users, etc.)
+# - Store hardware info for computers (if provided)
 # - Complete successfully
 ```
 
@@ -297,6 +348,7 @@ notepad ".\EXERCISES\CHILLED_ROCKET\exercise_template.json"
 # - Skip existing objects (shown in gray)
 # - Create only missing objects (shown in green)
 # - Update modified objects where applicable
+# - Update hardware info if changed (v2.1)
 ```
 
 ### Workflow 5: What-If Mode (Validation)
@@ -341,7 +393,7 @@ notepad ".\EXERCISES\CHILLED_ROCKET\exercise_template.json"
    - Groups
    - DNS zones and forwarders
    - GPOs and links
-   - Computer accounts
+   - Computer accounts **(with hardware info if provided - v2.1)**
    - User accounts and group memberships
 3. Display completion message
 
@@ -396,6 +448,11 @@ The new template-driven approach provides several advantages:
 - Verify OU paths use relative DN format
 - Review error messages for specific object failures
 
+**Hardware info not appearing (v2.1)**
+- Verify computers.json has hardware fields (manufacturer, model, service_tag)
+- Check that fields are not null or empty
+- Run with `-WhatIf` to see what would be created
+
 ### Validation and Testing
 
 ```powershell
@@ -412,6 +469,9 @@ Write-Host "OUs: $($structure.ous.Count)"
 
 # Enable verbose output for debugging
 .\ad_deploy.ps1 -ExerciseName "CHILLED_ROCKET" -Verbose
+
+# Test hardware info implementation (v2.1)
+.\UTILITIES\Test-HardwareInfoImplementation.ps1
 ```
 
 ---
@@ -461,7 +521,63 @@ You can extend this deployment engine by:
 
 ---
 
-## 12. Template Library (Future)
+## 12. Hardware Info Utilities (v2.1)
+
+The framework includes optional utility scripts for managing hardware metadata:
+
+### Available Utilities
+
+**Location:** `UTILITIES/` directory (recommended)
+
+1. **hardware_info_utility_scripts.ps1** - Management functions
+   - `Get-ComputerHardwareInfo` - Query individual computer
+   - `Get-AllComputerHardware` - Export all hardware to CSV
+   - `Set-ComputerHardwareInfo` - Update hardware for existing computer
+   - `Find-ComputerByHardware` - Search by manufacturer/model/tag
+   - `New-HardwareInventoryReport` - Generate HTML reports
+
+2. **Test-HardwareInfoImplementation.ps1** - Validation suite
+   - Pre-deployment testing
+   - JSON encoding/decoding validation
+   - Hardware info roundtrip tests
+
+### Usage Examples
+
+```powershell
+# Load utility functions
+. .\UTILITIES\hardware_info_utility_scripts.ps1
+
+# Query single computer
+Get-ComputerHardwareInfo -ComputerName "HQ-IT-WS001"
+
+# Export inventory to CSV
+Get-AllComputerHardware -ExportCSV "hardware_inventory.csv"
+
+# Generate HTML report
+New-HardwareInventoryReport -OutputPath "inventory.html"
+
+# Search for Dell computers
+Find-ComputerByHardware -Manufacturer "Dell*"
+
+# Update hardware info for existing computer
+Set-ComputerHardwareInfo -ComputerName "HQ-IT-WS001" `
+                         -Manufacturer "Dell" `
+                         -Model "OptiPlex 7090" `
+                         -ServiceTag "XYZ789"
+```
+
+### Implementation Notes
+
+- **Exchange-Safe**: Does not use extensionAttribute fields
+- **No Schema Changes**: Uses standard AD "info" attribute
+- **Fully Reversible**: Can migrate to custom schema later if needed
+- **Backward Compatible**: Works without hardware data in computers.json
+
+See `DOCUMENTATION/IMPLEMENTATION_GUIDE.md` for detailed setup instructions.
+
+---
+
+## 13. Template Library (Future)
 
 Future releases may include a library of starter templates:
 
@@ -475,7 +591,7 @@ Future releases may include a library of starter templates:
 
 ---
 
-## 13. Best Practices
+## 14. Best Practices
 
 ### Exercise Development
 
@@ -502,7 +618,7 @@ Future releases may include a library of starter templates:
 
 ---
 
-## 14. Quick Reference
+## 15. Quick Reference
 
 ### Command Cheat Sheet
 
@@ -526,6 +642,10 @@ Future releases may include a library of starter templates:
 .\ad_deploy.ps1 -ExerciseName "EXERCISE_NAME"  # Run 1: Creates forest
 # <reboot>
 .\ad_deploy.ps1 -ExerciseName "EXERCISE_NAME"  # Run 2: Deploys config
+
+# Query hardware info (v2.1)
+$computer = Get-ADComputer "COMPUTER_NAME" -Properties info
+$computer.info | ConvertFrom-Json
 ```
 
 ### File Checklist
@@ -533,14 +653,18 @@ Future releases may include a library of starter templates:
 Before deployment, ensure these files exist:
 - ✅ `exercise_template.json` (manually created)
 - ✅ `users.json` (manually created)
-- ✅ `computers.json` (manually created)
+- ✅ `computers.json` (manually created - optionally with hardware fields)
 - ✅ `services.json` (manually created)
 - ✅ `gpo.json` (manually created)
 - ⚙️ `structure.json` (generated by script)
 
+**Optional Utility Scripts (v2.1):**
+- ⚙️ `UTILITIES/hardware_info_utility_scripts.ps1` (hardware management)
+- ⚙️ `UTILITIES/Test-HardwareInfoImplementation.ps1` (validation)
+
 ---
 
-## 15. Support and Contribution
+## 16. Support and Contribution
 
 This modular approach enables **rapid iteration** and **repeatable AD builds** for multiple cyber range scenarios.
 
@@ -554,6 +678,25 @@ Use this framework as the backbone to spin up Stark Industries today… and tear
 
 ---
 
-**Version:** 2.0  
-**Last Updated:** 2024-11-22  
-**Architecture:** Template-Driven Deployment Engine
+## Version History
+
+### Version 2.1 (2025-11-28)
+**Hardware Metadata Enhancement**
+- Added hardware info storage (manufacturer, model, service_tag)
+- JSON encoding in AD "info" attribute
+- Exchange-safe implementation (no extensionAttributes)
+- Utility scripts for hardware management
+- Optional feature - backward compatible
+
+### Version 2.0 (2024-11-22)
+**Template-Driven Architecture**
+- Introduced exercise_template.json
+- Separated topology from generation logic
+- Enhanced generate_structure.ps1
+- Improved maintainability
+
+---
+
+**Version:** 2.1  
+**Last Updated:** 2025-11-28  
+**Architecture:** Template-Driven Deployment Engine with Hardware Metadata Storage
