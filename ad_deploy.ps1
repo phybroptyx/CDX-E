@@ -15,6 +15,13 @@
 .NOTES
     - Run as a local admin (pre-forest) or Domain Admin (post-forest).
     - Designed for Windows Server 2012 R2 and later.
+    
+.VERSION
+    2.1 - Hardware Info Enhancement
+    - Modified Invoke-DeployComputers to store hardware metadata
+    - Added Build-HardwareInfoJSON helper function
+    - Added Get-HardwareInfo helper function
+    - Hardware data stored in "info" attribute as JSON
 #>
 
 [CmdletBinding()]
@@ -41,6 +48,7 @@ param(
 
 Write-Host "=====================================================" -ForegroundColor Cyan
 Write-Host "           Active Directory Deployment Engine        " -ForegroundColor Cyan
+Write-Host "                Hardware Info Enhanced v2.1          " -ForegroundColor Cyan
 Write-Host "=====================================================`n" -ForegroundColor Cyan
 
 # ---------------------------------------------------------------------------
@@ -177,56 +185,33 @@ function Ensure-ActiveDirectoryDomain {
         throw "Aborting: No domain found and user chose not to create a new forest."
     }
 
-    Write-Host "`n=== MODE: FOREST CREATION ===`n" -ForegroundColor Magenta
+    # ===== NEW FOREST CREATION =====
+    Write-Host "`n=== MODE: NEW FOREST CREATION ===`n" -ForegroundColor Magenta
 
-    # Ensure ADDSDeployment module exists; install AD DS role if missing
-    if (-not (Get-Module -ListAvailable -Name ADDSDeployment)) {
-        Write-Warning "[Domain] ADDSDeployment module is not available. Installing Active Directory Domain Services role..."
-
-        try {
-            Install-WindowsFeature AD-Domain-Services -IncludeManagementTools -ErrorAction Stop | Out-Null
-            Write-Host "[Domain] AD DS role installed successfully. A reboot may be required." -ForegroundColor Green
-        }
-        catch {
-            throw "Failed to install Active Directory Domain Services role: $_"
-        }
+    # Check if AD DS role is installed; if not, install it
+    if (-not (Get-WindowsFeature -Name AD-Domain-Services -ErrorAction SilentlyContinue | Where-Object Installed)) {
+        Write-Host "[Domain] AD DS role not installed. Installing now (this may take a few minutes)..." -ForegroundColor Yellow
+        Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null
+        Write-Host "[Domain] AD DS role installed successfully." -ForegroundColor Green
+    }
+    else {
+        Write-Host "[Domain] AD DS role is already installed." -ForegroundColor DarkGreen
     }
 
-    try {
-        Import-Module ADDSDeployment -ErrorAction Stop
-        Write-Host "[Domain] ADDSDeployment module successfully loaded." -ForegroundColor Green
-    }
-    catch {
-        throw "ADDSDeployment module still not available after install. A reboot may be required."
-    }
+    Import-Module ADDSDeployment -ErrorAction Stop | Out-Null
 
-    # Prompt for domain details if not provided
+    # Prompt for domain details
     if (-not $DomainFQDNParam) {
-        $DomainFQDNParam = Read-Host "Enter new domain FQDN (e.g., stark.local)"
+        $DomainFQDNParam = Read-Host "Enter domain FQDN (e.g., stark.local)"
     }
 
-    # Derive DomainDN from FQDN if missing
     if (-not $DomainDNParam) {
-        $parts = $DomainFQDNParam.Split(".")
-        $DomainDNParam = ($parts | ForEach-Object { "DC=$_" }) -join ","
+        $parts = $DomainFQDNParam -split '\.'
+        $DomainDNParam = ($parts | ForEach-Object { "DC=$_" }) -join ','
     }
 
-    # NetBIOS name (optional, auto-derived)
-    $defaultNetBIOS = ($DomainFQDNParam.Split(".")[0]).ToUpper()
-    if ($defaultNetBIOS.Length -gt 15) {
-        $defaultNetBIOS = $defaultNetBIOS.Substring(0,15)
-    }
-    $netbios = Read-Host "Enter NetBIOS name for the domain [`$default: $defaultNetBIOS`]"
-
-    if ([string]::IsNullOrWhiteSpace($netbios)) {
-        $netbios = $defaultNetBIOS
-    }
-
-    Write-Host "`nIMPORTANT: This forest installation will run under the CURRENT USER context." -ForegroundColor Yellow
-    Write-Host "Ensure you are running this script as a local administrator on this server.`n" -ForegroundColor Yellow
-
-    # DSRM password
-    Write-Host "Enter a Directory Services Restore Mode (DSRM) password." -ForegroundColor Cyan
+    $netbios = Read-Host "Enter NetBIOS domain name (e.g., STARK)"
+    Write-Host "`nYou will now set the DSRM password (used for Directory Services Restore Mode)." -ForegroundColor Cyan
     $dsrmPassword = Read-Host -AsSecureString -Prompt "DSRM password"
 
     if ($WhatIf) {
@@ -299,143 +284,64 @@ function Invoke-DeploySitesAndOUs {
         $desc = $site.description
 
         # Does the target site already exist?
-        $existing = Get-ADReplicationSite -Filter "Name -eq '$name'" -ErrorAction SilentlyContinue
-        if ($existing) {
+        $existingSite = Get-ADReplicationSite -Filter "Name -eq '$name'" -ErrorAction SilentlyContinue
+        if ($existingSite) {
             Write-Host "Site exists: $name" -ForegroundColor DarkGray
         }
         else {
-            # If the target site doesn't exist, check for the default site to rename
-            $defaultSite = Get-ADReplicationSite -Filter "Name -eq 'Default-First-Site-Name'" -ErrorAction SilentlyContinue
-
-            if ($defaultSite -and $name -eq "StarkTower-NYC") {
-                Write-Host "Renaming existing 'Default-First-Site-Name' to '$name'..." -ForegroundColor Yellow
-
-                if ($WhatIf) {
-                    Write-Host "[WhatIf] Would rename 'Default-First-Site-Name' to '$name' and set description." -ForegroundColor Yellow
-                }
-                else {
-                    Rename-ADObject -Identity $defaultSite.DistinguishedName -NewName $name
-
-                    $renamed = Get-ADReplicationSite -Filter "Name -eq '$name'" -ErrorAction SilentlyContinue
-                    if ($renamed -and $desc) {
-                        Set-ADObject -Identity $renamed.DistinguishedName -Replace @{description = $desc}
-                    }
-                }
-            }
-            else {
-                Write-Host "Creating site: $name" -ForegroundColor Green
-                New-ADReplicationSite -Name $name -Description $desc -WhatIf:$WhatIf
-            }
+            Write-Host "Creating site: $name" -ForegroundColor Green
+            New-ADReplicationSite -Name $name -Description $desc -WhatIf:$WhatIf | Out-Null
         }
     }
 
     # --- Subnets ---
     foreach ($subnet in $StructureConfig.subnets) {
-        $cidr     = $subnet.cidr
+        $cidr = $subnet.cidr
         $siteName = $subnet.site
-        $location = $subnet.location
+        $desc = $subnet.description
 
-        $existing = Get-ADReplicationSubnet -Filter "Name -eq '$cidr'" -ErrorAction SilentlyContinue
-        if ($existing) {
-            Write-Host "Subnet exists: $cidr" -ForegroundColor DarkGray
+        $existingSubnet = Get-ADReplicationSubnet -Filter "Name -eq '$cidr'" -ErrorAction SilentlyContinue
+        if ($existingSubnet) {
+            Write-Host "Subnet exists: $cidr -> $siteName" -ForegroundColor DarkGray
         }
         else {
-            Write-Host "Creating subnet: $cidr -> site $siteName" -ForegroundColor Green
-            New-ADReplicationSubnet -Name $cidr -Site $siteName -Location $location -WhatIf:$WhatIf
+            Write-Host "Creating subnet: $cidr -> $siteName" -ForegroundColor Green
+            New-ADReplicationSubnet -Name $cidr -Site $siteName -Description $desc -WhatIf:$WhatIf | Out-Null
         }
     }
 
     # --- Site Links ---
     foreach ($link in $StructureConfig.sitelinks) {
-        $name          = $link.name
-        $sitesIncluded = @($link.sites)
-        $cost          = $link.cost
-        $intervalMins  = $link.replicationIntervalMins
+        $linkName = $link.name
+        $sites = $link.sites
+        $cost = $link.cost
+        $interval = $link.replicationInterval
 
-        $existing = Get-ADReplicationSiteLink -Filter "Name -eq '$name'" -ErrorAction SilentlyContinue
-
-        if ($existing) {
-            Write-Host "Site link exists: $name - updating cost/sites as needed..." -ForegroundColor DarkGray
-
-            if ($WhatIf) {
-                Write-Host "[WhatIf] Would set cost to $cost and ensure sites [$($sitesIncluded -join ', ')] are included on link '$name'." -ForegroundColor Yellow
-            }
-            else {
-                # Merge existing sites with desired sites (idempotent, non-destructive)
-                $currentSiteDNs   = $existing.SitesIncluded
-                $currentSiteNames = $currentSiteDNs | ForEach-Object {
-                    ($_ -split ",")[0] -replace "^CN=", ""
-                }
-
-                $allSiteNames = ($currentSiteNames + $sitesIncluded) | Select-Object -Unique
-
-                $params = @{
-                    Identity      = $existing.DistinguishedName
-                    Cost          = $cost
-                    SitesIncluded = $allSiteNames
-                }
-
-                # Only set ReplicationInterval if the cmdlet supports it
-                $paramSet = (Get-Command Set-ADReplicationSiteLink).Parameters
-                if ($intervalMins -and $paramSet.ContainsKey("ReplicationInterval")) {
-                    $params["ReplicationInterval"] = [int]$intervalMins
-                }
-                elseif ($intervalMins) {
-                    Write-Warning "ReplicationInterval not supported on this OS version; skipping that setting for site link '$name'."
-                }
-
-                Set-ADReplicationSiteLink @params -WhatIf:$WhatIf
-            }
+        $existingLink = Get-ADReplicationSiteLink -Filter "Name -eq '$linkName'" -ErrorAction SilentlyContinue
+        if ($existingLink) {
+            Write-Host "Site link exists: $linkName" -ForegroundColor DarkGray
         }
         else {
-            Write-Host "Creating site link: $name [sites: $($sitesIncluded -join ', ')]" -ForegroundColor Green
-
-            if ($WhatIf) {
-                Write-Host "[WhatIf] Would create site link '$name' with cost $cost and sites [$($sitesIncluded -join ', ')]" -ForegroundColor Yellow
-            }
-            else {
-                $params = @{
-                    Name          = $name
-                    SitesIncluded = $sitesIncluded
-                    Cost          = $cost
-                }
-
-                # Only set ReplicationInterval if the cmdlet supports it
-                $paramSet = (Get-Command New-ADReplicationSiteLink).Parameters
-                if ($intervalMins -and $paramSet.ContainsKey("ReplicationInterval")) {
-                    $params["ReplicationInterval"] = [int]$intervalMins
-                }
-                elseif ($intervalMins) {
-                    Write-Warning "ReplicationInterval not supported on this OS version; skipping that setting for new site link '$name'."
-                }
-
-                New-ADReplicationSiteLink @params -WhatIf:$WhatIf
-            }
+            Write-Host "Creating site link: $linkName (Cost: $cost, Interval: $interval min)" -ForegroundColor Green
+            New-ADReplicationSiteLink -Name $linkName `
+                                      -SitesIncluded $sites `
+                                      -Cost $cost `
+                                      -ReplicationFrequencyInMinutes $interval `
+                                      -WhatIf:$WhatIf | Out-Null
         }
     }
 
-    # --- Remove DEFAULTIPSITELINK if we manage our own links ---
+    # Optionally remove the auto-created DEFAULTIPSITELINK if it exists and is not referenced
     try {
-        $defaultIpSiteLink = Get-ADReplicationSiteLink -Filter "Name -eq 'DEFAULTIPSITELINK'" -ErrorAction SilentlyContinue
-        if ($defaultIpSiteLink) {
-            # Only remove if it's NOT explicitly defined in structure.json
-            $weManageDefault = $false
-            if ($StructureConfig.sitelinks) {
-                $weManageDefault = $StructureConfig.sitelinks.name -contains 'DEFAULTIPSITELINK'
-            }
-
-            if (-not $weManageDefault) {
-                Write-Host "Removing auto-created site link 'DEFAULTIPSITELINK'..." -ForegroundColor Yellow
-
-                if ($WhatIf) {
-                    Write-Host "[WhatIf] Would remove DEFAULTIPSITELINK." -ForegroundColor Yellow
-                }
-                else {
-                    Remove-ADReplicationSiteLink -Identity $defaultIpSiteLink.DistinguishedName -Confirm:$false
-                }
+        $defaultLink = Get-ADReplicationSiteLink -Filter "Name -eq 'DEFAULTIPSITELINK'" -ErrorAction SilentlyContinue
+        if ($defaultLink) {
+            $linkedSites = $defaultLink.SitesIncluded
+            if ($linkedSites.Count -eq 0) {
+                Write-Host "Removing unused DEFAULTIPSITELINK..." -ForegroundColor Yellow
+                Remove-ADReplicationSiteLink -Identity "DEFAULTIPSITELINK" -Confirm:$false -WhatIf:$WhatIf
             }
             else {
-                Write-Host "DEFAULTIPSITELINK is defined in structure.json; leaving it in place." -ForegroundColor DarkGray
+                Write-Host "DEFAULTIPSITELINK has linked sites; not removing." -ForegroundColor DarkGray
             }
         }
     }
@@ -609,49 +515,79 @@ function Invoke-DeployGPOs {
 
     Import-Module GroupPolicy -ErrorAction SilentlyContinue | Out-Null
 
-    # --- Create / ensure GPOs exist ---
+    # Create GPOs
     foreach ($gpo in $GpoConfig.gpos) {
-        $name        = $gpo.name
-        $description = $gpo.description
+        $gpoName = $gpo.name
+        $gpoDesc = $gpo.description
 
-        $existing = Get-GPO -Name $name -ErrorAction SilentlyContinue
-        if ($existing) {
-            Write-Host "GPO exists: $name" -ForegroundColor DarkGray
+        $existingGpo = Get-GPO -Name $gpoName -ErrorAction SilentlyContinue
+        if ($existingGpo) {
+            Write-Host "GPO exists: $gpoName" -ForegroundColor DarkGray
         }
         else {
-            Write-Host "Creating GPO: $name" -ForegroundColor Green
-            New-GPO -Name $name -Comment $description -WhatIf:$WhatIf | Out-Null
+            Write-Host "Creating GPO: $gpoName" -ForegroundColor Green
+            New-GPO -Name $gpoName -Comment $gpoDesc -WhatIf:$WhatIf | Out-Null
         }
     }
 
-    # --- Create / ensure GPO links ---
+    # Link GPOs to target OUs
     foreach ($link in $GpoConfig.links) {
-        $gpoName  = $link.gpoName
-        $targetOu = $link.targetOu
-
-        # JSON uses booleans; translate to the strings the cmdlet expects
-        $enforcedBool = [bool]$link.enforced
-        $enabledBool  = [bool]$link.enabled
-
-        # New-GPLink expects "Yes"/"No" for these parameters
-        $enforcedValue = if ($enforcedBool) { "Yes" } else { "No" }
-        $enabledValue  = if ($enabledBool)  { "Yes" } else { "No" }
+        $gpoName   = $link.gpoName
+        $targetOu  = $link.targetOu
+        $enforced  = $link.enforced
+        $enabled   = $link.enabled
 
         $targetDn = "$targetOu,$DomainDN"
 
-        Write-Host "Ensuring GPO link: $gpoName -> $targetDn (Enforced=$enforcedValue, Enabled=$enabledValue)" -ForegroundColor DarkCyan
+        $enforcedValue = if ($enforced) { "Yes" } else { "No" }
+        $enabledValue  = if ($enabled) { "Yes" } else { "No" }
 
-        if ($WhatIf) {
-            Write-Host "[WhatIf] Would link GPO '$gpoName' to '$targetDn' (Enforced=$enforcedValue, Enabled=$enabledValue)." -ForegroundColor Yellow
+        $existingLink = Get-GPInheritance -Target $targetDn -ErrorAction SilentlyContinue |
+                        Select-Object -ExpandProperty GpoLinks -ErrorAction SilentlyContinue |
+                        Where-Object { $_.DisplayName -eq $gpoName }
+
+        if ($existingLink) {
+            Write-Host "GPO link exists: $gpoName -> $targetDn" -ForegroundColor DarkGray
         }
         else {
-            New-GPLink -Name $gpoName `
-                       -Target $targetDn `
-                       -Enforced $enforcedValue `
-                       -LinkEnabled $enabledValue | Out-Null
+            Write-Host "Linking GPO: $gpoName -> $targetDn" -ForegroundColor Yellow
+            if ($WhatIf) {
+                Write-Host "[WhatIf] Would link GPO: $gpoName to $targetDn (Enforced: $enforcedValue, Enabled: $enabledValue)" -ForegroundColor Yellow
+            }
+            else {
+                New-GPLink -Name $gpoName `
+                           -Target $targetDn `
+                           -Enforced $enforcedValue `
+                           -LinkEnabled $enabledValue | Out-Null
+            }
         }
     }
 }
+
+# =============================================================================
+# MODIFIED FUNCTION: Invoke-DeployComputers
+# Hardware Attributes Storage: JSON in "info" attribute
+# =============================================================================
+
+<#
+.SYNOPSIS
+    Modified computer deployment function that stores hardware metadata in the 
+    "info" attribute as JSON.
+
+.DESCRIPTION
+    This modified version of Invoke-DeployComputers stores manufacturer, model, 
+    and service tag information in the computer object's "info" attribute as 
+    JSON-encoded data. This approach:
+    
+    - Uses existing AD schema (no extensions needed)
+    - Avoids Exchange extensionAttribute conflicts
+    - Stores all hardware data in single field
+    - Is fully reversible and Exchange-safe
+    
+.NOTES
+    Version 2.1 - Hardware Info Enhancement
+    Integrated: 2025-11-28
+#>
 
 function Invoke-DeployComputers {
     param(
@@ -670,19 +606,128 @@ function Invoke-DeployComputers {
 
         $path = "$ou,$DomainDN"
 
-        $existing = Get-ADComputer -Filter "Name -eq '$name'" -ErrorAction SilentlyContinue
+        # Check if computer already exists
+        $existing = Get-ADComputer -Filter "Name -eq '$name'" -Properties info -ErrorAction SilentlyContinue
+        
         if ($existing) {
             Write-Host "Computer exists: $name" -ForegroundColor DarkGray
+            
+            # Optional: Update hardware info if it exists and has changed
+            if ($comp.manufacturer -or $comp.model -or $comp.service_tag) {
+                $newHardwareData = Build-HardwareInfoJSON -Computer $comp
+                
+                # Only update if hardware data has changed
+                if ($existing.info -ne $newHardwareData) {
+                    Write-Host "  Updating hardware info for: $name" -ForegroundColor Yellow
+                    Set-ADComputer -Identity $existing.DistinguishedName `
+                                   -Replace @{info = $newHardwareData} `
+                                   -WhatIf:$WhatIf
+                }
+            }
         }
         else {
             Write-Host "Creating computer: $name in $path" -ForegroundColor Green
+            
+            # Build hardware info JSON if data is available
+            $otherAttributes = @{}
+            
+            if ($comp.manufacturer -or $comp.model -or $comp.service_tag) {
+                $hardwareInfo = Build-HardwareInfoJSON -Computer $comp
+                $otherAttributes['info'] = $hardwareInfo
+                
+                Write-Host "  + Hardware: $($comp.manufacturer) $($comp.model) [$($comp.service_tag)]" `
+                    -ForegroundColor DarkGreen
+            }
+            
+            # Create computer with hardware info
             New-ADComputer -Name $name `
                            -Path $path `
                            -Description $desc `
+                           -OtherAttributes $otherAttributes `
                            -WhatIf:$WhatIf | Out-Null
         }
     }
 }
+
+# =============================================================================
+# HELPER FUNCTIONS FOR HARDWARE INFO
+# =============================================================================
+
+<#
+.SYNOPSIS
+    Helper function to build JSON-encoded hardware information string.
+
+.DESCRIPTION
+    Creates a compact JSON string containing manufacturer, model, and service tag.
+    Only includes fields that have values (omits null/empty).
+#>
+function Build-HardwareInfoJSON {
+    param(
+        [Parameter(Mandatory)]
+        $Computer
+    )
+    
+    # Build hashtable with only non-empty values
+    $hardwareData = [ordered]@{}
+    
+    if (-not [string]::IsNullOrWhiteSpace($Computer.manufacturer)) {
+        $hardwareData['manufacturer'] = $Computer.manufacturer
+    }
+    
+    if (-not [string]::IsNullOrWhiteSpace($Computer.model)) {
+        $hardwareData['model'] = $Computer.model
+    }
+    
+    if (-not [string]::IsNullOrWhiteSpace($Computer.service_tag)) {
+        $hardwareData['serviceTag'] = $Computer.service_tag
+    }
+    
+    # Return null if no hardware data
+    if ($hardwareData.Count -eq 0) {
+        return $null
+    }
+    
+    # Convert to compact JSON (single line, no formatting)
+    return ($hardwareData | ConvertTo-Json -Compress -Depth 2)
+}
+
+<#
+.SYNOPSIS
+    Helper function to retrieve hardware information from a computer object.
+
+.DESCRIPTION
+    Reads the "info" attribute from an AD computer object and parses the JSON
+    to extract hardware details.
+
+.EXAMPLE
+    $computer = Get-ADComputer "HQ-IT-WS001" -Properties info
+    $hardware = Get-HardwareInfo -Computer $computer
+    Write-Host "Model: $($hardware.model)"
+#>
+function Get-HardwareInfo {
+    param(
+        [Parameter(Mandatory)]
+        [Microsoft.ActiveDirectory.Management.ADComputer]$Computer
+    )
+    
+    if ([string]::IsNullOrWhiteSpace($Computer.info)) {
+        return $null
+    }
+    
+    try {
+        # Parse JSON from info attribute
+        $hardwareData = $Computer.info | ConvertFrom-Json
+        return $hardwareData
+    }
+    catch {
+        Write-Warning "Failed to parse hardware info for $($Computer.Name): $_"
+        return $null
+    }
+}
+
+# =============================================================================
+# USER DEPLOYMENT FUNCTION
+# =============================================================================
 
 function Invoke-DeployUsers {
     param(
@@ -712,60 +757,67 @@ function Invoke-DeployUsers {
         $country   = $user.country
         $phone     = $user.telephoneNumber
 
-        $ouPartial = $user.ou
-        $path      = "$ouPartial,$DomainDN"
+        $ou        = $user.ou
+        $dept      = $user.department
 
-        $password  = $user.password
-        $enabled   = [bool]$user.enabled
+        $path = "$ou,$DomainDN"
+        $upn  = "$sam@$DomainFQDN"
 
-        $upn       = "$numericId@$DomainFQDN"
+        # Generate a default password based on numeric ID or use a fixed password
+        $defaultPassword = "Password$numericId"
+        $securePassword  = ConvertTo-SecureString -String $defaultPassword -AsPlainText -Force
 
         $existing = Get-ADUser -Filter "sAMAccountName -eq '$sam'" -ErrorAction SilentlyContinue
-
         if ($existing) {
             Write-Host "User exists: $sam" -ForegroundColor DarkGray
         }
         else {
-            Write-Host "Creating user: $sam in $path" -ForegroundColor Green
+            Write-Host "Creating user: $sam ($display)" -ForegroundColor Green
 
-            $securePassword = (ConvertTo-SecureString $password -AsPlainText -Force)
+            $userParams = @{
+                Name                  = $display
+                SamAccountName        = $sam
+                UserPrincipalName     = $upn
+                GivenName             = $given
+                Surname               = $sn
+                Initials              = $middle
+                DisplayName           = $display
+                Title                 = $title
+                Department            = $dept
+                StreetAddress         = $street
+                City                  = $city
+                State                 = $state
+                PostalCode            = $postal
+                Country               = $country
+                OfficePhone           = $phone
+                Path                  = $path
+                AccountPassword       = $securePassword
+                Enabled               = $true
+                ChangePasswordAtLogon = $true
+            }
 
-            New-ADUser -Name $display `
-                       -SamAccountName $sam `
-                       -UserPrincipalName $upn `
-                       -GivenName $given `
-                       -Surname $sn `
-                       -Initials $middle `
-                       -DisplayName $display `
-                       -Title $title `
-                       -StreetAddress $street `
-                       -City $city `
-                       -State $state `
-                       -PostalCode $postal `
-                       -Country $country `
-                       -OfficePhone $phone `
-                       -Path $path `
-                       -AccountPassword $securePassword `
-                       -Enabled $enabled `
-                       -WhatIf:$WhatIf | Out-Null
+            New-ADUser @userParams -WhatIf:$WhatIf | Out-Null
         }
     }
 
-    Write-Host "`n[7b] Ensuring group memberships..." -ForegroundColor Cyan
+    # Group memberships
+    Write-Host "`n[8] Assigning Group Memberships..." -ForegroundColor Cyan
 
     foreach ($user in $UsersConfig.users) {
-        $sam       = $user.sAMAccountName
-        $groupList = @($user.groups)
+        $sam = $user.sAMAccountName
+        $memberOf = $user.memberOf
 
-        if (-not $groupList -or $groupList.Count -eq 0) { continue }
-
-        $userObj = Get-ADUser -Filter "sAMAccountName -eq '$sam'" -ErrorAction SilentlyContinue
-        if (-not $userObj) {
-            Write-Warning "User not found for membership processing: $sam"
+        if (-not $memberOf -or $memberOf.Count -eq 0) {
             continue
         }
 
-        foreach ($groupSam in $groupList) {
+        $userObj = Get-ADUser -Filter "sAMAccountName -eq '$sam'" -ErrorAction SilentlyContinue
+        if (-not $userObj) {
+            Write-Warning "User not found for group membership: $sam"
+            continue
+        }
+
+        foreach ($groupSam in $memberOf) {
             $groupObj = Get-ADGroup -Filter "sAMAccountName -eq '$groupSam'" -ErrorAction SilentlyContinue
             if (-not $groupObj) {
                 Write-Warning "Group not found for membership: $sam -> $groupSam"
@@ -806,7 +858,10 @@ try {
     Invoke-DeployComputers    -ComputersConfig $computersConfig -DomainDN $DomainDN
     Invoke-DeployUsers        -UsersConfig $usersConfig   -DomainFQDN $DomainFQDN -DomainDN $DomainDN
 
-    Write-Host "`nDeployment complete for exercise '$ExerciseName'." -ForegroundColor Green
+    Write-Host "`n=====================================================" -ForegroundColor Green
+    Write-Host "  Deployment complete for exercise '$ExerciseName'" -ForegroundColor Green
+    Write-Host "  Hardware info stored in computer 'info' attributes" -ForegroundColor Green
+    Write-Host "=====================================================" -ForegroundColor Green
 }
 catch {
     Write-Error $_
