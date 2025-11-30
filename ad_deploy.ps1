@@ -10,13 +10,21 @@
         * Prompts for domain details.
         * Installs AD DS role if needed.
         * Creates a new AD forest on this server.
-        * Instructs you to reboot and rerun to apply the exercise config.
+        * Automatically reboots and continues deployment (with -AutoReboot flag).
 
 .NOTES
     - Run as a local admin (pre-forest) or Domain Admin (post-forest).
     - Designed for Windows Server 2012 R2 and later.
     
 .VERSION
+    2.2 - Automatic Reboot Enhancement
+    - Added -AutoReboot switch parameter
+    - Added -RebootDelaySeconds parameter (default: 30)
+    - Added Invoke-GracefulReboot function with countdown
+    - Added remote session detection
+    - Added scheduled task creation for post-reboot auto-deployment
+    - Maintains full backward compatibility (manual reboot still default)
+    
     2.1 - Hardware Info Enhancement
     - Modified Invoke-DeployComputers to store hardware metadata
     - Added Build-HardwareInfoJSON helper function
@@ -43,17 +51,147 @@ param(
     [switch]$GenerateStructure,
 
     # Pass through to AD/DNS/GPO cmdlets
-    [switch]$WhatIf
+    [switch]$WhatIf,
+    
+    # NEW v2.2: Enable automatic reboot after forest creation
+    [switch]$AutoReboot,
+    
+    # NEW v2.2: Countdown delay before automatic reboot (seconds)
+    [int]$RebootDelaySeconds = 30
 )
 
 Write-Host "=====================================================" -ForegroundColor Cyan
 Write-Host "           Active Directory Deployment Engine        " -ForegroundColor Cyan
-Write-Host "                Hardware Info Enhanced v2.1          " -ForegroundColor Cyan
+Write-Host "          Hardware Info + Auto-Reboot v2.2           " -ForegroundColor Cyan
 Write-Host "=====================================================`n" -ForegroundColor Cyan
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# NEW v2.2: Graceful Reboot Function with Remote Session Detection
+# ===========================================================================
+
+function Invoke-GracefulReboot {
+    <#
+    .SYNOPSIS
+        Performs graceful system reboot with countdown and optional scheduled task creation.
+    
+    .DESCRIPTION
+        - Detects if running in PowerShell remoting session
+        - Creates scheduled task for post-reboot auto-deployment if remote
+        - Provides countdown with cancel option
+        - Handles both local and remote execution contexts
+    
+    .PARAMETER DelaySeconds
+        Number of seconds to countdown before reboot (default: 30)
+    
+    .PARAMETER ExerciseName
+        Exercise name to pass to post-reboot deployment
+    
+    .PARAMETER ConfigPath
+        Configuration path for post-reboot deployment
+    
+    .PARAMETER ScriptPath
+        Full path to this script for scheduled task
+    #>
+    
+    param(
+        [int]$DelaySeconds = 30,
+        [string]$ExerciseName,
+        [string]$ConfigPath,
+        [string]$ScriptPath
+    )
+    
+    Write-Host "`n=====================================================" -ForegroundColor Yellow
+    Write-Host "           AUTOMATIC REBOOT INITIATED                " -ForegroundColor Yellow
+    Write-Host "=====================================================" -ForegroundColor Yellow
+    
+    # Detect if running in remote PowerShell session
+    $isRemote = $null -ne $PSSenderInfo
+    
+    if ($isRemote) {
+        Write-Host "`n[AutoReboot] Remote PowerShell session detected" -ForegroundColor Cyan
+        Write-Host "[AutoReboot] Creating scheduled task for post-reboot deployment..." -ForegroundColor Yellow
+        
+        try {
+            # Build PowerShell command for scheduled task
+            $psCommand = @"
+-ExecutionPolicy Bypass -NoProfile -File "$ScriptPath" -ExerciseName "$ExerciseName"
+"@
+            
+            # Create scheduled task action
+            $taskAction = New-ScheduledTaskAction `
+                -Execute "PowerShell.exe" `
+                -Argument $psCommand
+            
+            # Trigger: Run at system startup
+            $taskTrigger = New-ScheduledTaskTrigger -AtStartup
+            
+            # Principal: Run as SYSTEM with highest privileges
+            $taskPrincipal = New-ScheduledTaskPrincipal `
+                -UserId "NT AUTHORITY\SYSTEM" `
+                -LogonType ServiceAccount `
+                -RunLevel Highest
+            
+            # Settings: Allow task to run even if on battery, etc.
+            $taskSettings = New-ScheduledTaskSettingsSet `
+                -AllowStartIfOnBatteries `
+                -DontStopIfGoingOnBatteries `
+                -StartWhenAvailable `
+                -ExecutionTimeLimit (New-TimeSpan -Hours 2)
+            
+            # Register the scheduled task
+            $task = Register-ScheduledTask `
+                -TaskName "CDX-PostReboot-Deployment" `
+                -Action $taskAction `
+                -Trigger $taskTrigger `
+                -Principal $taskPrincipal `
+                -Settings $taskSettings `
+                -Description "Auto-run CDX-E AD deployment after forest creation reboot" `
+                -Force
+            
+            Write-Host "[AutoReboot] ✓ Scheduled task created successfully" -ForegroundColor Green
+            Write-Host "              Task Name: CDX-PostReboot-Deployment" -ForegroundColor Gray
+            Write-Host "              Will execute: $ScriptPath" -ForegroundColor Gray
+            Write-Host "              With exercise: $ExerciseName" -ForegroundColor Gray
+            Write-Host "`n[AutoReboot] Post-reboot deployment will continue automatically!" -ForegroundColor Green
+            
+        }
+        catch {
+            Write-Warning "[AutoReboot] Failed to create scheduled task: $_"
+            Write-Host "[AutoReboot] You will need to manually rerun the script after reboot" -ForegroundColor Yellow
+        }
+    }
+    else {
+        Write-Host "`n[AutoReboot] Local console session detected" -ForegroundColor Cyan
+        Write-Host "[AutoReboot] After reboot, manually rerun:" -ForegroundColor Yellow
+        Write-Host "            .\ad_deploy.ps1 -ExerciseName '$ExerciseName'" -ForegroundColor Gray
+    }
+    
+    # Countdown with cancel option
+    Write-Host "`n[AutoReboot] System will RESTART in $DelaySeconds seconds..." -ForegroundColor Yellow
+    Write-Host "[AutoReboot] Press Ctrl+C NOW to cancel automatic reboot" -ForegroundColor Cyan
+    Write-Host "" -NoNewline
+    
+    for ($i = $DelaySeconds; $i -gt 0; $i--) {
+        # Display countdown on same line
+        Write-Host "`r[AutoReboot] Restarting in $i seconds...  " -NoNewline -ForegroundColor Yellow
+        Start-Sleep -Seconds 1
+    }
+    
+    Write-Host "`r[AutoReboot] Restarting NOW...                    " -ForegroundColor Red
+    Write-Host ""
+    
+    # Initiate restart
+    Write-Host "[AutoReboot] Executing system restart..." -ForegroundColor Red
+    Write-Host "=====================================================" -ForegroundColor Red
+    
+    Start-Sleep -Seconds 2
+    Restart-Computer -Force
+}
+
+# ===========================================================================
 # Resolve config path based on exercise layout
-# ---------------------------------------------------------------------------
+# ===========================================================================
+
 if (-not $ConfigPath) {
     if (-not $ExerciseName) {
         $ExerciseName = Read-Host "Enter exercise name (e.g., CHILLED_ROCKET)"
@@ -86,25 +224,37 @@ if (-not (Test-Path $ConfigPath)) {
 
 Write-Host "Exercises Root : $ExercisesRoot"
 Write-Host "Exercise Name  : $ExerciseName"
-Write-Host "Config Path    : $ConfigPath`n"
+Write-Host "Config Path    : $ConfigPath"
+
+# NEW v2.2: Display Auto-Reboot status
+if ($AutoReboot) {
+    Write-Host "Auto-Reboot    : ENABLED (${RebootDelaySeconds}s countdown)" -ForegroundColor Green
+} else {
+    Write-Host "Auto-Reboot    : DISABLED (manual reboot required)" -ForegroundColor Gray
+}
+
+Write-Host ""
 
 # Make sure structure.json exists before we try to load it
 $structurePath = Join-Path $ConfigPath "structure.json"
 if (-not (Test-Path $structurePath)) {
-    throw "structure.json not found at expected path: $structurePath. Run with -GenerateStructure or create it manually."
+    throw "structure.json not found at expected path: $structurePath. Run with -GenerateStructure to create it."
 }
 
-# ---------------------------------------------------------------------------
-# Prerequisite checks
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# Test basic prerequisites
+# ===========================================================================
+
 function Test-Prerequisites {
     Write-Host "[Prereq] Checking environment..." -ForegroundColor Cyan
 
-    # Basic OS hint
+    # Check OS
     try {
-        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
-        if ($os -and $os.ProductType -eq 1) {
-            Write-Warning "This appears to be a client OS (e.g., Windows 10/11). AD DS deployment typically runs on Windows Server."
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        $caption = $os.Caption
+        if ($caption -notmatch "Server") {
+            Write-Warning "This script is designed for Windows Server. Detected OS: $caption.
+AD DS deployment typically runs on Windows Server."
         }
     } catch {}
 
@@ -129,9 +279,10 @@ Test-Prerequisites
 # Try to import AD module (may fail pre-forest; that's ok)
 Import-Module ActiveDirectory -ErrorAction SilentlyContinue | Out-Null
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # Helper: Load JSON config from the exercise folder
-# ---------------------------------------------------------------------------
+# ===========================================================================
+
 function Get-JsonConfig {
     param(
         [Parameter(Mandatory)]
@@ -146,9 +297,10 @@ function Get-JsonConfig {
     Get-Content $fullPath -Raw | ConvertFrom-Json
 }
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # Ensure domain exists: either detect or create a new forest
-# ---------------------------------------------------------------------------
+# ===========================================================================
+
 function Ensure-ActiveDirectoryDomain {
     param(
         [string]$DomainFQDNParam,
@@ -235,13 +387,34 @@ function Ensure-ActiveDirectoryDomain {
         SafeModeAdministratorPassword = $dsrmPassword
         InstallDNS                    = $true
         Force                         = $true
-        NoRebootOnCompletion          = $true
+        NoRebootOnCompletion          = $true  # We handle reboot ourselves
     }
 
     Install-ADDSForest @splat
 
-    Write-Host "`n[Domain] New forest created. You MUST reboot this server before continuing." -ForegroundColor Yellow
-    Write-Host "After reboot, rerun this script to apply the exercise configuration." -ForegroundColor Yellow
+    Write-Host "`n[Domain] ✓ New forest created successfully!" -ForegroundColor Green
+
+    # NEW v2.2: Handle reboot based on -AutoReboot flag
+    if ($AutoReboot) {
+        # Get full path to this script for scheduled task
+        $scriptFullPath = $MyInvocation.MyCommand.Path
+        
+        Invoke-GracefulReboot `
+            -DelaySeconds $RebootDelaySeconds `
+            -ExerciseName $ExerciseName `
+            -ConfigPath $ConfigPath `
+            -ScriptPath $scriptFullPath
+        
+        # If we reach here, user cancelled reboot
+        Write-Host "`n[AutoReboot] Reboot cancelled by user" -ForegroundColor Yellow
+        Write-Host "[Info] You MUST reboot this server before continuing." -ForegroundColor Yellow
+        Write-Host "After reboot, rerun this script to apply the exercise configuration." -ForegroundColor Yellow
+        
+    } else {
+        # Manual reboot (original behavior)
+        Write-Host "`n[Domain] You MUST reboot this server before continuing." -ForegroundColor Yellow
+        Write-Host "After reboot, rerun this script to apply the exercise configuration." -ForegroundColor Yellow
+    }
 
     return @{
         DomainFQDN = $DomainFQDNParam
@@ -259,8 +432,37 @@ Write-Host "`nUsing domain: FQDN = $DomainFQDN; DN = $DomainDN`n" -ForegroundCol
 
 # If we just created a new forest in this run (and not in -WhatIf), stop here.
 if ($domainInfo.CreatedNew -and -not $WhatIf) {
-    Write-Host "`n[Domain] Forest creation completed. Please reboot this server, then rerun ad_deploy.ps1 for '$ExerciseName' to continue with Sites/OUs/etc." -ForegroundColor Yellow
+    Write-Host "`n[Domain] Forest creation completed." -ForegroundColor Green
+    
+    if ($AutoReboot) {
+        Write-Host "[AutoReboot] System will restart automatically" -ForegroundColor Yellow
+        Write-Host "[AutoReboot] Deployment will continue post-reboot (if scheduled task created)" -ForegroundColor Yellow
+    } else {
+        Write-Host "[Info] Please reboot this server, then rerun ad_deploy.ps1 for '$ExerciseName' to continue with Sites/OUs/etc." -ForegroundColor Yellow
+    }
+    
     return
+}
+
+# =============================================================================
+# NEW v2.2: Cleanup scheduled task if we're in post-reboot run
+# =============================================================================
+
+try {
+    $scheduledTask = Get-ScheduledTask -TaskName "CDX-PostReboot-Deployment" -ErrorAction SilentlyContinue
+    
+    if ($scheduledTask) {
+        Write-Host "[AutoReboot] Detected post-reboot scheduled task" -ForegroundColor Cyan
+        Write-Host "[AutoReboot] Removing task (no longer needed)..." -ForegroundColor Yellow
+        
+        Unregister-ScheduledTask -TaskName "CDX-PostReboot-Deployment" -Confirm:$false
+        
+        Write-Host "[AutoReboot] ✓ Scheduled task removed" -ForegroundColor Green
+        Write-Host "[AutoReboot] Continuing with exercise deployment...`n" -ForegroundColor Green
+    }
+}
+catch {
+    # Ignore errors - task may not exist
 }
 
 # =============================================================================
@@ -283,118 +485,111 @@ function Invoke-DeploySitesAndOUs {
         $name = $site.name
         $desc = $site.description
 
-        # Does the target site already exist?
-        $existingSite = Get-ADReplicationSite -Filter "Name -eq '$name'" -ErrorAction SilentlyContinue
-        if ($existingSite) {
-            Write-Host "Site exists: $name" -ForegroundColor DarkGray
+        try {
+            $existing = Get-ADReplicationSite -Identity $name -ErrorAction Stop
+            Write-Host "[Site] $name (already exists)" -ForegroundColor DarkGray
         }
-        else {
-            Write-Host "Creating site: $name" -ForegroundColor Green
-            New-ADReplicationSite -Name $name -Description $desc -WhatIf:$WhatIf | Out-Null
+        catch {
+            if ($WhatIf) {
+                Write-Host "[WhatIf][Site] Would create: $name" -ForegroundColor Yellow
+            } else {
+                New-ADReplicationSite -Name $name -Description $desc -WhatIf:$false
+                Write-Host "[Site] Created: $name" -ForegroundColor Green
+            }
         }
     }
 
     # --- Subnets ---
     foreach ($subnet in $StructureConfig.subnets) {
-        $cidr = $subnet.cidr
-        $siteName = $subnet.site
-        $desc = $subnet.description
+        $subnetName = $subnet.name
+        $siteName   = $subnet.site
+        $desc       = $subnet.description
 
-        $existingSubnet = Get-ADReplicationSubnet -Filter "Name -eq '$cidr'" -ErrorAction SilentlyContinue
-        if ($existingSubnet) {
-            Write-Host "Subnet exists: $cidr -> $siteName" -ForegroundColor DarkGray
+        try {
+            $existingSubnet = Get-ADReplicationSubnet -Identity $subnetName -ErrorAction Stop
+            Write-Host "[Subnet] $subnetName (already exists)" -ForegroundColor DarkGray
         }
-        else {
-            Write-Host "Creating subnet: $cidr -> $siteName" -ForegroundColor Green
-            New-ADReplicationSubnet -Name $cidr -Site $siteName -Description $desc -WhatIf:$WhatIf | Out-Null
+        catch {
+            if ($WhatIf) {
+                Write-Host "[WhatIf][Subnet] Would create: $subnetName -> $siteName" -ForegroundColor Yellow
+            } else {
+                New-ADReplicationSubnet -Name $subnetName -Site $siteName -Description $desc -WhatIf:$false
+                Write-Host "[Subnet] Created: $subnetName -> $siteName" -ForegroundColor Green
+            }
         }
     }
 
     # --- Site Links ---
-    foreach ($link in $StructureConfig.sitelinks) {
+    foreach ($link in $StructureConfig.siteLinks) {
         $linkName = $link.name
-        $sites = $link.sites
-        $cost = $link.cost
-        $interval = $link.replicationInterval
+        $sites    = $link.sites
+        $cost     = if ($link.cost) { $link.cost } else { 100 }
+        $interval = if ($link.replicationInterval) { $link.replicationInterval } else { 180 }
 
-        $existingLink = Get-ADReplicationSiteLink -Filter "Name -eq '$linkName'" -ErrorAction SilentlyContinue
-        if ($existingLink) {
-            Write-Host "Site link exists: $linkName" -ForegroundColor DarkGray
+        try {
+            $existingLink = Get-ADReplicationSiteLink -Identity $linkName -ErrorAction Stop
+            Write-Host "[SiteLink] $linkName (already exists)" -ForegroundColor DarkGray
         }
-        else {
-            Write-Host "Creating site link: $linkName (Cost: $cost, Interval: $interval min)" -ForegroundColor Green
-            New-ADReplicationSiteLink -Name $linkName `
-                                      -SitesIncluded $sites `
-                                      -Cost $cost `
-                                      -ReplicationFrequencyInMinutes $interval `
-                                      -WhatIf:$WhatIf | Out-Null
+        catch {
+            if ($WhatIf) {
+                Write-Host "[WhatIf][SiteLink] Would create: $linkName (cost=$cost)" -ForegroundColor Yellow
+            } else {
+                New-ADReplicationSiteLink -Name $linkName `
+                    -SitesIncluded $sites `
+                    -Cost $cost `
+                    -ReplicationFrequencyInMinutes $interval `
+                    -WhatIf:$false
+                Write-Host "[SiteLink] Created: $linkName (cost=$cost)" -ForegroundColor Green
+            }
         }
     }
 
-    # Optionally remove the auto-created DEFAULTIPSITELINK if it exists and is not referenced
+    # Optionally remove the default site link created by forest install
     try {
-        $defaultLink = Get-ADReplicationSiteLink -Filter "Name -eq 'DEFAULTIPSITELINK'" -ErrorAction SilentlyContinue
-        if ($defaultLink) {
-            $linkedSites = $defaultLink.SitesIncluded
-            if ($linkedSites.Count -eq 0) {
-                Write-Host "Removing unused DEFAULTIPSITELINK..." -ForegroundColor Yellow
-                Remove-ADReplicationSiteLink -Identity "DEFAULTIPSITELINK" -Confirm:$false -WhatIf:$WhatIf
-            }
-            else {
-                Write-Host "DEFAULTIPSITELINK has linked sites; not removing." -ForegroundColor DarkGray
-            }
+        $defaultLink = Get-ADReplicationSiteLink -Identity "DEFAULTIPSITELINK" -ErrorAction Stop
+        if ($WhatIf) {
+            Write-Host "[WhatIf][SiteLink] Would remove: DEFAULTIPSITELINK" -ForegroundColor Yellow
+        } else {
+            Remove-ADReplicationSiteLink -Identity "DEFAULTIPSITELINK" -Confirm:$false -WhatIf:$false
+            Write-Host "[SiteLink] Removed: DEFAULTIPSITELINK" -ForegroundColor Green
         }
     }
     catch {
-        Write-Warning "Failed to evaluate or remove DEFAULTIPSITELINK: $_"
+        # DEFAULTIPSITELINK might not exist or already removed
     }
 
-    # --- OUs ---
-    Write-Host "`n[2] Creating Organizational Units..." -ForegroundColor Cyan
+    # --- Organizational Units ---
+    Write-Host "`n[2] Deploying Organizational Units..." -ForegroundColor Cyan
 
-    # Your structure.json OUs look like:
-    # { "name": "Sites", "parent_dn": "", "description": "..." }
-    # { "name": "HQ", "parent_dn": "OU=Sites", "description": "..." }
-    # etc.
+    # Sort OUs by depth so parents are created before children
+    $ousSorted = $StructureConfig.ous | Sort-Object -Property @{Expression={
+        ($_.dn -split ',').Count
+    }}
 
-    # Sort so that parents are created before children, based on parent_dn depth
-    $sortedOUs = $StructureConfig.ous | Sort-Object {
-        if ([string]::IsNullOrWhiteSpace($_.parent_dn)) {
-            0
+    foreach ($ou in $ousSorted) {
+        $ouDN   = $ou.dn
+        $ouName = $ou.name
+        $desc   = $ou.description
+
+        try {
+            $existingOU = Get-ADOrganizationalUnit -Identity $ouDN -ErrorAction Stop
+            Write-Host "[OU] $ouName (already exists)" -ForegroundColor DarkGray
         }
-        else {
-            ([regex]::Matches($_.parent_dn, 'OU=').Count)
-        }
-    }
+        catch {
+            # Parse parent DN
+            $parts = $ouDN -split ',',2
+            if ($parts.Count -lt 2) {
+                Write-Warning "[OU] Could not parse parent DN for: $ouDN"
+                continue
+            }
+            $parentPath = $parts[1]
 
-    foreach ($ou in $sortedOUs) {
-        $name     = $ou.name
-        $parentDn = $ou.parent_dn
-        $desc     = $ou.description
-
-        # Build full parent path:
-        #  - If parent_dn is empty/null => directly under the domain
-        #  - Otherwise treat parent_dn as a relative OU chain and append DomainDN
-        if ([string]::IsNullOrWhiteSpace($parentDn)) {
-            $parentPath = $DomainDN
-        }
-        else {
-            $parentPath = "$parentDn,$DomainDN"
-        }
-
-        $dn = "OU=$name,$parentPath"
-
-        $existing = Get-ADOrganizationalUnit -LDAPFilter "(distinguishedName=$dn)" -ErrorAction SilentlyContinue
-        if ($existing) {
-            Write-Host "OU exists: $dn" -ForegroundColor DarkGray
-        }
-        else {
-            Write-Host "Creating OU: $dn" -ForegroundColor Green
-            New-ADOrganizationalUnit -Name $name `
-                                     -Path $parentPath `
-                                     -Description $desc `
-                                     -ProtectedFromAccidentalDeletion $false `
-                                     -WhatIf:$WhatIf | Out-Null
+            if ($WhatIf) {
+                Write-Host "[WhatIf][OU] Would create: $ouName" -ForegroundColor Yellow
+            } else {
+                New-ADOrganizationalUnit -Name $ouName -Path $parentPath -Description $desc -WhatIf:$false
+                Write-Host "[OU] Created: $ouName" -ForegroundColor Green
+            }
         }
     }
 }
@@ -403,35 +598,41 @@ function Invoke-DeployGroups {
     param(
         [Parameter(Mandatory)]
         $UsersConfig,
+
         [Parameter(Mandatory)]
         [string]$DomainDN
     )
 
-    Write-Host "`n[3] Creating Groups..." -ForegroundColor Cyan
+    if (-not $UsersConfig.groups) {
+        Write-Host "`n[3] No groups defined in users.json; skipping." -ForegroundColor DarkGray
+        return
+    }
 
-    foreach ($group in $UsersConfig.groups) {
-        $sam   = $group.sAMAccountName
-        $name  = $group.name
-        $scope = $group.scope
-        $cat   = $group.category
-        $desc  = $group.description
-        $ou    = $group.ou
+    Write-Host "`n[3] Deploying Security Groups..." -ForegroundColor Cyan
 
-        $path  = "$ou,$DomainDN"
+    foreach ($grp in $UsersConfig.groups) {
+        $groupName  = $grp.name
+        $groupScope = if ($grp.scope) { $grp.scope } else { "Global" }
+        $groupCat   = if ($grp.category) { $grp.category } else { "Security" }
+        $groupPath  = $grp.ou
+        $desc       = $grp.description
 
-        $existing = Get-ADGroup -Filter "sAMAccountName -eq '$sam'" -ErrorAction SilentlyContinue
-        if ($existing) {
-            Write-Host "Group exists: $sam" -ForegroundColor DarkGray
+        try {
+            $existingGroup = Get-ADGroup -Identity $groupName -ErrorAction Stop
+            Write-Host "[Group] $groupName (already exists)" -ForegroundColor DarkGray
         }
-        else {
-            Write-Host "Creating group: $sam in $path" -ForegroundColor Green
-            New-ADGroup -Name $name `
-                        -SamAccountName $sam `
-                        -GroupCategory $cat `
-                        -GroupScope $scope `
-                        -Path $path `
-                        -Description $desc `
-                        -WhatIf:$WhatIf | Out-Null
+        catch {
+            if ($WhatIf) {
+                Write-Host "[WhatIf][Group] Would create: $groupName" -ForegroundColor Yellow
+            } else {
+                New-ADGroup -Name $groupName `
+                    -GroupScope $groupScope `
+                    -GroupCategory $groupCat `
+                    -Path $groupPath `
+                    -Description $desc `
+                    -WhatIf:$false
+                Write-Host "[Group] Created: $groupName" -ForegroundColor Green
+            }
         }
     }
 }
@@ -440,271 +641,203 @@ function Invoke-DeployServices {
     param(
         [Parameter(Mandatory)]
         $ServicesConfig,
+
         [Parameter(Mandatory)]
         [string]$DomainFQDN
     )
 
-    Write-Host "`n[4] Configuring Services (DNS)..." -ForegroundColor Cyan
+    Write-Host "`n[4] Deploying Services (DNS, etc.)..." -ForegroundColor Cyan
 
-    if (-not (Get-Module -ListAvailable -Name DnsServer)) {
-        Write-Warning "DnsServer module not available; skipping DNS configuration."
-        return
-    }
-
-    Import-Module DnsServer -ErrorAction SilentlyContinue | Out-Null
-
-    # DNS Zones
+    # --- DNS Zones ---
     if ($ServicesConfig.dns -and $ServicesConfig.dns.zones) {
-        foreach ($zone in $ServicesConfig.dns.zones) {
+        $dnsModuleAvailable = Get-Module -ListAvailable -Name DnsServer
+        if (-not $dnsModuleAvailable) {
+            Write-Warning "[DNS] DnsServer module not available; skipping DNS zones."
+        }
+        else {
+            Import-Module DnsServer -ErrorAction SilentlyContinue
 
-            # Allow domain-agnostic placeholder in JSON
-            $rawName = $zone.name
-            if ($rawName -eq "__AD_DOMAIN__") {
-                $name = $DomainFQDN
-            }
-            else {
-                $name = $rawName
-            }
+            foreach ($zone in $ServicesConfig.dns.zones) {
+                $zoneName = $zone.name
+                $zoneType = if ($zone.type) { $zone.type } else { "Primary" }
 
-            $scope = $zone.replicationScope
-
-            $existingZone = Get-DnsServerZone -Name $name -ErrorAction SilentlyContinue
-            if ($existingZone) {
-                Write-Host "DNS zone exists: $name" -ForegroundColor DarkGray
-            }
-            else {
-                Write-Host "Creating DNS zone: $name" -ForegroundColor Green
-                Add-DnsServerPrimaryZone -Name $name -ReplicationScope $scope -WhatIf:$WhatIf | Out-Null
+                try {
+                    $existingZone = Get-DnsServerZone -Name $zoneName -ErrorAction Stop
+                    Write-Host "[DNS Zone] $zoneName (already exists)" -ForegroundColor DarkGray
+                }
+                catch {
+                    if ($WhatIf) {
+                        Write-Host "[WhatIf][DNS Zone] Would create: $zoneName ($zoneType)" -ForegroundColor Yellow
+                    } else {
+                        if ($zoneType -eq "Primary") {
+                            Add-DnsServerPrimaryZone -Name $zoneName -ReplicationScope "Forest" -WhatIf:$false
+                        }
+                        elseif ($zoneType -eq "Reverse") {
+                            Add-DnsServerPrimaryZone -NetworkId $zoneName -ReplicationScope "Forest" -WhatIf:$false
+                        }
+                        Write-Host "[DNS Zone] Created: $zoneName" -ForegroundColor Green
+                    }
+                }
             }
         }
     }
 
-    # DNS Forwarders
+    # --- DNS Forwarders ---
     if ($ServicesConfig.dns -and $ServicesConfig.dns.forwarders) {
-        $currentForwarders = @()
-        try {
-            $currentForwarders = (Get-DnsServerForwarder -ErrorAction SilentlyContinue).IPAddress
-        } catch {}
-
-        foreach ($fwd in $ServicesConfig.dns.forwarders) {
-            if ($currentForwarders -and $currentForwarders -contains $fwd) {
-                Write-Host "DNS forwarder exists: $fwd" -ForegroundColor DarkGray
-            }
-            else {
-                Write-Host "Adding DNS forwarder: $fwd" -ForegroundColor Green
-                Add-DnsServerForwarder -IPAddress $fwd -ErrorAction SilentlyContinue -WhatIf:$WhatIf | Out-Null
+        if (-not (Get-Module -Name DnsServer)) {
+            Write-Warning "[DNS Forwarders] DnsServer module not loaded; skipping."
+        }
+        else {
+            foreach ($fwd in $ServicesConfig.dns.forwarders) {
+                if ($WhatIf) {
+                    Write-Host "[WhatIf][DNS Forwarder] Would add: $fwd" -ForegroundColor Yellow
+                } else {
+                    try {
+                        Add-DnsServerForwarder -IPAddress $fwd -ErrorAction Stop
+                        Write-Host "[DNS Forwarder] Added: $fwd" -ForegroundColor Green
+                    }
+                    catch {
+                        Write-Host "[DNS Forwarder] $fwd (may already exist or error)" -ForegroundColor DarkGray
+                    }
+                }
             }
         }
     }
+
+    # Placeholders for other services (not yet implemented):
+    # - DHCP
+    # - WINS
+    # - Certificate Services
 }
 
 function Invoke-DeployGPOs {
     param(
         [Parameter(Mandatory)]
         $GpoConfig,
+
         [Parameter(Mandatory)]
         [string]$DomainDN
     )
 
-    Write-Host "`n[5] Creating GPOs and Linking..." -ForegroundColor Cyan
-
-    if (-not (Get-Module -ListAvailable -Name GroupPolicy)) {
-        Write-Warning "GroupPolicy module not available; skipping GPO configuration."
+    if (-not $GpoConfig.gpos) {
+        Write-Host "`n[5] No GPOs defined in gpo.json; skipping." -ForegroundColor DarkGray
         return
     }
 
-    Import-Module GroupPolicy -ErrorAction SilentlyContinue | Out-Null
+    Write-Host "`n[5] Deploying Group Policy Objects..." -ForegroundColor Cyan
 
-    # Create GPOs
-    foreach ($gpo in $GpoConfig.gpos) {
-        $gpoName = $gpo.name
-        $gpoDesc = $gpo.description
-
-        $existingGpo = Get-GPO -Name $gpoName -ErrorAction SilentlyContinue
-        if ($existingGpo) {
-            Write-Host "GPO exists: $gpoName" -ForegroundColor DarkGray
-        }
-        else {
-            Write-Host "Creating GPO: $gpoName" -ForegroundColor Green
-            New-GPO -Name $gpoName -Comment $gpoDesc -WhatIf:$WhatIf | Out-Null
-        }
+    $gpModuleAvailable = Get-Module -ListAvailable -Name GroupPolicy
+    if (-not $gpModuleAvailable) {
+        Write-Warning "[GPO] GroupPolicy module not available; skipping GPO deployment."
+        return
     }
 
-    # Link GPOs to target OUs
-    foreach ($link in $GpoConfig.links) {
-        $gpoName   = $link.gpoName
-        $targetOu  = $link.targetOu
-        $enforced  = $link.enforced
-        $enabled   = $link.enabled
+    Import-Module GroupPolicy -ErrorAction SilentlyContinue
 
-        $targetDn = "$targetOu,$DomainDN"
+    foreach ($gpoItem in $GpoConfig.gpos) {
+        $gpoName = $gpoItem.name
+        $comment = $gpoItem.comment
 
-        $enforcedValue = if ($enforced) { "Yes" } else { "No" }
-        $enabledValue  = if ($enabled) { "Yes" } else { "No" }
-
-        $existingLink = Get-GPInheritance -Target $targetDn -ErrorAction SilentlyContinue |
-                        Select-Object -ExpandProperty GpoLinks -ErrorAction SilentlyContinue |
-                        Where-Object { $_.DisplayName -eq $gpoName }
-
-        if ($existingLink) {
-            Write-Host "GPO link exists: $gpoName -> $targetDn" -ForegroundColor DarkGray
+        try {
+            $existingGPO = Get-GPO -Name $gpoName -ErrorAction Stop
+            Write-Host "[GPO] $gpoName (already exists)" -ForegroundColor DarkGray
         }
-        else {
-            Write-Host "Linking GPO: $gpoName -> $targetDn" -ForegroundColor Yellow
+        catch {
             if ($WhatIf) {
-                Write-Host "[WhatIf] Would link GPO: $gpoName to $targetDn (Enforced: $enforcedValue, Enabled: $enabledValue)" -ForegroundColor Yellow
-            }
-            else {
-                New-GPLink -Name $gpoName `
-                           -Target $targetDn `
-                           -Enforced $enforcedValue `
-                           -LinkEnabled $enabledValue | Out-Null
+                Write-Host "[WhatIf][GPO] Would create: $gpoName" -ForegroundColor Yellow
+            } else {
+                $newGPO = New-GPO -Name $gpoName -Comment $comment -WhatIf:$false
+                Write-Host "[GPO] Created: $gpoName" -ForegroundColor Green
             }
         }
     }
-}
 
-# =============================================================================
-# MODIFIED FUNCTION: Invoke-DeployComputers
-# Hardware Attributes Storage: JSON in "info" attribute
-# =============================================================================
+    # --- GPO Links ---
+    if ($GpoConfig.links) {
+        foreach ($linkItem in $GpoConfig.links) {
+            $gpoName   = $linkItem.gpo
+            $targetOU  = $linkItem.target
+            $enforced  = if ($linkItem.enforced) { "Yes" } else { "No" }
 
-<#
-.SYNOPSIS
-    Modified computer deployment function that stores hardware metadata in the 
-    "info" attribute as JSON.
-
-.DESCRIPTION
-    This modified version of Invoke-DeployComputers stores manufacturer, model, 
-    and service tag information in the computer object's "info" attribute as 
-    JSON-encoded data. This approach:
-    
-    - Uses existing AD schema (no extensions needed)
-    - Avoids Exchange extensionAttribute conflicts
-    - Stores all hardware data in single field
-    - Is fully reversible and Exchange-safe
-    
-.NOTES
-    Version 2.1 - Hardware Info Enhancement
-    Integrated: 2025-11-28
-#>
-
-function Invoke-DeployComputers {
-    param(
-        [Parameter(Mandatory)]
-        $ComputersConfig,
-        [Parameter(Mandatory)]
-        [string]$DomainDN
-    )
-
-    Write-Host "`n[6] Creating Computer Accounts..." -ForegroundColor Cyan
-
-    foreach ($comp in $ComputersConfig.computers) {
-        $name = $comp.name
-        $ou   = $comp.ou
-        $desc = $comp.description
-
-        $path = "$ou,$DomainDN"
-
-        # Check if computer already exists
-        $existing = Get-ADComputer -Filter "Name -eq '$name'" -Properties info -ErrorAction SilentlyContinue
-        
-        if ($existing) {
-            Write-Host "Computer exists: $name" -ForegroundColor DarkGray
-            
-            # Optional: Update hardware info if it exists and has changed
-            if ($comp.manufacturer -or $comp.model -or $comp.service_tag) {
-                $newHardwareData = Build-HardwareInfoJSON -Computer $comp
-                
-                # Only update if hardware data has changed
-                if ($existing.info -ne $newHardwareData) {
-                    Write-Host "  Updating hardware info for: $name" -ForegroundColor Yellow
-                    Set-ADComputer -Identity $existing.DistinguishedName `
-                                   -Replace @{info = $newHardwareData} `
-                                   -WhatIf:$WhatIf
+            if ($WhatIf) {
+                Write-Host "[WhatIf][GPO Link] Would link: $gpoName -> $targetOU (Enforced=$enforced)" -ForegroundColor Yellow
+            } else {
+                try {
+                    $existing = Get-GPInheritance -Target $targetOU | 
+                                Select-Object -ExpandProperty GpoLinks | 
+                                Where-Object { $_.DisplayName -eq $gpoName }
+                    if ($existing) {
+                        Write-Host "[GPO Link] $gpoName -> $targetOU (already linked)" -ForegroundColor DarkGray
+                    }
+                    else {
+                        New-GPLink -Name $gpoName -Target $targetOU -LinkEnabled Yes -Enforced $enforced -WhatIf:$false | Out-Null
+                        Write-Host "[GPO Link] Linked: $gpoName -> $targetOU" -ForegroundColor Green
+                    }
+                }
+                catch {
+                    Write-Warning "[GPO Link] Failed to link $gpoName to $targetOU: $_"
                 }
             }
         }
-        else {
-            Write-Host "Creating computer: $name in $path" -ForegroundColor Green
-            
-            # Build hardware info JSON if data is available
-            $otherAttributes = @{}
-            
-            if ($comp.manufacturer -or $comp.model -or $comp.service_tag) {
-                $hardwareInfo = Build-HardwareInfoJSON -Computer $comp
-                $otherAttributes['info'] = $hardwareInfo
-                
-                Write-Host "  + Hardware: $($comp.manufacturer) $($comp.model) [$($comp.service_tag)]" `
-                    -ForegroundColor DarkGreen
-            }
-            
-            # Create computer with hardware info
-            New-ADComputer -Name $name `
-                           -Path $path `
-                           -Description $desc `
-                           -OtherAttributes $otherAttributes `
-                           -WhatIf:$WhatIf | Out-Null
-        }
     }
 }
 
 # =============================================================================
-# HELPER FUNCTIONS FOR HARDWARE INFO
+# NEW v2.1: Hardware Info Helper Functions
 # =============================================================================
 
-<#
-.SYNOPSIS
-    Helper function to build JSON-encoded hardware information string.
-
-.DESCRIPTION
-    Creates a compact JSON string containing manufacturer, model, and service tag.
-    Only includes fields that have values (omits null/empty).
-#>
 function Build-HardwareInfoJSON {
+    <#
+    .SYNOPSIS
+        Builds JSON string from hardware fields in computer object.
+    
+    .DESCRIPTION
+        Takes manufacturer, model, and service_tag fields and creates
+        a compact JSON string for storage in the AD "info" attribute.
+        Returns empty string if no hardware data provided.
+    #>
     param(
-        [Parameter(Mandatory)]
-        $Computer
+        [string]$Manufacturer,
+        [string]$Model,
+        [string]$ServiceTag
     )
     
-    # Build hashtable with only non-empty values
+    # Only build JSON if at least one field has data
+    if ([string]::IsNullOrWhiteSpace($Manufacturer) -and 
+        [string]::IsNullOrWhiteSpace($Model) -and 
+        [string]::IsNullOrWhiteSpace($ServiceTag)) {
+        return ""
+    }
+    
+    # Build ordered hashtable
     $hardwareData = [ordered]@{}
     
-    if (-not [string]::IsNullOrWhiteSpace($Computer.manufacturer)) {
-        $hardwareData['manufacturer'] = $Computer.manufacturer
+    if (-not [string]::IsNullOrWhiteSpace($Manufacturer)) {
+        $hardwareData["manufacturer"] = $Manufacturer.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Model)) {
+        $hardwareData["model"] = $Model.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ServiceTag)) {
+        $hardwareData["serviceTag"] = $ServiceTag.Trim()
     }
     
-    if (-not [string]::IsNullOrWhiteSpace($Computer.model)) {
-        $hardwareData['model'] = $Computer.model
-    }
+    # Convert to compact JSON
+    $json = $hardwareData | ConvertTo-Json -Compress -Depth 2
     
-    if (-not [string]::IsNullOrWhiteSpace($Computer.service_tag)) {
-        $hardwareData['serviceTag'] = $Computer.service_tag
-    }
-    
-    # Return null if no hardware data
-    if ($hardwareData.Count -eq 0) {
-        return $null
-    }
-    
-    # Convert to compact JSON (single line, no formatting)
-    return ($hardwareData | ConvertTo-Json -Compress -Depth 2)
+    return $json
 }
 
-<#
-.SYNOPSIS
-    Helper function to retrieve hardware information from a computer object.
-
-.DESCRIPTION
-    Reads the "info" attribute from an AD computer object and parses the JSON
-    to extract hardware details.
-
-.EXAMPLE
-    $computer = Get-ADComputer "HQ-IT-WS001" -Properties info
-    $hardware = Get-HardwareInfo -Computer $computer
-    Write-Host "Model: $($hardware.model)"
-#>
 function Get-HardwareInfo {
+    <#
+    .SYNOPSIS
+        Extracts hardware info from AD computer object's info attribute.
+    
+    .DESCRIPTION
+        Parses the JSON stored in the "info" attribute and returns
+        a custom object with manufacturer, model, and serviceTag properties.
+        Returns $null if no hardware info present or JSON invalid.
+    #>
     param(
         [Parameter(Mandatory)]
         [Microsoft.ActiveDirectory.Management.ADComputer]$Computer
@@ -715,127 +848,216 @@ function Get-HardwareInfo {
     }
     
     try {
-        # Parse JSON from info attribute
         $hardwareData = $Computer.info | ConvertFrom-Json
         return $hardwareData
     }
     catch {
-        Write-Warning "Failed to parse hardware info for $($Computer.Name): $_"
+        Write-Warning "[Hardware] Failed to parse hardware info for $($Computer.Name): $_"
         return $null
     }
 }
 
-# =============================================================================
-# USER DEPLOYMENT FUNCTION
-# =============================================================================
+function Invoke-DeployComputers {
+    <#
+    .SYNOPSIS
+        Creates/updates computer objects with optional hardware metadata.
+    
+    .DESCRIPTION
+        v2.1 Enhancement: Stores hardware info (manufacturer, model, service_tag)
+        as JSON in the "info" attribute. Updates existing computers if hardware
+        data has changed.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        $ComputersConfig,
+
+        [Parameter(Mandatory)]
+        [string]$DomainDN
+    )
+
+    if (-not $ComputersConfig.computers) {
+        Write-Host "`n[6] No computers defined in computers.json; skipping." -ForegroundColor DarkGray
+        return
+    }
+
+    Write-Host "`n[6] Deploying Computer Accounts..." -ForegroundColor Cyan
+
+    foreach ($comp in $ComputersConfig.computers) {
+        $compName = $comp.name
+        $compPath = $comp.ou
+        $compDesc = $comp.description
+        
+        # NEW v2.1: Extract hardware fields if present
+        $manufacturer = if ($comp.manufacturer) { $comp.manufacturer } else { "" }
+        $model        = if ($comp.model) { $comp.model } else { "" }
+        $serviceTag   = if ($comp.service_tag) { $comp.service_tag } else { "" }
+        
+        # Build hardware JSON
+        $hardwareJSON = Build-HardwareInfoJSON -Manufacturer $manufacturer -Model $model -ServiceTag $serviceTag
+
+        try {
+            $existingComp = Get-ADComputer -Identity $compName -Properties info -ErrorAction Stop
+            
+            # NEW v2.1: Check if hardware info needs updating
+            $needsUpdate = $false
+            if (-not [string]::IsNullOrWhiteSpace($hardwareJSON)) {
+                if ($existingComp.info -ne $hardwareJSON) {
+                    $needsUpdate = $true
+                }
+            }
+            
+            if ($needsUpdate -and -not $WhatIf) {
+                Set-ADComputer -Identity $compName -Replace @{info=$hardwareJSON} -WhatIf:$false
+                Write-Host "[Computer] $compName (updated hardware info)" -ForegroundColor Yellow
+                
+                # Display updated hardware
+                if (-not [string]::IsNullOrWhiteSpace($hardwareJSON)) {
+                    $hw = Get-HardwareInfo -Computer (Get-ADComputer $compName -Properties info)
+                    if ($hw) {
+                        Write-Host "           Hardware: $($hw.manufacturer) $($hw.model)" -ForegroundColor DarkGray
+                        if ($hw.serviceTag) {
+                            Write-Host "           Service Tag: $($hw.serviceTag)" -ForegroundColor DarkGray
+                        }
+                    }
+                }
+            } else {
+                Write-Host "[Computer] $compName (already exists)" -ForegroundColor DarkGray
+            }
+        }
+        catch {
+            # Computer doesn't exist - create it
+            if ($WhatIf) {
+                Write-Host "[WhatIf][Computer] Would create: $compName" -ForegroundColor Yellow
+                if (-not [string]::IsNullOrWhiteSpace($hardwareJSON)) {
+                    Write-Host "                   Hardware: $manufacturer $model" -ForegroundColor DarkGray
+                }
+            } else {
+                # Create computer object
+                $newCompParams = @{
+                    Name        = $compName
+                    Path        = $compPath
+                    Description = $compDesc
+                    Enabled     = $true
+                    WhatIf      = $false
+                }
+                
+                New-ADComputer @newCompParams
+                
+                # Set hardware info if provided
+                if (-not [string]::IsNullOrWhiteSpace($hardwareJSON)) {
+                    Set-ADComputer -Identity $compName -Replace @{info=$hardwareJSON} -WhatIf:$false
+                }
+                
+                Write-Host "[Computer] Created: $compName" -ForegroundColor Green
+                
+                # Display hardware info
+                if (-not [string]::IsNullOrWhiteSpace($hardwareJSON)) {
+                    $hw = Get-HardwareInfo -Computer (Get-ADComputer $compName -Properties info)
+                    if ($hw) {
+                        Write-Host "           Hardware: $($hw.manufacturer) $($hw.model)" -ForegroundColor DarkGray
+                        if ($hw.serviceTag) {
+                            Write-Host "           Service Tag: $($hw.serviceTag)" -ForegroundColor DarkGray
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 function Invoke-DeployUsers {
     param(
         [Parameter(Mandatory)]
         $UsersConfig,
+
         [Parameter(Mandatory)]
         [string]$DomainFQDN,
+
         [Parameter(Mandatory)]
         [string]$DomainDN
     )
 
-    Write-Host "`n[7] Creating User Accounts..." -ForegroundColor Cyan
-
-    foreach ($user in $UsersConfig.users) {
-        $sam       = $user.sAMAccountName
-        $numericId = $user.numericId
-        $given     = $user.givenName
-        $sn        = $user.sn
-        $middle    = $user.initials
-        $display   = $user.displayName
-        $title     = $user.title
-
-        $street    = $user.streetAddress
-        $city      = $user.city
-        $state     = $user.state
-        $postal    = $user.postalCode
-        $country   = $user.country
-        $phone     = $user.telephoneNumber
-
-        $ou        = $user.ou
-        $dept      = $user.department
-
-        $path = "$ou,$DomainDN"
-        $upn  = "$sam@$DomainFQDN"
-
-        # Generate a default password based on numeric ID or use a fixed password
-        $defaultPassword = "Password$numericId"
-        $securePassword  = ConvertTo-SecureString -String $defaultPassword -AsPlainText -Force
-
-        $existing = Get-ADUser -Filter "sAMAccountName -eq '$sam'" -ErrorAction SilentlyContinue
-        if ($existing) {
-            Write-Host "User exists: $sam" -ForegroundColor DarkGray
-        }
-        else {
-            Write-Host "Creating user: $sam ($display)" -ForegroundColor Green
-
-            $userParams = @{
-                Name                  = $display
-                SamAccountName        = $sam
-                UserPrincipalName     = $upn
-                GivenName             = $given
-                Surname               = $sn
-                Initials              = $middle
-                DisplayName           = $display
-                Title                 = $title
-                Department            = $dept
-                StreetAddress         = $street
-                City                  = $city
-                State                 = $state
-                PostalCode            = $postal
-                Country               = $country
-                OfficePhone           = $phone
-                Path                  = $path
-                AccountPassword       = $securePassword
-                Enabled               = $true
-                ChangePasswordAtLogon = $true
-            }
-
-            New-ADUser @userParams -WhatIf:$WhatIf | Out-Null
-        }
+    if (-not $UsersConfig.users) {
+        Write-Host "`n[7] No users defined in users.json; skipping." -ForegroundColor DarkGray
+        return
     }
 
-    # Group memberships
-    Write-Host "`n[8] Assigning Group Memberships..." -ForegroundColor Cyan
+    Write-Host "`n[7] Deploying User Accounts..." -ForegroundColor Cyan
 
-    foreach ($user in $UsersConfig.users) {
-        $sam = $user.sAMAccountName
-        $memberOf = $user.memberOf
+    foreach ($usr in $UsersConfig.users) {
+        $samAccountName = $usr.samAccountName
+        $givenName      = $usr.givenName
+        $surname        = $usr.surname
+        $displayName    = "$givenName $surname"
+        $upn            = "$samAccountName@$DomainFQDN"
+        $userPath       = $usr.ou
+        $title          = $usr.title
+        $department     = $usr.department
+        $company        = $usr.company
 
-        if (-not $memberOf -or $memberOf.Count -eq 0) {
-            continue
+        # Optional attributes
+        $office         = $usr.office
+        $phone          = $usr.telephoneNumber
+        $email          = $usr.mail
+        $streetAddress  = $usr.streetAddress
+        $city           = $usr.city
+        $state          = $usr.state
+        $postalCode     = $usr.postalCode
+        $country        = $usr.country
+
+        try {
+            $existingUser = Get-ADUser -Identity $samAccountName -ErrorAction Stop
+            Write-Host "[User] $samAccountName (already exists)" -ForegroundColor DarkGray
+        }
+        catch {
+            if ($WhatIf) {
+                Write-Host "[WhatIf][User] Would create: $samAccountName" -ForegroundColor Yellow
+            } else {
+                $userParams = @{
+                    SamAccountName    = $samAccountName
+                    UserPrincipalName = $upn
+                    GivenName         = $givenName
+                    Surname           = $surname
+                    DisplayName       = $displayName
+                    Name              = $displayName
+                    Path              = $userPath
+                    Enabled           = $true
+                    AccountPassword   = (ConvertTo-SecureString "P@ssw0rd123!" -AsPlainText -Force)
+                    ChangePasswordAtLogon = $true
+                    WhatIf            = $false
+                }
+
+                if ($title)   { $userParams["Title"] = $title }
+                if ($department) { $userParams["Department"] = $department }
+                if ($company) { $userParams["Company"] = $company }
+                if ($office)  { $userParams["Office"] = $office }
+                if ($phone)   { $userParams["OfficePhone"] = $phone }
+                if ($email)   { $userParams["EmailAddress"] = $email }
+                if ($streetAddress) { $userParams["StreetAddress"] = $streetAddress }
+                if ($city)    { $userParams["City"] = $city }
+                if ($state)   { $userParams["State"] = $state }
+                if ($postalCode) { $userParams["PostalCode"] = $postalCode }
+                if ($country) { $userParams["Country"] = $country }
+
+                New-ADUser @userParams
+                Write-Host "[User] Created: $samAccountName ($displayName)" -ForegroundColor Green
+            }
         }
 
-        $userObj = Get-ADUser -Filter "sAMAccountName -eq '$sam'" -ErrorAction SilentlyContinue
-        if (-not $userObj) {
-            Write-Warning "User not found for group membership: $sam"
-            continue
-        }
-
-        foreach ($groupSam in $memberOf) {
-            $groupObj = Get-ADGroup -Filter "sAMAccountName -eq '$groupSam'" -ErrorAction SilentlyContinue
-            if (-not $groupObj) {
-                Write-Warning "Group not found for membership: $sam -> $groupSam"
-                continue
-            }
-
-            $isMember = Get-ADGroupMember -Identity $groupObj.DistinguishedName -Recursive |
-                        Where-Object { $_.DistinguishedName -eq $userObj.DistinguishedName }
-
-            if ($isMember) {
-                Write-Host "Membership already present: $sam -> $groupSam" -ForegroundColor DarkGray
-            }
-            else {
-                Write-Host "Adding membership: $sam -> $groupSam" -ForegroundColor Green
-                Add-ADGroupMember -Identity $groupObj.DistinguishedName `
-                                  -Members $userObj.DistinguishedName `
-                                  -ErrorAction SilentlyContinue `
-                                  -WhatIf:$WhatIf
+        # Add to groups
+        if ($usr.memberOf -and $usr.memberOf.Count -gt 0) {
+            foreach ($groupName in $usr.memberOf) {
+                if ($WhatIf) {
+                    Write-Host "[WhatIf][User Group] Would add $samAccountName -> $groupName" -ForegroundColor Yellow
+                } else {
+                    try {
+                        Add-ADGroupMember -Identity $groupName -Members $samAccountName -ErrorAction Stop -WhatIf:$false
+                        Write-Host "[User Group] Added: $samAccountName -> $groupName" -ForegroundColor Green
+                    }
+                    catch {
+                        Write-Host "[User Group] $samAccountName -> $groupName (may already be member)" -ForegroundColor DarkGray
+                    }
+                }
             }
         }
     }
@@ -844,6 +1066,7 @@ function Invoke-DeployUsers {
 # =============================================================================
 # Main execution
 # =============================================================================
+
 try {
     $structureConfig = Get-JsonConfig -FileName "structure.json"
     $servicesConfig  = Get-JsonConfig -FileName "services.json"
@@ -856,7 +1079,7 @@ try {
     Invoke-DeployServices     -ServicesConfig $servicesConfig -DomainFQDN $DomainFQDN
     Invoke-DeployGPOs         -GpoConfig $gpoConfig       -DomainDN $DomainDN
     Invoke-DeployComputers    -ComputersConfig $computersConfig -DomainDN $DomainDN
-    Invoke-DeployUsers        -UsersConfig $usersConfig   -DomainFQDN $DomainFQDN -DomainDN $DomainDN
+    Invoke-DeployUsers        -UsersConfig $usersConfig   -DoreachFQDN $DomainFQDN -DomainDN $DomainDN
 
     Write-Host "`n=====================================================" -ForegroundColor Green
     Write-Host "  Deployment complete for exercise '$ExerciseName'" -ForegroundColor Green
