@@ -549,7 +549,44 @@ function Invoke-DeploySitesAndOUs {
     Write-Host "`n[1] Deploying AD Sites, Subnets, and Site Links..." -ForegroundColor Cyan
 
     # --- Sites ---
-    foreach ($site in $StructureConfig.sites) {
+    # Special handling: Rename "Default-First-Site-Name" to the first site in our list
+    $firstSite = $StructureConfig.sites[0]
+    
+    try {
+        $defaultSite = Get-ADReplicationSite -Identity "Default-First-Site-Name" -ErrorAction Stop
+        
+        # Rename default site to our first site
+        if ($WhatIf) {
+            Write-Host "[WhatIf][Site] Would rename: Default-First-Site-Name -> $($firstSite.name)" -ForegroundColor Yellow
+        } else {
+            Rename-ADObject -Identity $defaultSite.DistinguishedName -NewName $firstSite.name -WhatIf:$false
+            
+            # Update description
+            Set-ADReplicationSite -Identity $firstSite.name -Description $firstSite.description -WhatIf:$false
+            
+            Write-Host "[Site] Renamed: Default-First-Site-Name -> $($firstSite.name)" -ForegroundColor Green
+        }
+    }
+    catch {
+        # Default site doesn't exist or already renamed - check if first site exists
+        try {
+            $existing = Get-ADReplicationSite -Identity $firstSite.name -ErrorAction Stop
+            Write-Host "[Site] $($firstSite.name) (already exists)" -ForegroundColor DarkGray
+        }
+        catch {
+            # First site doesn't exist - create it
+            if ($WhatIf) {
+                Write-Host "[WhatIf][Site] Would create: $($firstSite.name)" -ForegroundColor Yellow
+            } else {
+                New-ADReplicationSite -Name $firstSite.name -Description $firstSite.description -WhatIf:$false
+                Write-Host "[Site] Created: $($firstSite.name)" -ForegroundColor Green
+            }
+        }
+    }
+    
+    # Create remaining sites (skip first since we handled it above)
+    for ($i = 1; $i -lt $StructureConfig.sites.Count; $i++) {
+        $site = $StructureConfig.sites[$i]
         $name = $site.name
         $desc = $site.description
 
