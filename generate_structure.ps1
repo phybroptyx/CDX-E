@@ -183,7 +183,7 @@ foreach ($siteKey in $orgStructure.siteMappings.PSObject.Properties.Name) {
         parent_dn   = "OU=$rootOUName"
         description = "$siteKey site OU (linked to $($siteMapping.siteName))"
     }
-    Write-Host "    + OU: $siteKey" -ForegroundColor DarkGreen
+    Write-Host "    + Site OU: $siteKey" -ForegroundColor DarkGreen
     
     # Department OUs under each site
     foreach ($dept in $siteMapping.departments) {
@@ -205,6 +205,20 @@ foreach ($siteKey in $orgStructure.siteMappings.PSObject.Properties.Name) {
             }
             Write-Host "        - SubOU: $subOU" -ForegroundColor DarkGray
         }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Convert OUs to proper DN format with full domain context
+# ---------------------------------------------------------------------------
+$domainDN = ""
+foreach ($ouObj in $ous) {
+    if ([string]::IsNullOrWhiteSpace($ouObj.parent_dn)) {
+        # Root OU - will be filled in by ad_deploy.ps1 with actual domain DN
+        $ouObj | Add-Member -NotePropertyName "dn" -NotePropertyValue "OU=$($ouObj.name)" -Force
+    }
+    else {
+        $ouObj | Add-Member -NotePropertyName "dn" -NotePropertyValue "OU=$($ouObj.name),$($ouObj.parent_dn)" -Force
     }
 }
 
@@ -233,7 +247,7 @@ Write-Host "[Generator] Writing structure.json to: $outputPath" -ForegroundColor
 
 try {
     $structure | ConvertTo-Json -Depth 8 | Set-Content -Path $outputPath -Encoding UTF8
-    Write-Host "[Generator] ✓ Structure file generated successfully!" -ForegroundColor Green
+    Write-Host "[Generator] [OK] Structure file generated successfully!" -ForegroundColor Green
 }
 catch {
     throw "Failed to write output file: $_"

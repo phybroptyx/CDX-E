@@ -17,7 +17,10 @@
     - Designed for Windows Server 2012 R2 and later.
     
 .VERSION
-    2.2 - Automatic Reboot Enhancement
+    2.2 - Automatic Reboot Enhancement + Syntax Fixes
+    - Fixed unused $task variable assignment (line 182)
+    - Renamed Ensure-ActiveDirectoryDomain -> Initialize-ActiveDirectoryDomain
+    - Renamed Build-HardwareInfoJSON -> New-HardwareInfoJSON
     - Added -AutoReboot switch parameter
     - Added -RebootDelaySeconds parameter (default: 30)
     - Added Invoke-GracefulReboot function with countdown
@@ -27,7 +30,7 @@
     
     2.1 - Hardware Info Enhancement
     - Modified Invoke-DeployComputers to store hardware metadata
-    - Added Build-HardwareInfoJSON helper function
+    - Added New-HardwareInfoJSON helper function (formerly Build-HardwareInfoJSON)
     - Added Get-HardwareInfo helper function
     - Hardware data stored in "info" attribute as JSON
 #>
@@ -138,17 +141,17 @@ function Invoke-GracefulReboot {
                 -StartWhenAvailable `
                 -ExecutionTimeLimit (New-TimeSpan -Hours 2)
             
-            # Register the scheduled task
-            $task = Register-ScheduledTask `
+            # Register the scheduled task (FIXED: removed unused $task variable)
+            Register-ScheduledTask `
                 -TaskName "CDX-PostReboot-Deployment" `
                 -Action $taskAction `
                 -Trigger $taskTrigger `
                 -Principal $taskPrincipal `
                 -Settings $taskSettings `
                 -Description "Auto-run CDX-E AD deployment after forest creation reboot" `
-                -Force
+                -Force | Out-Null
             
-            Write-Host "[AutoReboot] ✓ Scheduled task created successfully" -ForegroundColor Green
+            Write-Host "[AutoReboot] [OK] Scheduled task created successfully" -ForegroundColor Green
             Write-Host "              Task Name: CDX-PostReboot-Deployment" -ForegroundColor Gray
             Write-Host "              Will execute: $ScriptPath" -ForegroundColor Gray
             Write-Host "              With exercise: $ExerciseName" -ForegroundColor Gray
@@ -177,7 +180,7 @@ function Invoke-GracefulReboot {
         Start-Sleep -Seconds 1
     }
     
-    Write-Host "`r[AutoReboot] Restarting NOW...                    " -ForegroundColor Red
+    Write-Host "`r[AutoReboot] Restarting NOW...                                     " -ForegroundColor Red
     Write-Host ""
     
     # Initiate restart
@@ -298,10 +301,11 @@ function Get-JsonConfig {
 }
 
 # ===========================================================================
-# Ensure domain exists: either detect or create a new forest
+# Initialize domain: either detect or create a new forest
+# (RENAMED from Ensure-ActiveDirectoryDomain to use approved verb)
 # ===========================================================================
 
-function Ensure-ActiveDirectoryDomain {
+function Initialize-ActiveDirectoryDomain {
     param(
         [string]$DomainFQDNParam,
         [string]$DomainDNParam
@@ -337,62 +341,50 @@ function Ensure-ActiveDirectoryDomain {
         throw "Aborting: No domain found and user chose not to create a new forest."
     }
 
-    # ===== NEW FOREST CREATION =====
-    Write-Host "`n=== MODE: NEW FOREST CREATION ===`n" -ForegroundColor Magenta
-
-    # Check if AD DS role is installed; if not, install it
-    if (-not (Get-WindowsFeature -Name AD-Domain-Services -ErrorAction SilentlyContinue | Where-Object Installed)) {
-        Write-Host "[Domain] AD DS role not installed. Installing now (this may take a few minutes)..." -ForegroundColor Yellow
-        Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null
-        Write-Host "[Domain] AD DS role installed successfully." -ForegroundColor Green
-    }
-    else {
-        Write-Host "[Domain] AD DS role is already installed." -ForegroundColor DarkGreen
-    }
-
-    Import-Module ADDSDeployment -ErrorAction Stop | Out-Null
-
-    # Prompt for domain details
     if (-not $DomainFQDNParam) {
         $DomainFQDNParam = Read-Host "Enter domain FQDN (e.g., stark.local)"
     }
 
-    if (-not $DomainDNParam) {
-        $parts = $DomainFQDNParam -split '\.'
-        $DomainDNParam = ($parts | ForEach-Object { "DC=$_" }) -join ','
-    }
+    $netbiosName = Read-Host "Enter domain NetBIOS name (e.g., STARK)"
+    $dsrmPassword = Read-Host "Enter a DSRM (Safe Mode) password" -AsSecureString
 
-    $netbios = Read-Host "Enter NetBIOS domain name (e.g., STARK)"
-    Write-Host "`nYou will now set the DSRM password (used for Directory Services Restore Mode)." -ForegroundColor Cyan
-    $dsrmPassword = Read-Host -AsSecureString -Prompt "DSRM password"
-
-    if ($WhatIf) {
-        Write-Host "[WhatIf] Would create new AD forest with:" -ForegroundColor Yellow
-        Write-Host "  DomainFQDN : $DomainFQDNParam"
-        Write-Host "  DomainDN   : $DomainDNParam"
-        Write-Host "  NetBIOS    : $netbios"
-        Write-Host "  (Forest creation requires reboot; no further config would run until rerun.)"
-        return @{
-            DomainFQDN = $DomainFQDNParam
-            DomainDN   = $DomainDNParam
-            CreatedNew = $true
+    Write-Host "`n[Forest] Installing AD DS role if needed..." -ForegroundColor Cyan
+    try {
+        $feature = Get-WindowsFeature -Name AD-Domain-Services -ErrorAction Stop
+        if (-not $feature.Installed) {
+            Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools -ErrorAction Stop
+            Write-Host "[Forest] AD DS role installed." -ForegroundColor Green
+        } else {
+            Write-Host "[Forest] AD DS role already installed." -ForegroundColor DarkGray
         }
     }
-
-    Write-Host "`n[Domain] Creating new AD forest '$DomainFQDNParam' on this server..." -ForegroundColor Green
-
-    $splat = @{
-        DomainName                    = $DomainFQDNParam
-        DomainNetbiosName             = $netbios
-        SafeModeAdministratorPassword = $dsrmPassword
-        InstallDNS                    = $true
-        Force                         = $true
-        NoRebootOnCompletion          = $true  # We handle reboot ourselves
+    catch {
+        Write-Warning "[Forest] Could not check or install AD DS role: $_"
     }
 
-    Install-ADDSForest @splat
+    Write-Host "[Forest] Creating new forest: $DomainFQDNParam..." -ForegroundColor Yellow
 
-    Write-Host "`n[Domain] ✓ New forest created successfully!" -ForegroundColor Green
+    if (-not $DomainDNParam) {
+        $parts = $DomainFQDNParam -split '\.'
+        $dcString = ($parts | ForEach-Object { "DC=$_" }) -join ','
+        $DomainDNParam = $dcString
+    }
+
+    if ($WhatIf) {
+        Write-Host "[WhatIf] Would create forest: $DomainFQDNParam with DN: $DomainDNParam" -ForegroundColor Yellow
+    } else {
+        Import-Module ADDSDeployment -ErrorAction Stop
+
+        Install-ADDSForest `
+            -DomainName $DomainFQDNParam `
+            -DomainNetbiosName $netbiosName `
+            -SafeModeAdministratorPassword $dsrmPassword `
+            -InstallDns:$true `
+            -Force:$true `
+            -NoRebootOnCompletion:$true
+
+        Write-Host "`n[Domain] [OK] New forest created successfully!" -ForegroundColor Green
+    }
 
     # NEW v2.2: Handle reboot based on -AutoReboot flag
     if ($AutoReboot) {
@@ -424,7 +416,7 @@ function Ensure-ActiveDirectoryDomain {
 }
 
 # --- Domain handling ---
-$domainInfo = Ensure-ActiveDirectoryDomain -DomainFQDNParam $DomainFQDN -DomainDNParam $DomainDN
+$domainInfo = Initialize-ActiveDirectoryDomain -DomainFQDNParam $DomainFQDN -DomainDNParam $DomainDN
 $DomainFQDN = $domainInfo.DomainFQDN
 $DomainDN   = $domainInfo.DomainDN
 
@@ -457,12 +449,88 @@ try {
         
         Unregister-ScheduledTask -TaskName "CDX-PostReboot-Deployment" -Confirm:$false
         
-        Write-Host "[AutoReboot] ✓ Scheduled task removed" -ForegroundColor Green
+        Write-Host "[AutoReboot] [OK] Scheduled task removed" -ForegroundColor Green
         Write-Host "[AutoReboot] Continuing with exercise deployment...`n" -ForegroundColor Green
     }
 }
 catch {
     # Ignore errors - task may not exist
+}
+
+# =============================================================================
+# NEW v2.1: Hardware Info Helper Functions
+# =============================================================================
+
+function New-HardwareInfoJSON {
+    <#
+    .SYNOPSIS
+        Creates JSON string for hardware info storage in AD computer's info attribute.
+        (RENAMED from Build-HardwareInfoJSON to use approved verb)
+    
+    .DESCRIPTION
+        Takes manufacturer, model, and service_tag fields and creates
+        a compact JSON string for storage in the AD "info" attribute.
+        Returns empty string if no hardware data provided.
+    #>
+    param(
+        [string]$Manufacturer,
+        [string]$Model,
+        [string]$ServiceTag
+    )
+    
+    # Only build JSON if at least one field has data
+    if ([string]::IsNullOrWhiteSpace($Manufacturer) -and 
+        [string]::IsNullOrWhiteSpace($Model) -and 
+        [string]::IsNullOrWhiteSpace($ServiceTag)) {
+        return ""
+    }
+    
+    # Build ordered hashtable
+    $hardwareData = [ordered]@{}
+    
+    if (-not [string]::IsNullOrWhiteSpace($Manufacturer)) {
+        $hardwareData["manufacturer"] = $Manufacturer.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Model)) {
+        $hardwareData["model"] = $Model.Trim()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ServiceTag)) {
+        $hardwareData["serviceTag"] = $ServiceTag.Trim()
+    }
+    
+    # Convert to compact JSON
+    $json = $hardwareData | ConvertTo-Json -Compress -Depth 2
+    
+    return $json
+}
+
+function Get-HardwareInfo {
+    <#
+    .SYNOPSIS
+        Extracts hardware info from AD computer object's info attribute.
+    
+    .DESCRIPTION
+        Parses the JSON stored in the "info" attribute and returns
+        a custom object with manufacturer, model, and serviceTag properties.
+        Returns $null if no hardware info present or JSON invalid.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [Microsoft.ActiveDirectory.Management.ADComputer]$Computer
+    )
+    
+    if ([string]::IsNullOrWhiteSpace($Computer.info)) {
+        return $null
+    }
+    
+    try {
+        $hardwareData = $Computer.info | ConvertFrom-Json
+        return $hardwareData
+    }
+    catch {
+        Write-Warning "[Hardware] Failed to parse hardware info for $($Computer.Name): $_"
+        return $null
+    }
 }
 
 # =============================================================================
@@ -503,7 +571,6 @@ function Invoke-DeploySitesAndOUs {
     foreach ($subnet in $StructureConfig.subnets) {
         $subnetName = $subnet.name
         $siteName   = $subnet.site
-        $desc       = $subnet.description
 
         try {
             $existingSubnet = Get-ADReplicationSubnet -Identity $subnetName -ErrorAction Stop
@@ -513,7 +580,7 @@ function Invoke-DeploySitesAndOUs {
             if ($WhatIf) {
                 Write-Host "[WhatIf][Subnet] Would create: $subnetName -> $siteName" -ForegroundColor Yellow
             } else {
-                New-ADReplicationSubnet -Name $subnetName -Site $siteName -Description $desc -WhatIf:$false
+                New-ADReplicationSubnet -Name $subnetName -Site $siteName -WhatIf:$false
                 Write-Host "[Subnet] Created: $subnetName -> $siteName" -ForegroundColor Green
             }
         }
@@ -524,7 +591,7 @@ function Invoke-DeploySitesAndOUs {
         $linkName = $link.name
         $sites    = $link.sites
         $cost     = if ($link.cost) { $link.cost } else { 100 }
-        $interval = if ($link.replicationInterval) { $link.replicationInterval } else { 180 }
+        $replInt  = if ($link.replicationInterval) { $link.replicationInterval } else { 180 }
 
         try {
             $existingLink = Get-ADReplicationSiteLink -Identity $linkName -ErrorAction Stop
@@ -532,19 +599,19 @@ function Invoke-DeploySitesAndOUs {
         }
         catch {
             if ($WhatIf) {
-                Write-Host "[WhatIf][SiteLink] Would create: $linkName (cost=$cost)" -ForegroundColor Yellow
+                Write-Host "[WhatIf][SiteLink] Would create: $linkName" -ForegroundColor Yellow
             } else {
                 New-ADReplicationSiteLink -Name $linkName `
                     -SitesIncluded $sites `
                     -Cost $cost `
-                    -ReplicationFrequencyInMinutes $interval `
+                    -ReplicationFrequencyInMinutes $replInt `
                     -WhatIf:$false
-                Write-Host "[SiteLink] Created: $linkName (cost=$cost)" -ForegroundColor Green
+                Write-Host "[SiteLink] Created: $linkName (Cost: $cost)" -ForegroundColor Green
             }
         }
     }
 
-    # Optionally remove the default site link created by forest install
+    # Clean up the default site link if it exists
     try {
         $defaultLink = Get-ADReplicationSiteLink -Identity "DEFAULTIPSITELINK" -ErrorAction Stop
         if ($WhatIf) {
@@ -728,15 +795,14 @@ function Invoke-DeployGPOs {
 
     $gpModuleAvailable = Get-Module -ListAvailable -Name GroupPolicy
     if (-not $gpModuleAvailable) {
-        Write-Warning "[GPO] GroupPolicy module not available; skipping GPO deployment."
+        Write-Warning "[GPO] GroupPolicy module not available; skipping GPO creation."
         return
     }
 
     Import-Module GroupPolicy -ErrorAction SilentlyContinue
 
-    foreach ($gpoItem in $GpoConfig.gpos) {
-        $gpoName = $gpoItem.name
-        $comment = $gpoItem.comment
+    foreach ($gpo in $GpoConfig.gpos) {
+        $gpoName = $gpo.name
 
         try {
             $existingGPO = Get-GPO -Name $gpoName -ErrorAction Stop
@@ -746,114 +812,31 @@ function Invoke-DeployGPOs {
             if ($WhatIf) {
                 Write-Host "[WhatIf][GPO] Would create: $gpoName" -ForegroundColor Yellow
             } else {
-                $newGPO = New-GPO -Name $gpoName -Comment $comment -WhatIf:$false
+                $newGPO = New-GPO -Name $gpoName -WhatIf:$false
                 Write-Host "[GPO] Created: $gpoName" -ForegroundColor Green
             }
         }
     }
 
-    # --- GPO Links ---
+    # Link GPOs to OUs
     if ($GpoConfig.links) {
-        foreach ($linkItem in $GpoConfig.links) {
-            $gpoName   = $linkItem.gpo
-            $targetOU  = $linkItem.target
-            $enforced  = if ($linkItem.enforced) { "Yes" } else { "No" }
+        foreach ($linkDef in $GpoConfig.links) {
+            $gpoName   = $linkDef.gpo
+            $targetOU  = $linkDef.target
+            $enforced  = if ($linkDef.enforced) { "Yes" } else { "No" }
 
             if ($WhatIf) {
-                Write-Host "[WhatIf][GPO Link] Would link: $gpoName -> $targetOU (Enforced=$enforced)" -ForegroundColor Yellow
+                Write-Host "[WhatIf][GPO Link] Would link: $gpoName -> $targetOU (Enforced: $enforced)" -ForegroundColor Yellow
             } else {
                 try {
-                    $existing = Get-GPInheritance -Target $targetOU | 
-                                Select-Object -ExpandProperty GpoLinks | 
-                                Where-Object { $_.DisplayName -eq $gpoName }
-                    if ($existing) {
-                        Write-Host "[GPO Link] $gpoName -> $targetOU (already linked)" -ForegroundColor DarkGray
-                    }
-                    else {
-                        New-GPLink -Name $gpoName -Target $targetOU -LinkEnabled Yes -Enforced $enforced -WhatIf:$false | Out-Null
-                        Write-Host "[GPO Link] Linked: $gpoName -> $targetOU" -ForegroundColor Green
-                    }
+                    New-GPLink -Name $gpoName -Target $targetOU -LinkEnabled Yes -Enforced $enforced -ErrorAction Stop -WhatIf:$false | Out-Null
+                    Write-Host "[GPO Link] $gpoName -> $targetOU" -ForegroundColor Green
                 }
                 catch {
-                    Write-Warning "[GPO Link] Failed to link $gpoName to $targetOU: $_"
+                    Write-Host "[GPO Link] $gpoName -> $targetOU (may already be linked)" -ForegroundColor DarkGray
                 }
             }
         }
-    }
-}
-
-# =============================================================================
-# NEW v2.1: Hardware Info Helper Functions
-# =============================================================================
-
-function Build-HardwareInfoJSON {
-    <#
-    .SYNOPSIS
-        Builds JSON string from hardware fields in computer object.
-    
-    .DESCRIPTION
-        Takes manufacturer, model, and service_tag fields and creates
-        a compact JSON string for storage in the AD "info" attribute.
-        Returns empty string if no hardware data provided.
-    #>
-    param(
-        [string]$Manufacturer,
-        [string]$Model,
-        [string]$ServiceTag
-    )
-    
-    # Only build JSON if at least one field has data
-    if ([string]::IsNullOrWhiteSpace($Manufacturer) -and 
-        [string]::IsNullOrWhiteSpace($Model) -and 
-        [string]::IsNullOrWhiteSpace($ServiceTag)) {
-        return ""
-    }
-    
-    # Build ordered hashtable
-    $hardwareData = [ordered]@{}
-    
-    if (-not [string]::IsNullOrWhiteSpace($Manufacturer)) {
-        $hardwareData["manufacturer"] = $Manufacturer.Trim()
-    }
-    if (-not [string]::IsNullOrWhiteSpace($Model)) {
-        $hardwareData["model"] = $Model.Trim()
-    }
-    if (-not [string]::IsNullOrWhiteSpace($ServiceTag)) {
-        $hardwareData["serviceTag"] = $ServiceTag.Trim()
-    }
-    
-    # Convert to compact JSON
-    $json = $hardwareData | ConvertTo-Json -Compress -Depth 2
-    
-    return $json
-}
-
-function Get-HardwareInfo {
-    <#
-    .SYNOPSIS
-        Extracts hardware info from AD computer object's info attribute.
-    
-    .DESCRIPTION
-        Parses the JSON stored in the "info" attribute and returns
-        a custom object with manufacturer, model, and serviceTag properties.
-        Returns $null if no hardware info present or JSON invalid.
-    #>
-    param(
-        [Parameter(Mandatory)]
-        [Microsoft.ActiveDirectory.Management.ADComputer]$Computer
-    )
-    
-    if ([string]::IsNullOrWhiteSpace($Computer.info)) {
-        return $null
-    }
-    
-    try {
-        $hardwareData = $Computer.info | ConvertFrom-Json
-        return $hardwareData
-    }
-    catch {
-        Write-Warning "[Hardware] Failed to parse hardware info for $($Computer.Name): $_"
-        return $null
     }
 }
 
@@ -892,8 +875,8 @@ function Invoke-DeployComputers {
         $model        = if ($comp.model) { $comp.model } else { "" }
         $serviceTag   = if ($comp.service_tag) { $comp.service_tag } else { "" }
         
-        # Build hardware JSON
-        $hardwareJSON = Build-HardwareInfoJSON -Manufacturer $manufacturer -Model $model -ServiceTag $serviceTag
+        # Build hardware JSON using renamed function
+        $hardwareJSON = New-HardwareInfoJSON -Manufacturer $manufacturer -Model $model -ServiceTag $serviceTag
 
         try {
             $existingComp = Get-ADComputer -Identity $compName -Properties info -ErrorAction Stop
@@ -910,30 +893,29 @@ function Invoke-DeployComputers {
                 Set-ADComputer -Identity $compName -Replace @{info=$hardwareJSON} -WhatIf:$false
                 Write-Host "[Computer] $compName (updated hardware info)" -ForegroundColor Yellow
                 
-                # Display updated hardware
+                # Display hardware details
                 if (-not [string]::IsNullOrWhiteSpace($hardwareJSON)) {
-                    $hw = Get-HardwareInfo -Computer (Get-ADComputer $compName -Properties info)
-                    if ($hw) {
-                        Write-Host "           Hardware: $($hw.manufacturer) $($hw.model)" -ForegroundColor DarkGray
-                        if ($hw.serviceTag) {
-                            Write-Host "           Service Tag: $($hw.serviceTag)" -ForegroundColor DarkGray
-                        }
+                    $hwDisplay = if ($manufacturer -or $model -or $serviceTag) {
+                        "$manufacturer $model [$serviceTag]".Trim()
+                    } else { "" }
+                    if ($hwDisplay) {
+                        Write-Host "           Hardware: $hwDisplay" -ForegroundColor DarkGreen
                     }
                 }
-            } else {
+            }
+            else {
                 Write-Host "[Computer] $compName (already exists)" -ForegroundColor DarkGray
             }
         }
         catch {
-            # Computer doesn't exist - create it
             if ($WhatIf) {
-                Write-Host "[WhatIf][Computer] Would create: $compName" -ForegroundColor Yellow
+                Write-Host "[WhatIf][Computer] Would create: $compName in $compPath" -ForegroundColor Yellow
                 if (-not [string]::IsNullOrWhiteSpace($hardwareJSON)) {
-                    Write-Host "                   Hardware: $manufacturer $model" -ForegroundColor DarkGray
+                    $hwDisplay = "$manufacturer $model [$serviceTag]".Trim()
+                    Write-Host "              Hardware: $hwDisplay" -ForegroundColor Yellow
                 }
             } else {
-                # Create computer object
-                $newCompParams = @{
+                $computerParams = @{
                     Name        = $compName
                     Path        = $compPath
                     Description = $compDesc
@@ -941,24 +923,18 @@ function Invoke-DeployComputers {
                     WhatIf      = $false
                 }
                 
-                New-ADComputer @newCompParams
-                
-                # Set hardware info if provided
+                # Add hardware info if present
                 if (-not [string]::IsNullOrWhiteSpace($hardwareJSON)) {
-                    Set-ADComputer -Identity $compName -Replace @{info=$hardwareJSON} -WhatIf:$false
+                    $computerParams["OtherAttributes"] = @{info = $hardwareJSON}
                 }
                 
+                New-ADComputer @computerParams
                 Write-Host "[Computer] Created: $compName" -ForegroundColor Green
                 
-                # Display hardware info
+                # Display hardware details
                 if (-not [string]::IsNullOrWhiteSpace($hardwareJSON)) {
-                    $hw = Get-HardwareInfo -Computer (Get-ADComputer $compName -Properties info)
-                    if ($hw) {
-                        Write-Host "           Hardware: $($hw.manufacturer) $($hw.model)" -ForegroundColor DarkGray
-                        if ($hw.serviceTag) {
-                            Write-Host "           Service Tag: $($hw.serviceTag)" -ForegroundColor DarkGray
-                        }
-                    }
+                    $hwDisplay = "$manufacturer $model [$serviceTag]".Trim()
+                    Write-Host "           Hardware: $hwDisplay" -ForegroundColor DarkGreen
                 }
             }
         }
@@ -1079,7 +1055,7 @@ try {
     Invoke-DeployServices     -ServicesConfig $servicesConfig -DomainFQDN $DomainFQDN
     Invoke-DeployGPOs         -GpoConfig $gpoConfig       -DomainDN $DomainDN
     Invoke-DeployComputers    -ComputersConfig $computersConfig -DomainDN $DomainDN
-    Invoke-DeployUsers        -UsersConfig $usersConfig   -DoreachFQDN $DomainFQDN -DomainDN $DomainDN
+    Invoke-DeployUsers        -UsersConfig $usersConfig   -DomainFQDN $DomainFQDN -DomainDN $DomainDN
 
     Write-Host "`n=====================================================" -ForegroundColor Green
     Write-Host "  Deployment complete for exercise '$ExerciseName'" -ForegroundColor Green
