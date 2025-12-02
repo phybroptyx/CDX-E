@@ -569,7 +569,7 @@ function Invoke-DeploySitesAndOUs {
 
     # --- Subnets ---
     foreach ($subnet in $StructureConfig.subnets) {
-        $subnetName = $subnet.name
+        $subnetName = $subnet.cidr
         $siteName   = $subnet.site
 
         try {
@@ -637,6 +637,11 @@ function Invoke-DeploySitesAndOUs {
         $ouDN   = $ou.dn
         $ouName = $ou.name
         $desc   = $ou.description
+        
+        # Complete the DN if it doesn't include domain components
+        if ($ouDN -notmatch "DC=") {
+            $ouDN = "$ouDN,$DomainDN"
+        }
 
         try {
             $existingOU = Get-ADOrganizationalUnit -Identity $ouDN -ErrorAction Stop
@@ -645,14 +650,16 @@ function Invoke-DeploySitesAndOUs {
         catch {
             # Parse parent DN
             $parts = $ouDN -split ',',2
+            
             if ($parts.Count -lt 2) {
-                Write-Warning "[OU] Could not parse parent DN for: $ouDN"
-                continue
+                # This is a root OU (e.g., "OU=Sites") - parent is the domain DN
+                $parentPath = $DomainDN
+            } else {
+                $parentPath = $parts[1]
             }
-            $parentPath = $parts[1]
 
             if ($WhatIf) {
-                Write-Host "[WhatIf][OU] Would create: $ouName" -ForegroundColor Yellow
+                Write-Host "[WhatIf][OU] Would create: $ouName in $parentPath" -ForegroundColor Yellow
             } else {
                 New-ADOrganizationalUnit -Name $ouName -Path $parentPath -Description $desc -WhatIf:$false
                 Write-Host "[OU] Created: $ouName" -ForegroundColor Green
@@ -683,6 +690,11 @@ function Invoke-DeployGroups {
         $groupCat   = if ($grp.category) { $grp.category } else { "Security" }
         $groupPath  = $grp.ou
         $desc       = $grp.description
+        
+        # Complete the OU path if it doesn't include domain components
+        if ($groupPath -notmatch "DC=") {
+            $groupPath = "$groupPath,$DomainDN"
+        }
 
         try {
             $existingGroup = Get-ADGroup -Identity $groupName -ErrorAction Stop
@@ -690,7 +702,7 @@ function Invoke-DeployGroups {
         }
         catch {
             if ($WhatIf) {
-                Write-Host "[WhatIf][Group] Would create: $groupName" -ForegroundColor Yellow
+                Write-Host "[WhatIf][Group] Would create: $groupName in $groupPath" -ForegroundColor Yellow
             } else {
                 New-ADGroup -Name $groupName `
                     -GroupScope $groupScope `
@@ -727,6 +739,17 @@ function Invoke-DeployServices {
             foreach ($zone in $ServicesConfig.dns.zones) {
                 $zoneName = $zone.name
                 $zoneType = if ($zone.type) { $zone.type } else { "Primary" }
+                
+                # Replace __AD_DOMAIN__ placeholder with actual domain FQDN
+                if ($zoneName -eq "__AD_DOMAIN__") {
+                    $zoneName = $DomainFQDN
+                }
+                
+                # Skip zones with null/empty names
+                if ([string]::IsNullOrWhiteSpace($zoneName)) {
+                    Write-Warning "[DNS Zone] Skipping zone with empty name"
+                    continue
+                }
 
                 try {
                     $existingZone = Get-DnsServerZone -Name $zoneName -ErrorAction Stop
@@ -821,9 +844,15 @@ function Invoke-DeployGPOs {
     # Link GPOs to OUs
     if ($GpoConfig.links) {
         foreach ($linkDef in $GpoConfig.links) {
-            $gpoName   = $linkDef.gpo
-            $targetOU  = $linkDef.target
+            # Handle both naming conventions from gpo.json
+            $gpoName   = if ($linkDef.gpoName) { $linkDef.gpoName } else { $linkDef.gpo }
+            $targetOU  = if ($linkDef.targetOu) { $linkDef.targetOu } else { $linkDef.target }
             $enforced  = if ($linkDef.enforced) { "Yes" } else { "No" }
+            
+            # Complete the OU path if it doesn't include domain components
+            if ($targetOU -notmatch "DC=") {
+                $targetOU = "$targetOU,$DomainDN"
+            }
 
             if ($WhatIf) {
                 Write-Host "[WhatIf][GPO Link] Would link: $gpoName -> $targetOU (Enforced: $enforced)" -ForegroundColor Yellow
@@ -869,6 +898,11 @@ function Invoke-DeployComputers {
         $compName = $comp.name
         $compPath = $comp.ou
         $compDesc = $comp.description
+        
+        # Complete the OU path if it doesn't include domain components
+        if ($compPath -notmatch "DC=") {
+            $compPath = "$compPath,$DomainDN"
+        }
         
         # NEW v2.1: Extract hardware fields if present
         $manufacturer = if ($comp.manufacturer) { $comp.manufacturer } else { "" }
@@ -970,6 +1004,11 @@ function Invoke-DeployUsers {
         $title          = $usr.title
         $department     = $usr.department
         $company        = $usr.company
+        
+        # Complete the OU path if it doesn't include domain components
+        if ($userPath -notmatch "DC=") {
+            $userPath = "$userPath,$DomainDN"
+        }
 
         # Optional attributes
         $office         = $usr.office
