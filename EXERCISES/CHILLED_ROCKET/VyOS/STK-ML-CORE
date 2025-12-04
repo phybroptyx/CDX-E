@@ -41,6 +41,16 @@ set interfaces ethernet eth4 address '192.168.203.2/30'
 set protocols static route 0.0.0.0/0 next-hop '192.168.203.1'
 
 ########################################
+# Services: DHCP
+########################################
+
+# Configure DHCP relay for internal subnets
+set service dhcp-relay server 4.150.216.10
+set service dhcp-relay interface eth2 description 'Malibu Operations'
+set service dhcp-relay interface eth3 description 'Malibu Development'
+set service dhcp-relay relay-options relay-agents-packets replace
+
+########################################
 # Commit & Save
 ########################################
 

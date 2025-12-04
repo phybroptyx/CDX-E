@@ -41,6 +41,17 @@ set interfaces ethernet eth4 address '192.168.203.2/30'
 set protocols static route 0.0.0.0/0 next-hop '192.168.203.1'
 
 ########################################
+# Services: DHCP
+########################################
+
+# Configure DHCP relay for internal subnets
+set service dhcp-relay server 50.222.72.12
+set service dhcp-relay interface eth2 description 'Dallas IT Core'
+set service dhcp-relay interface eth3 description 'Dallas Operations'
+set service dhcp-relay interface eth4 description 'Dallas Development'
+set service dhcp-relay relay-options relay-agents-packets replace
+
+########################################
 # Commit & Save
 ########################################
 

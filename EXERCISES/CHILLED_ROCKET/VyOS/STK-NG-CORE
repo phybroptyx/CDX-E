@@ -53,6 +53,18 @@ set interfaces ethernet eth7 address '192.168.203.2/30'
 set protocols static route 0.0.0.0/0 next-hop '192.168.203.1'
 
 ########################################
+# Services: DHCP
+########################################
+
+# Configure DHCP relay for internal subnets
+set service dhcp-relay server 14.206.0.10
+set service dhcp-relay interface eth2 description 'Nagasaki Operations'
+set service dhcp-relay interface eth3 description 'Nagasaki Engineering'
+set service dhcp-relay interface eth4 description 'Nagasaki Engineering Dev'
+set service dhcp-relay interface eth5 description 'Nagasaki QA'
+set service dhcp-relay relay-options relay-agents-packets replace
+
+########################################
 # Commit & Save
 ########################################
 
