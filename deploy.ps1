@@ -7,7 +7,7 @@
     Management Workstation through all phases:
     - Phase 1: Forest Root DC deployment and forest creation
     - Phase 2: User account deployment (immediate post-forest)
-    - Phase 3: Group Policy deployment (immediate post-forest)
+    - Phase 3: Group Policy deployment with branding (immediate post-forest)
     - Phase 4: Site DC deployment and promotion
     - Phase 5: Member server deployment and domain join
     - Phase 6: DHCP scope deployment
@@ -19,6 +19,7 @@
     - Automatic Windows Firewall ICMP enablement on deployed VMs
     - Dynamic resource allocation for STK-DC-01 during forest creation
     - Intelligent wait logic replacing static timeouts
+    - Corporate branding deployment (logon screens, wallpapers)
 
 .PARAMETER ProxmoxHost
     Proxmox cluster node IP (any node)
@@ -51,7 +52,7 @@
 
 .NOTES
     Author: CDX-E Team
-    Version: 2.0
+    Version: 2.1 - Branding Enhancement
     Requires: PowerShell 5.1+, Network access to Proxmox cluster
     Duration: ~8 hours for complete deployment
     
@@ -252,10 +253,6 @@ function Save-DeploymentLog {
 # ============================================================================
 
 function Connect-ProxmoxAPI {
-    <#
-    .SYNOPSIS
-        Authenticates to Proxmox API and stores session ticket
-    #>
     param(
         [string]$Host = $ProxmoxHost,
         [string]$Password = $ProxmoxPassword
@@ -283,10 +280,6 @@ function Connect-ProxmoxAPI {
 }
 
 function Invoke-ProxmoxAPI {
-    <#
-    .SYNOPSIS
-        Makes authenticated API calls to Proxmox
-    #>
     param(
         [Parameter(Mandatory)]
         [string]$Endpoint,
@@ -303,82 +296,29 @@ function Invoke-ProxmoxAPI {
         throw "Not authenticated to Proxmox API. Call Connect-ProxmoxAPI first."
     }
     
-    $uri = "https://${ProxmoxHost}:8006/api2/json$Endpoint"
+    $url = "https://${ProxmoxHost}:8006/api2/json$Endpoint"
     
     $headers = @{
         "Cookie" = "PVEAuthCookie=$($script:ProxmoxTicket)"
         "CSRFPreventionToken" = $script:ProxmoxCSRF
     }
     
-    $params = @{
-        Uri = $uri
-        Method = $Method
-        Headers = $headers
-        SkipCertificateCheck = $true
-    }
-    
-    if ($Method -in @("POST", "PUT") -and $Body.Count -gt 0) {
-        $params.Body = $Body
-    }
-    
-    return Invoke-RestMethod @params
-}
-
-# ============================================================================
-# QEMU GUEST AGENT FUNCTIONS
-# ============================================================================
-
-function Test-QemuGuestAgent {
-    <#
-    .SYNOPSIS
-        Tests if QEMU guest agent is responding for a VM
-    #>
-    param(
-        [Parameter(Mandatory)]
-        [int]$VMID,
-        
-        [string]$Node = "cdx-pve-01"
-    )
-    
     try {
-        $result = Invoke-ProxmoxAPI -Endpoint "/nodes/$Node/qemu/$VMID/agent/ping" -Method POST
-        return $true
+        if ($Method -eq "GET") {
+            $response = Invoke-RestMethod -Uri $url -Method $Method -Headers $headers -SkipCertificateCheck
+        }
+        else {
+            $response = Invoke-RestMethod -Uri $url -Method $Method -Headers $headers -Body $Body -SkipCertificateCheck
+        }
+        return $response.data
     }
     catch {
-        return $false
-    }
-}
-
-function Get-QemuGuestNetworkInterfaces {
-    <#
-    .SYNOPSIS
-        Retrieves network interface information from VM via guest agent
-    #>
-    param(
-        [Parameter(Mandatory)]
-        [int]$VMID,
-        
-        [string]$Node = "cdx-pve-01"
-    )
-    
-    try {
-        $result = Invoke-ProxmoxAPI -Endpoint "/nodes/$Node/qemu/$VMID/agent/network-get-interfaces" -Method POST
-        return $result.data.result
-    }
-    catch {
+        Write-Warning "Proxmox API call failed: $_"
         return $null
     }
 }
 
 function Wait-VMNetworkReady {
-    <#
-    .SYNOPSIS
-        Waits for VM to report expected IP address via QEMU guest agent
-    .DESCRIPTION
-        Polls the QEMU guest agent until the VM reports the expected IP address
-        on its network interface. This bypasses Windows Firewall restrictions
-        since the guest agent communicates via virtio-serial, not the network.
-    #>
     param(
         [Parameter(Mandatory)]
         [int]$VMID,
@@ -393,96 +333,40 @@ function Wait-VMNetworkReady {
         [int]$PollIntervalSeconds = $AgentPollIntervalSeconds
     )
     
-    # Strip CIDR notation if present
-    $targetIP = $ExpectedIP -replace '/\d+$', ''
+    $startTime = Get-Date
+    $timeout = New-TimeSpan -Seconds $TimeoutSeconds
     
-    Write-Host "    Waiting for VM $VMID to report IP $targetIP via guest agent..." -ForegroundColor DarkGray
+    Write-Host "    Waiting for VM $VMID to report IP $ExpectedIP..." -ForegroundColor DarkGray
     
-    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-    $lastStatus = ""
-    
-    while ($stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+    while ((Get-Date) - $startTime -lt $timeout) {
         try {
-            # First check if agent is responding
-            if (-not (Test-QemuGuestAgent -VMID $VMID -Node $Node)) {
-                $status = "agent not responding"
-                if ($status -ne $lastStatus) {
-                    Write-Host "      ... $status ($('{0:N0}' -f $stopwatch.Elapsed.TotalSeconds)s)" -ForegroundColor DarkGray
-                    $lastStatus = $status
-                }
-                Start-Sleep -Seconds $PollIntervalSeconds
-                continue
-            }
+            $agentInfo = Invoke-ProxmoxAPI -Endpoint "/nodes/$Node/qemu/$VMID/agent/network-get-interfaces" -Node $Node
             
-            # Get network interfaces
-            $interfaces = Get-QemuGuestNetworkInterfaces -VMID $VMID -Node $Node
-            
-            if ($interfaces) {
-                foreach ($iface in $interfaces) {
-                    # Skip loopback
-                    if ($iface.name -match "Loopback|lo") { continue }
-                    
-                    foreach ($addr in $iface.'ip-addresses') {
-                        if ($addr.'ip-address-type' -eq 'ipv4') {
-                            $reportedIP = $addr.'ip-address'
-                            
-                            if ($reportedIP -eq $targetIP) {
-                                Write-Host "      [OK] VM $VMID is up at $targetIP ($('{0:N0}' -f $stopwatch.Elapsed.TotalSeconds)s)" -ForegroundColor Green
-                                return @{
-                                    Success = $true
-                                    IPAddress = $reportedIP
-                                    Interface = $iface.name
-                                    ElapsedSeconds = $stopwatch.Elapsed.TotalSeconds
-                                }
-                            }
-                            else {
-                                $status = "reported IP $reportedIP (waiting for $targetIP)"
-                                if ($status -ne $lastStatus) {
-                                    Write-Host "      ... $status" -ForegroundColor DarkGray
-                                    $lastStatus = $status
-                                }
+            if ($agentInfo) {
+                foreach ($iface in $agentInfo.result) {
+                    if ($iface.'ip-addresses') {
+                        foreach ($ip in $iface.'ip-addresses') {
+                            if ($ip.'ip-address' -eq $ExpectedIP) {
+                                Write-Host "    [OK] VM $VMID is ready at $ExpectedIP" -ForegroundColor Green
+                                return @{ Success = $true; IP = $ExpectedIP }
                             }
                         }
                     }
                 }
             }
-            else {
-                $status = "no network interfaces reported"
-                if ($status -ne $lastStatus) {
-                    Write-Host "      ... $status ($('{0:N0}' -f $stopwatch.Elapsed.TotalSeconds)s)" -ForegroundColor DarkGray
-                    $lastStatus = $status
-                }
-            }
         }
         catch {
-            $status = "error: $($_.Exception.Message)"
-            if ($status -ne $lastStatus) {
-                Write-Host "      ... $status" -ForegroundColor DarkGray
-                $lastStatus = $status
-            }
+            # Agent not ready yet, continue waiting
         }
         
         Start-Sleep -Seconds $PollIntervalSeconds
     }
     
-    Write-Host "      [TIMEOUT] VM $VMID did not report expected IP within $TimeoutSeconds seconds" -ForegroundColor Yellow
-    return @{
-        Success = $false
-        IPAddress = $null
-        Interface = $null
-        ElapsedSeconds = $stopwatch.Elapsed.TotalSeconds
-    }
+    Write-Host "    [TIMEOUT] VM $VMID did not become ready within $TimeoutSeconds seconds" -ForegroundColor Yellow
+    return @{ Success = $false; IP = $null }
 }
 
-# ============================================================================
-# VM CONFIGURATION FUNCTIONS
-# ============================================================================
-
 function Set-VMMemory {
-    <#
-    .SYNOPSIS
-        Dynamically adjusts VM memory allocation
-    #>
     param(
         [Parameter(Mandatory)]
         [int]$VMID,
@@ -493,26 +377,14 @@ function Set-VMMemory {
         [string]$Node = "cdx-pve-01"
     )
     
-    Write-DeploymentLog "Setting VM $VMID memory to $MemoryMB MB..." -Level Info
+    $body = @{
+        memory = $MemoryMB
+    }
     
-    try {
-        $result = Invoke-ProxmoxAPI -Endpoint "/nodes/$Node/qemu/$VMID/config" -Method PUT -Body @{
-            memory = $MemoryMB
-        }
-        Write-DeploymentLog "VM $VMID memory set to $MemoryMB MB" -Level Success
-        return $true
-    }
-    catch {
-        Write-DeploymentLog "Failed to set VM $VMID memory: $_" -Level Error
-        return $false
-    }
+    Invoke-ProxmoxAPI -Endpoint "/nodes/$Node/qemu/$VMID/config" -Method PUT -Body $body -Node $Node
 }
 
 function Enable-VMIcmp {
-    <#
-    .SYNOPSIS
-        Enables ICMP (ping) response in Windows Firewall via WinRM
-    #>
     param(
         [Parameter(Mandatory)]
         [string]$ComputerIP,
@@ -520,45 +392,33 @@ function Enable-VMIcmp {
         [Parameter(Mandatory)]
         [PSCredential]$Credential
     )
-    
-    Write-Host "    Enabling ICMP on $ComputerIP..." -ForegroundColor DarkGray
     
     try {
         $session = New-PSSession -ComputerName $ComputerIP -Credential $Credential -ErrorAction Stop
         
         Invoke-Command -Session $session -ScriptBlock {
             # Enable ICMPv4 Echo Request (ping)
-            $ruleName = "CDX-E Allow ICMPv4-In"
+            $existingRule = Get-NetFirewallRule -DisplayName "Allow ICMPv4-In" -ErrorAction SilentlyContinue
             
-            # Remove existing rule if present
-            Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-            
-            # Create new rule
-            New-NetFirewallRule -DisplayName $ruleName `
-                                -Direction Inbound `
-                                -Protocol ICMPv4 `
-                                -IcmpType 8 `
-                                -Action Allow `
-                                -Profile Any `
-                                -Enabled True | Out-Null
-            
-            Write-Host "        [OK] ICMP enabled" -ForegroundColor Green
+            if (-not $existingRule) {
+                New-NetFirewallRule -DisplayName "Allow ICMPv4-In" `
+                    -Protocol ICMPv4 `
+                    -IcmpType 8 `
+                    -Direction Inbound `
+                    -Action Allow `
+                    -Profile Any | Out-Null
+            }
         }
         
         Remove-PSSession $session
-        return $true
+        Write-Host "    [OK] ICMP enabled on $ComputerIP" -ForegroundColor Green
     }
     catch {
-        Write-Host "        [WARNING] Could not enable ICMP: $_" -ForegroundColor Yellow
-        return $false
+        Write-Host "    [WARN] Could not enable ICMP on $ComputerIP : $_" -ForegroundColor Yellow
     }
 }
 
 function Set-ExecutionPolicyUnrestricted {
-    <#
-    .SYNOPSIS
-        Sets PowerShell execution policy to Unrestricted on remote computer
-    #>
     param(
         [Parameter(Mandatory)]
         [string]$ComputerIP,
@@ -567,22 +427,18 @@ function Set-ExecutionPolicyUnrestricted {
         [PSCredential]$Credential
     )
     
-    Write-Host "    Setting Execution Policy to Unrestricted on $ComputerIP..." -ForegroundColor DarkGray
-    
     try {
         $session = New-PSSession -ComputerName $ComputerIP -Credential $Credential -ErrorAction Stop
         
         Invoke-Command -Session $session -ScriptBlock {
             Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Scope LocalMachine -Force
-            Write-Host "        [OK] Execution Policy set to Unrestricted" -ForegroundColor Green
         }
         
         Remove-PSSession $session
-        return $true
+        Write-Host "    [OK] Execution policy set to Unrestricted on $ComputerIP" -ForegroundColor Green
     }
     catch {
-        Write-Host "        [WARNING] Could not set Execution Policy: $_" -ForegroundColor Yellow
-        return $false
+        Write-Host "    [WARN] Could not set execution policy on $ComputerIP : $_" -ForegroundColor Yellow
     }
 }
 
@@ -590,71 +446,37 @@ function Set-ExecutionPolicyUnrestricted {
 # PRE-FLIGHT CHECKS
 # ============================================================================
 
-Write-DeploymentLog "Starting CHILLED_ROCKET deployment orchestration" -Level Info
-Write-DeploymentLog "Exercise path: $ExercisePath" -Level Info
+Write-Host "============================================================" -ForegroundColor Yellow
+Write-Host "   PRE-FLIGHT CHECKS" -ForegroundColor Yellow
+Write-Host "============================================================" -ForegroundColor Yellow
+Write-Host ""
 
-if ($WhatIf) {
-    Write-DeploymentLog "Running in WhatIf mode - no changes will be made" -Level Warning
-}
-
-# Validate exercise path
+# Verify exercise path exists
 if (-not (Test-Path $ExercisePath)) {
     Write-DeploymentLog "Exercise path not found: $ExercisePath" -Level Error
     exit 1
 }
 
-# Validate required files
-$requiredFiles = @(
-    "exercise_template.json",
-    "computers.json",
-    "master_workstation_inventory.json",
-    "users.json",
-    "services.json",
-    "gpo.json",
-    "dhcp_scopes.json"
-)
+Write-DeploymentLog "Exercise path verified: $ExercisePath" -Level Success
 
-foreach ($file in $requiredFiles) {
-    $filePath = Join-Path $ExercisePath $file
-    if (-not (Test-Path $filePath)) {
-        Write-DeploymentLog "Required file not found: $file" -Level Error
-        exit 1
-    }
+# Connect to Proxmox API
+if (-not (Connect-ProxmoxAPI)) {
+    Write-DeploymentLog "Cannot proceed without Proxmox API connection" -Level Error
+    exit 1
 }
 
-Write-DeploymentLog "All required configuration files present" -Level Success
-
-# Validate required scripts
-$requiredScripts = @(
-    "Clone-ProxmoxVMs.ps1",
-    "Enhanced-Repository-Transfer.ps1",
-    "ad_deploy.ps1"
-)
-
-foreach ($script in $requiredScripts) {
-    if (-not (Test-Path ".\$script")) {
-        Write-DeploymentLog "Required script not found: $script" -Level Error
-        exit 1
-    }
-}
-
-Write-DeploymentLog "All required deployment scripts present" -Level Success
-
-# Authenticate to Proxmox API
-Write-DeploymentLog "Authenticating to Proxmox API..." -Level Info
-
+# Final confirmation
 if (-not $WhatIf) {
-    if (-not (Connect-ProxmoxAPI)) {
-        Write-DeploymentLog "Cannot authenticate to Proxmox API" -Level Error
-        exit 1
-    }
-}
-
-Write-DeploymentLog "Pre-flight checks complete" -Level Success
-Write-Host ""
-
-if (-not $WhatIf) {
-    Write-Host "WARNING: This will deploy 343 VMs across your Proxmox cluster." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Yellow
+    Write-Host "   DEPLOYMENT CONFIRMATION" -ForegroundColor Yellow
+    Write-Host "============================================================" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Domain:    $script:DomainFQDN" -ForegroundColor White
+    Write-Host "NetBIOS:   $script:DomainNetBIOS" -ForegroundColor White
+    Write-Host "Exercise:  CHILLED_ROCKET" -ForegroundColor White
+    Write-Host ""
+    Write-Host "WARNING: This will deploy 343 VMs across 5 sites." -ForegroundColor Yellow
     Write-Host "         Estimated deployment time: 8 hours" -ForegroundColor Yellow
     Write-Host ""
     $confirm = Read-Host "Type 'DEPLOY' to continue"
@@ -782,58 +604,27 @@ if (-not (Test-PhaseSkipped -PhaseNumber 1)) {
                 $script:DomainFQDN,
                 $script:DomainNetBIOS
             ) -ScriptBlock {
-                param($DsrmPwd, $DomainAdminPwd, $ForestFQDN, $NetBIOS)
+                param($DsrmPassword, $DomainAdminPassword, $DomainFQDN, $DomainNetBIOS)
                 
                 # Install AD DS role
-                Write-Host "Installing AD DS role..." -ForegroundColor Yellow
-                Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools
+                Install-WindowsFeature AD-Domain-Services -IncludeManagementTools
                 
-                # Import module
-                Import-Module ADDSDeployment
-                
-                # Create the forest with hardcoded values
-                Write-Host "Creating forest: $ForestFQDN ($NetBIOS)..." -ForegroundColor Yellow
-                
+                # Create forest with hardcoded values
                 Install-ADDSForest `
-                    -DomainName $ForestFQDN `
-                    -DomainNetbiosName $NetBIOS `
-                    -DomainMode "WinThreshold" `
-                    -ForestMode "WinThreshold" `
-                    -InstallDns:$true `
-                    -CreateDnsDelegation:$false `
-                    -DatabasePath "C:\Windows\NTDS" `
-                    -LogPath "C:\Windows\NTDS" `
-                    -SysvolPath "C:\Windows\SYSVOL" `
-                    -SafeModeAdministratorPassword $DsrmPwd `
-                    -Force:$true `
-                    -NoRebootOnCompletion:$false
+                    -DomainName $DomainFQDN `
+                    -DomainNetbiosName $DomainNetBIOS `
+                    -SafeModeAdministratorPassword $DsrmPassword `
+                    -InstallDns `
+                    -Force
             }
             
             Remove-PSSession $session -ErrorAction SilentlyContinue
             
-            Write-DeploymentLog "Forest creation initiated - STK-DC-01 will reboot automatically" -Level Success
-            Write-DeploymentLog "Waiting for forest deployment to complete..." -Level Info
-            
-            # Wait for reboot and AD availability via guest agent
-            Start-Sleep -Seconds 60  # Initial delay for shutdown
-            
-            # Wait for VM to come back online
-            $vmBack = Wait-VMNetworkReady -VMID $script:ForestRootDC.VMID `
-                                          -ExpectedIP $script:ForestRootDC.IP `
-                                          -Node $script:ForestRootDC.Node `
-                                          -TimeoutSeconds 900  # 15 minutes
-            
-            if (-not $vmBack.Success) {
-                Write-DeploymentLog "STK-DC-01 did not come back online after forest creation" -Level Error
-                Save-DeploymentLog
-                exit 1
-            }
-            
-            # Wait additional time for AD services to fully start
-            Write-DeploymentLog "Waiting for AD services to initialize..." -Level Info
+            # Wait for DC to reboot and come back online
+            Write-DeploymentLog "Waiting for STK-DC-01 to reboot after forest creation..." -Level Info
             Start-Sleep -Seconds 60
             
-            # Verify AD is functional
+            # Wait for DC to come back online
             $maxRetries = 30
             $retries = 0
             $forestReady = $false
@@ -917,46 +708,265 @@ if (-not (Test-PhaseSkipped -PhaseNumber 2)) {
 }
 
 # ============================================================================
-# PHASE 3: GROUP POLICY DEPLOYMENT (IMMEDIATE POST-FOREST)
+# PHASE 3: GROUP POLICY DEPLOYMENT WITH BRANDING (IMMEDIATE POST-FOREST)
 # ============================================================================
 
 if (-not (Test-PhaseSkipped -PhaseNumber 3)) {
-    Write-PhaseHeader -PhaseNumber 3 -PhaseName "Group Policy Deployment" -EstimatedDuration "15 minutes"
+    Write-PhaseHeader -PhaseNumber 3 -PhaseName "Group Policy Deployment with Branding" -EstimatedDuration "15 minutes"
     
-    Write-DeploymentLog "Step 3.1: Deploying Group Policy Objects..." -Level Info
+    # =========================================================================
+    # Step 3.1: Stage Branding Images to SYSVOL
+    # =========================================================================
+    
+    Write-DeploymentLog "Step 3.1: Staging branding images to SYSVOL..." -Level Info
     
     if (-not $WhatIf) {
         $session = New-PSSession -ComputerName "$($script:ForestRootDC.Name).$script:DomainFQDN" -Credential $script:DomainAdminCred
         
-        # Check if GPO deployment script exists
-        $hasGpoScript = Invoke-Command -Session $session -ScriptBlock {
-            Test-Path "C:\CDX-E\deployment_scripts\Deploy-GPOs.ps1"
+        $imageStageResult = Invoke-Command -Session $session -ArgumentList $script:DomainFQDN -ScriptBlock {
+            param($DomainFQDN)
+            
+            # Define paths
+            $sysvolBase = "$env:SystemRoot\SYSVOL\sysvol\$DomainFQDN"
+            $netlogonPath = "$sysvolBase\scripts"
+            $imagesTargetPath = "$netlogonPath\Images"
+            $imageSourcePath = "C:\CDX-E\EXERCISES\CHILLED_ROCKET\Domain Files"
+            
+            # Required image files
+            $requiredImages = @(
+                "domain-splash-stark-industries.jpg",
+                "domain-u-wall-stark-industries.jpg",
+                "tony-stark-vip.jpg"
+            )
+            
+            $results = @{
+                Success = $true
+                ImagesStaged = @()
+                ImagesMissing = @()
+                TargetPath = $imagesTargetPath
+                Errors = @()
+            }
+            
+            # Verify SYSVOL structure exists
+            if (-not (Test-Path $netlogonPath)) {
+                $results.Success = $false
+                $results.Errors += "NETLOGON path not found: $netlogonPath"
+                return $results
+            }
+            
+            # Create Images folder if it doesn't exist
+            if (-not (Test-Path $imagesTargetPath)) {
+                try {
+                    New-Item -Path $imagesTargetPath -ItemType Directory -Force | Out-Null
+                    Write-Host "[Images] Created folder: $imagesTargetPath" -ForegroundColor Green
+                }
+                catch {
+                    $results.Success = $false
+                    $results.Errors += "Failed to create Images folder: $_"
+                    return $results
+                }
+            }
+            else {
+                Write-Host "[Images] Target folder exists: $imagesTargetPath" -ForegroundColor DarkGray
+            }
+            
+            # Verify source path exists
+            if (-not (Test-Path $imageSourcePath)) {
+                $results.Success = $false
+                $results.Errors += "Source path not found: $imageSourcePath"
+                return $results
+            }
+            
+            # Copy each required image
+            foreach ($imageName in $requiredImages) {
+                $sourceFile = Join-Path $imageSourcePath $imageName
+                $targetFile = Join-Path $imagesTargetPath $imageName
+                
+                if (Test-Path $sourceFile) {
+                    try {
+                        Copy-Item -Path $sourceFile -Destination $targetFile -Force
+                        $fileSize = [math]::Round((Get-Item $targetFile).Length / 1KB, 2)
+                        Write-Host "[Images] Staged: $imageName ($fileSize KB)" -ForegroundColor Green
+                        $results.ImagesStaged += $imageName
+                    }
+                    catch {
+                        Write-Host "[Images] Failed to copy: $imageName - $_" -ForegroundColor Red
+                        $results.Errors += "Failed to copy $imageName : $_"
+                    }
+                }
+                else {
+                    Write-Host "[Images] Source not found: $imageName" -ForegroundColor Yellow
+                    $results.ImagesMissing += $imageName
+                }
+            }
+            
+            # Verify all images were staged
+            if ($results.ImagesMissing.Count -gt 0) {
+                Write-Host "[Images] WARNING: $($results.ImagesMissing.Count) images missing from source" -ForegroundColor Yellow
+            }
+            
+            # Set appropriate permissions on Images folder
+            try {
+                $acl = Get-Acl $imagesTargetPath
+                # Ensure Domain Users can read the images
+                $domainUsersRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                    "Domain Users",
+                    "ReadAndExecute",
+                    "ContainerInherit,ObjectInherit",
+                    "None",
+                    "Allow"
+                )
+                $acl.AddAccessRule($domainUsersRule)
+                Set-Acl -Path $imagesTargetPath -AclObject $acl
+                Write-Host "[Images] Permissions configured for Domain Users (Read)" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "[Images] Warning: Could not set permissions - $_" -ForegroundColor Yellow
+                $results.Errors += "Permission configuration warning: $_"
+            }
+            
+            return $results
         }
         
-        if ($hasGpoScript) {
-            Invoke-Command -Session $session -ScriptBlock {
-                cd C:\CDX-E\deployment_scripts
-                .\Deploy-GPOs.ps1
+        # Report image staging results
+        if ($imageStageResult.Success) {
+            Write-DeploymentLog "Branding images staged successfully to SYSVOL" -Level Success
+            Write-DeploymentLog "  Staged: $($imageStageResult.ImagesStaged.Count) images" -Level Info
+            Write-DeploymentLog "  Target: $($imageStageResult.TargetPath)" -Level Info
+            
+            if ($imageStageResult.ImagesMissing.Count -gt 0) {
+                Write-DeploymentLog "  WARNING: Missing images: $($imageStageResult.ImagesMissing -join ', ')" -Level Warning
             }
         }
         else {
-            # Fallback to ad_deploy.ps1 for GPO creation
-            Invoke-Command -Session $session -ScriptBlock {
-                cd C:\CDX-E
+            Write-DeploymentLog "Failed to stage branding images" -Level Warning
+            foreach ($err in $imageStageResult.Errors) {
+                Write-DeploymentLog "  Error: $err" -Level Warning
+            }
+            # Continue with deployment - GPOs will be created but images won't display until fixed
+        }
+        
+        Remove-PSSession $session -ErrorAction SilentlyContinue
+    }
+    
+    # =========================================================================
+    # Step 3.2: Deploy Group Policy Objects
+    # =========================================================================
+    
+    Write-DeploymentLog "Step 3.2: Deploying Group Policy Objects..." -Level Info
+    
+    if (-not $WhatIf) {
+        $session = New-PSSession -ComputerName "$($script:ForestRootDC.Name).$script:DomainFQDN" -Credential $script:DomainAdminCred
+        
+        # Execute GPO deployment via ad_deploy.ps1
+        # The enhanced Invoke-DeployGPOs function handles:
+        # - GPO creation
+        # - Registry policy configuration
+        # - Security filtering
+        # - OU linking
+        # - Security group creation
+        
+        $gpoResult = Invoke-Command -Session $session -ScriptBlock {
+            Set-Location C:\CDX-E
+            
+            Write-Host "`n=== Deploying Group Policy Objects ===" -ForegroundColor Cyan
+            
+            # Import required modules
+            Import-Module GroupPolicy -ErrorAction SilentlyContinue
+            Import-Module ActiveDirectory -ErrorAction SilentlyContinue
+            
+            # Load GPO configuration
+            $gpoConfigPath = "C:\CDX-E\EXERCISES\CHILLED_ROCKET\gpo.json"
+            
+            if (-not (Test-Path $gpoConfigPath)) {
+                Write-Host "[GPO] Configuration file not found: $gpoConfigPath" -ForegroundColor Red
+                return @{ Success = $false; Error = "gpo.json not found" }
+            }
+            
+            try {
+                $gpoConfig = Get-Content $gpoConfigPath -Raw | ConvertFrom-Json
+                
+                Write-Host "[GPO] Loaded configuration with $($gpoConfig.gpos.Count) GPOs" -ForegroundColor Green
+                
+                # Call ad_deploy.ps1 which contains the enhanced Invoke-DeployGPOs function
                 .\ad_deploy.ps1 -ExerciseName "CHILLED_ROCKET" -Verbose
+                
+                return @{ Success = $true }
+            }
+            catch {
+                Write-Host "[GPO] Deployment error: $_" -ForegroundColor Red
+                return @{ Success = $false; Error = $_.ToString() }
             }
         }
         
-        Remove-PSSession $session
-        Write-DeploymentLog "Group Policies deployed successfully" -Level Success
+        if ($gpoResult.Success) {
+            Write-DeploymentLog "Group Policy Objects deployed successfully" -Level Success
+        }
+        else {
+            Write-DeploymentLog "GPO deployment encountered issues: $($gpoResult.Error)" -Level Warning
+        }
+        
+        Remove-PSSession $session -ErrorAction SilentlyContinue
     }
     
-    # Revert STK-DC-01 memory to normal (8 GB)
-    Write-DeploymentLog "Step 3.2: Reverting STK-DC-01 memory to normal (8 GB)..." -Level Info
+    # =========================================================================
+    # Step 3.3: Verify GPO Configuration (Summary)
+    # =========================================================================
+    
+    Write-DeploymentLog "Step 3.3: Verifying GPO deployment..." -Level Info
     
     if (-not $WhatIf) {
-        # Note: This requires a VM restart to take effect, or use balloon driver
-        # For now, just update the config - it will take effect on next reboot
+        $session = New-PSSession -ComputerName "$($script:ForestRootDC.Name).$script:DomainFQDN" -Credential $script:DomainAdminCred
+        
+        Invoke-Command -Session $session -ArgumentList $script:DomainFQDN -ScriptBlock {
+            param($DomainFQDN)
+            
+            Import-Module GroupPolicy -ErrorAction SilentlyContinue
+            
+            Write-Host "`n=== GPO Deployment Summary ===" -ForegroundColor Cyan
+            
+            $gpos = Get-GPO -All | Select-Object DisplayName, GpoStatus, CreationTime
+            
+            Write-Host "`nGroup Policy Objects ($($gpos.Count) total):" -ForegroundColor Yellow
+            foreach ($gpo in $gpos) {
+                $status = if ($gpo.GpoStatus -eq "AllSettingsEnabled") { "[OK]" } else { "[!]" }
+                Write-Host "  $status $($gpo.DisplayName)" -ForegroundColor $(if ($status -eq "[OK]") { "Green" } else { "Yellow" })
+            }
+            
+            # List branding-specific GPOs
+            $brandingGpos = $gpos | Where-Object { $_.DisplayName -like "SI *" }
+            if ($brandingGpos) {
+                Write-Host "`nStark Industries Branding GPOs:" -ForegroundColor Cyan
+                foreach ($gpo in $brandingGpos) {
+                    Write-Host "  - $($gpo.DisplayName)" -ForegroundColor Green
+                }
+            }
+            
+            # Verify image accessibility
+            $imagePath = "\\$DomainFQDN\NETLOGON\Images"
+            if (Test-Path $imagePath) {
+                $images = Get-ChildItem $imagePath -Filter "*.jpg" -ErrorAction SilentlyContinue | Select-Object Name
+                Write-Host "`nBranding Images in NETLOGON ($($images.Count) files):" -ForegroundColor Yellow
+                foreach ($img in $images) {
+                    Write-Host "  - $($img.Name)" -ForegroundColor Green
+                }
+            }
+            else {
+                Write-Host "`n[WARNING] NETLOGON Images path not accessible: $imagePath" -ForegroundColor Yellow
+            }
+        }
+        
+        Remove-PSSession $session -ErrorAction SilentlyContinue
+        Write-DeploymentLog "GPO verification complete" -Level Success
+    }
+    
+    # =========================================================================
+    # Step 3.4: Revert STK-DC-01 Memory to Normal (8 GB)
+    # =========================================================================
+    
+    Write-DeploymentLog "Step 3.4: Reverting STK-DC-01 memory to normal (8 GB)..." -Level Info
+    
+    if (-not $WhatIf) {
         Set-VMMemory -VMID $script:ForestRootDC.VMID `
                      -MemoryMB $script:ForestRootDC.NormalMemory `
                      -Node $script:ForestRootDC.Node
@@ -964,7 +974,28 @@ if (-not (Test-PhaseSkipped -PhaseNumber 3)) {
         Write-DeploymentLog "STK-DC-01 memory configuration reverted to 8 GB (effective after reboot)" -Level Info
     }
     
-    Write-DeploymentLog "Phase 3 complete: GPOs deployed" -Level Success
+    # =========================================================================
+    # Phase 3 Complete
+    # =========================================================================
+    
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Green
+    Write-Host "   Phase 3 Complete: Group Policy Deployment" -ForegroundColor Green
+    Write-Host "============================================================" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  Branding GPOs Deployed:" -ForegroundColor White
+    Write-Host "    - SI Domain Branding - Logon Screen (all systems)" -ForegroundColor Cyan
+    Write-Host "    - SI Domain Branding - Workstation Wallpaper (all workstations)" -ForegroundColor Cyan
+    Write-Host "    - SI VIP - Tony Stark Wallpaper (ML-DEV-W32805N only)" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  Images Staged:" -ForegroundColor White
+    Write-Host "    - \\$script:DomainFQDN\NETLOGON\Images\" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  Note: GPOs will apply automatically when systems join the domain" -ForegroundColor Yellow
+    Write-Host "        and perform their initial Group Policy refresh." -ForegroundColor Yellow
+    Write-Host ""
+    
+    Write-DeploymentLog "Phase 3 complete: GPOs and branding deployed" -Level Success
     Wait-UserConfirmation
 }
 
@@ -1039,7 +1070,6 @@ if (-not (Test-PhaseSkipped -PhaseNumber 4)) {
                                            -TimeoutSeconds $AgentTimeoutSeconds
             
             if ($vmReady.Success) {
-                # Enable ICMP
                 Enable-VMIcmp -ComputerIP $dc.IP -Credential $script:CdxAdminCred
             }
             else {
@@ -1092,42 +1122,37 @@ if (-not (Test-PhaseSkipped -PhaseNumber 4)) {
         }
     }
     
-    # Step 4.4: Promote DCs
-    Write-DeploymentLog "Step 4.4: Promoting site servers to Domain Controllers..." -Level Info
+    # Step 4.4: Promote site DCs to domain controllers
+    Write-DeploymentLog "Step 4.4: Promoting site servers to domain controllers..." -Level Info
     
     if (-not $WhatIf) {
         foreach ($dc in $siteDCs) {
-            Write-DeploymentLog "  Promoting $($dc.Name) at site $($dc.Site)..." -Level Info
+            Write-DeploymentLog "  Promoting $($dc.Name)..." -Level Info
             
             try {
-                $session = New-PSSession -ComputerName $dc.Name -Credential $script:DomainAdminCred -ErrorAction Stop
+                $session = New-PSSession -ComputerName $dc.IP -Credential $script:DomainAdminCred -ErrorAction Stop
                 
-                # Install AD DS role
-                Write-Host "    Installing AD DS role..." -ForegroundColor DarkGray
-                Invoke-Command -Session $session -ScriptBlock {
-                    Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools
-                }
-                
-                # Promote to DC
-                Write-Host "    Promoting to Domain Controller..." -ForegroundColor DarkGray
-                Invoke-Command -Session $session -ArgumentList $dc.Site, $script:DsrmSecurePassword, $script:DomainFQDN -ScriptBlock {
-                    param($SiteName, $DsrmPwd, $DomainName)
+                Invoke-Command -Session $session -ArgumentList $script:DomainFQDN, $script:DsrmSecurePassword, $dc.Site -ScriptBlock {
+                    param($DomainName, $DsrmPassword, $SiteName)
                     
+                    # Install AD DS role
+                    Install-WindowsFeature AD-Domain-Services -IncludeManagementTools
+                    
+                    # Promote to domain controller
                     Install-ADDSDomainController `
                         -DomainName $DomainName `
                         -SiteName $SiteName `
-                        -InstallDns:$true `
-                        -CreateDnsDelegation:$false `
-                        -SafeModeAdministratorPassword $DsrmPwd `
-                        -Force:$true `
-                        -NoRebootOnCompletion:$false
+                        -SafeModeAdministratorPassword $DsrmPassword `
+                        -InstallDns `
+                        -NoRebootOnCompletion:$false `
+                        -Force
                 }
                 
                 Remove-PSSession $session -ErrorAction SilentlyContinue
-                Write-DeploymentLog "  $($dc.Name) promoted and rebooting" -Level Success
+                Write-DeploymentLog "  $($dc.Name) promotion initiated - will reboot" -Level Success
                 
-                # Wait for DC to come back
-                Start-Sleep -Seconds 30  # Initial delay
+                # Wait for DC to come back as domain controller
+                Start-Sleep -Seconds 120
                 
                 $vmBack = Wait-VMNetworkReady -VMID $dc.VMID `
                                               -ExpectedIP $dc.IP `
@@ -1135,14 +1160,14 @@ if (-not (Test-PhaseSkipped -PhaseNumber 4)) {
                                               -TimeoutSeconds 600
                 
                 if ($vmBack.Success) {
-                    # Verify DC is functional
-                    Start-Sleep -Seconds 60  # Wait for AD services
-                    
+                    # Verify DC promotion
                     try {
-                        $verifySession = New-PSSession -ComputerName $dc.Name -Credential $script:DomainAdminCred -ErrorAction Stop
+                        $verifySession = New-PSSession -ComputerName $dc.IP -Credential $script:DomainAdminCred -ErrorAction Stop
+                        
                         $isDC = Invoke-Command -Session $verifySession -ScriptBlock {
-                            (Get-Service -Name NTDS -ErrorAction SilentlyContinue).Status -eq 'Running'
+                            (Get-ADDomainController -Identity $env:COMPUTERNAME -ErrorAction SilentlyContinue) -ne $null
                         }
+                        
                         Remove-PSSession $verifySession
                         
                         if ($isDC) {
@@ -1201,7 +1226,6 @@ if (-not (Test-PhaseSkipped -PhaseNumber 5)) {
         Write-DeploymentLog "Step 5.2: Waiting for member servers to become available..." -Level Info
         
         if (-not $WhatIf) {
-            # Load server configs to get VMIDs and IPs
             $serverConfig = Get-Content $coreInfraConfigPath -Raw | ConvertFrom-Json
             
             foreach ($server in $serverConfig.computers) {
@@ -1213,7 +1237,7 @@ if (-not (Test-PhaseSkipped -PhaseNumber 5)) {
                 $vmReady = Wait-VMNetworkReady -VMID $server.vmid `
                                                -ExpectedIP $serverIP `
                                                -Node $serverNode `
-                                               -TimeoutSeconds 180  # Shorter timeout for servers
+                                               -TimeoutSeconds 180
                 
                 if ($vmReady.Success) {
                     Enable-VMIcmp -ComputerIP $serverIP -Credential $script:CdxAdminCred
@@ -1328,7 +1352,7 @@ if (-not (Test-PhaseSkipped -PhaseNumber 7)) {
                         $vmReady = Wait-VMNetworkReady -VMID $ws.vmid `
                                                        -ExpectedIP $wsIP `
                                                        -Node $wsNode `
-                                                       -TimeoutSeconds 120  # Shorter timeout
+                                                       -TimeoutSeconds 120
                         
                         if ($vmReady.Success) {
                             Enable-VMIcmp -ComputerIP $wsIP -Credential $script:CdxAdminCred
@@ -1423,6 +1447,14 @@ if (-not (Test-PhaseSkipped -PhaseNumber 8)) {
                 
                 Write-Host "`n[Group Policy Objects]" -ForegroundColor Yellow
                 Get-GPO -All | Select-Object DisplayName, GpoStatus
+                
+                Write-Host "`n[Branding Images]" -ForegroundColor Yellow
+                $imagePath = "\\$DomainName\NETLOGON\Images"
+                if (Test-Path $imagePath) {
+                    Get-ChildItem $imagePath | Select-Object Name, Length
+                } else {
+                    Write-Host "Images not found at $imagePath" -ForegroundColor Yellow
+                }
             }
         }
         
@@ -1450,6 +1482,11 @@ Write-Host "Exercise: CHILLED_ROCKET" -ForegroundColor White
 Write-Host "Start Time: $($script:StartTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor White
 Write-Host "End Time: $($script:EndTime.ToString('yyyy-MM-dd HH:mm:ss'))" -ForegroundColor White
 Write-Host "Duration: $($duration.Hours)h $($duration.Minutes)m $($duration.Seconds)s" -ForegroundColor White
+Write-Host ""
+Write-Host "Branding Status:" -ForegroundColor Cyan
+Write-Host "  - Logon/Lock Screen: domain-splash-stark-industries.jpg" -ForegroundColor White
+Write-Host "  - Default Wallpaper: domain-u-wall-stark-industries.jpg" -ForegroundColor White
+Write-Host "  - Tony Stark VIP: tony-stark-vip.jpg (ML-DEV-W32805N)" -ForegroundColor White
 Write-Host ""
 Write-Host "Next Steps:" -ForegroundColor Cyan
 Write-Host "  1. Create VM snapshots for rollback capability" -ForegroundColor White
