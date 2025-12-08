@@ -1,14 +1,14 @@
 {
   "_meta": {
     "exercise": "CHILLED_ROCKET",
-    "version": "2.1",
-    "description": "Stark Industries complete infrastructure - 48 servers + 295 workstations",
+    "version": "3.1",
+    "description": "Stark Industries complete infrastructure - 36 servers + 295 workstations (CDX-E v3.1 standardized VM ID allocation)",
     "generated": "2025-11-24",
     "proxmox_allocation": {
-      "servers": "5000-5069 (48 servers)",
+      "servers": "5200-5899 (function-based ranges)",
       "workstations": "6001-6458 (295 workstations)",
-      "total_vms": 343,
-      "total_servers": 48
+      "total_vms": 331,
+      "total_servers": 36
     },
     "template_mapping": {
       "2001": "Windows Server 2025",
@@ -260,11 +260,26 @@
         }
       },
       "workstation_templates": {}
+    },
+    "last_modified": "2025-12-08",
+    "vm_id_scheme": {
+      "version": "3.1",
+      "description": "Function-based server allocation",
+      "ranges": {
+        "domain_controllers": "5200-5299",
+        "infrastructure": "5300-5399",
+        "file_servers": "5400-5499",
+        "database_servers": "5500-5599",
+        "web_servers": "5600-5699",
+        "application_servers": "5700-5799",
+        "exchange_servers": "5800-5899",
+        "workstations": "6000-6999"
+      }
     }
   },
   "computers": [
     {
-      "vmid": 5001,
+      "vmid": 5200,
       "name": "STK-DC-01",
       "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
       "description": "Primary Domain Controller - HQ (2012 R2)",
@@ -296,7 +311,7 @@
       }
     },
     {
-      "vmid": 5002,
+      "vmid": 5400,
       "name": "HQ-FS-01",
       "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
       "description": "HQ file server 01",
@@ -326,7 +341,7 @@
       }
     },
     {
-      "vmid": 5003,
+      "vmid": 5401,
       "name": "HQ-FS-02",
       "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
       "description": "HQ file server 02",
@@ -356,7 +371,7 @@
       }
     },
     {
-      "vmid": 5004,
+      "vmid": 5500,
       "name": "HQ-SQL-01",
       "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
       "description": "HQ SQL server 01",
@@ -388,7 +403,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5005,
+      "vmid": 5501,
       "name": "HQ-SQL-02",
       "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
       "description": "HQ SQL server 02",
@@ -420,7 +435,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5006,
+      "vmid": 5800,
       "name": "HQ-EX-01",
       "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
       "description": "HQ Exchange Server",
@@ -452,7 +467,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5007,
+      "vmid": 5801,
       "name": "HQ-EX-02",
       "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
       "description": "HQ Exchange Server",
@@ -484,7 +499,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5008,
+      "vmid": 5802,
       "name": "HQ-EX-03",
       "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
       "description": "HQ Exchange Server",
@@ -516,7 +531,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5009,
+      "vmid": 5803,
       "name": "DL-EX-01",
       "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
       "description": "Dallas Exchange Server",
@@ -548,7 +563,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5010,
+      "vmid": 5804,
       "name": "DL-EX-02",
       "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
       "description": "Dallas Exchange Server",
@@ -580,7 +595,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5011,
+      "vmid": 5805,
       "name": "DL-EX-03",
       "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
       "description": "Dallas Exchange Server",
@@ -612,7 +627,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5012,
+      "vmid": 5806,
       "name": "AM-EX-01",
       "ou": "OU=Servers,OU=IT-Core,OU=Amsterdam,OU=Sites",
       "description": "Amsterdam Exchange Server",
@@ -644,7 +659,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5013,
+      "vmid": 5807,
       "name": "AM-EX-02",
       "ou": "OU=Servers,OU=IT-Core,OU=Amsterdam,OU=Sites",
       "description": "Amsterdam Exchange Server",
@@ -676,7 +691,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5014,
+      "vmid": 5808,
       "name": "AM-EX-03",
       "ou": "OU=Servers,OU=IT-Core,OU=Amsterdam,OU=Sites",
       "description": "Amsterdam Exchange Server",
@@ -708,7 +723,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5015,
+      "vmid": 5809,
       "name": "ML-EX-01",
       "ou": "OU=Servers,OU=Operations,OU=Malibu,OU=Sites",
       "description": "Malibu Exchange Server",
@@ -740,7 +755,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5016,
+      "vmid": 5810,
       "name": "ML-EX-02",
       "ou": "OU=Servers,OU=Operations,OU=Malibu,OU=Sites",
       "description": "Malibu Exchange Server",
@@ -772,7 +787,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5017,
+      "vmid": 5811,
       "name": "NG-EX-01",
       "ou": "OU=Servers,OU=IT-Core,OU=Nagasaki,OU=Sites",
       "description": "Nagasaki Exchange Server",
@@ -804,7 +819,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5018,
+      "vmid": 5812,
       "name": "NG-EX-02",
       "ou": "OU=Servers,OU=IT-Core,OU=Nagasaki,OU=Sites",
       "description": "Nagasaki Exchange Server",
@@ -836,7 +851,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5019,
+      "vmid": 5813,
       "name": "NG-EX-03",
       "ou": "OU=Servers,OU=IT-Core,OU=Nagasaki,OU=Sites",
       "description": "Nagasaki Exchange Server",
@@ -868,7 +883,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5020,
+      "vmid": 5201,
       "name": "STK-DC-02",
       "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
       "description": "HQ Domain Controller",
@@ -900,7 +915,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5021,
+      "vmid": 5202,
       "name": "STK-DC-03",
       "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
       "description": "HQ Domain Controller",
@@ -932,7 +947,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5022,
+      "vmid": 5203,
       "name": "STK-DC-04",
       "ou": "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites",
       "description": "HQ Domain Controller",
@@ -962,7 +977,7 @@
       }
     },
     {
-      "vmid": 5023,
+      "vmid": 5204,
       "name": "STK-DC-05",
       "ou": "OU=Servers,OU=Operations,OU=Malibu,OU=Sites",
       "description": "Malibu Domain Controller",
@@ -992,7 +1007,7 @@
       }
     },
     {
-      "vmid": 5024,
+      "vmid": 5205,
       "name": "STK-DC-06",
       "ou": "OU=Servers,OU=Operations,OU=Malibu,OU=Sites",
       "description": "Malibu Domain Controller",
@@ -1022,7 +1037,7 @@
       }
     },
     {
-      "vmid": 5025,
+      "vmid": 5206,
       "name": "STK-DC-07",
       "ou": "OU=Servers,OU=Operations,OU=Malibu,OU=Sites",
       "description": "Malibu Domain Controller",
@@ -1052,7 +1067,7 @@
       }
     },
     {
-      "vmid": 5026,
+      "vmid": 5207,
       "name": "STK-DC-08",
       "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
       "description": "Dallas Domain Controller",
@@ -1084,7 +1099,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5027,
+      "vmid": 5208,
       "name": "STK-DC-09",
       "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
       "description": "Dallas Domain Controller",
@@ -1116,7 +1131,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5028,
+      "vmid": 5209,
       "name": "STK-DC-10",
       "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
       "description": "Dallas Domain Controller",
@@ -1146,7 +1161,7 @@
       }
     },
     {
-      "vmid": 5029,
+      "vmid": 5210,
       "name": "STK-DC-11",
       "ou": "OU=Servers,OU=Operations,OU=Dallas,OU=Sites",
       "description": "Dallas Domain Controller",
@@ -1176,7 +1191,7 @@
       }
     },
     {
-      "vmid": 5030,
+      "vmid": 5211,
       "name": "STK-DC-12",
       "ou": "OU=Servers,OU=IT-Core,OU=Nagasaki,OU=Sites",
       "description": "Nagasaki Domain Controller",
@@ -1208,7 +1223,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5031,
+      "vmid": 5212,
       "name": "STK-DC-13",
       "ou": "OU=Servers,OU=IT-Core,OU=Nagasaki,OU=Sites",
       "description": "Nagasaki Domain Controller",
@@ -1240,7 +1255,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5032,
+      "vmid": 5213,
       "name": "STK-DC-14",
       "ou": "OU=Servers,OU=IT-Core,OU=Nagasaki,OU=Sites",
       "description": "Nagasaki Domain Controller",
@@ -1272,7 +1287,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5033,
+      "vmid": 5214,
       "name": "STK-DC-15",
       "ou": "OU=Servers,OU=IT-Core,OU=Amsterdam,OU=Sites",
       "description": "Amsterdam Domain Controller",
@@ -1304,7 +1319,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5034,
+      "vmid": 5215,
       "name": "STK-DC-16",
       "ou": "OU=Servers,OU=IT-Core,OU=Amsterdam,OU=Sites",
       "description": "Amsterdam Domain Controller",
@@ -1336,7 +1351,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5035,
+      "vmid": 5216,
       "name": "STK-DC-17",
       "ou": "OU=Servers,OU=IT-Core,OU=Amsterdam,OU=Sites",
       "description": "Amsterdam Domain Controller",
@@ -1368,7 +1383,7 @@
       "security_note": "Legacy OS - Higher attack surface, requires additional monitoring"
     },
     {
-      "vmid": 5036,
+      "vmid": 5217,
       "name": "STK-DC-18",
       "ou": "OU=Servers,OU=IT-Core,OU=Amsterdam,OU=Sites",
       "description": "Amsterdam Domain Controller",
