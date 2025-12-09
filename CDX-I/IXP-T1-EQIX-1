@@ -44,6 +44,10 @@ set interfaces ethernet eth1 address '41.229.158.73/23'
 set interfaces ethernet eth1 address '37.102.0.93/18'
 set interfaces ethernet eth1 address '50.220.138.191/23'
 
+# Root DNS address space on regional interface (EQIX1 - London allocation)
+set interfaces ethernet eth1 address '193.0.14.1/24'      # k.root-servers.net
+set interfaces ethernet eth1 address '192.58.128.1/24'    # j.root-servers.net
+
 # eth2: Upstream to Tier-0
 set interfaces ethernet eth2 description 'to TIER 0'
 set interfaces ethernet eth2 address '185.1.104.74/28'
@@ -57,7 +61,7 @@ set interfaces ethernet eth2 address '185.1.104.74/28'
 ########################################
 # OSPF – Tier-1 Regional IXP (London)
 # - Area 0: Link to Tier-0
-# - Area 1: All London Regional Peering Blocks
+# - Area 1: All London Regional Peering Blocks + Root DNS
 # - Router-ID based on primary London address
 ########################################
 
@@ -89,6 +93,10 @@ set protocols ospf area 1 network '41.77.176.0/22'
 set protocols ospf area 1 network '41.229.158.0/23'
 set protocols ospf area 1 network '37.102.0.0/18'
 set protocols ospf area 1 network '50.220.138.0/23'
+
+# Root DNS networks (Area 1) - EQIX1 London allocation
+set protocols ospf area 1 network '193.0.14.0/24'        # k.root-servers.net
+set protocols ospf area 1 network '192.58.128.0/24'      # j.root-servers.net
 
 ########################################
 # NAT
