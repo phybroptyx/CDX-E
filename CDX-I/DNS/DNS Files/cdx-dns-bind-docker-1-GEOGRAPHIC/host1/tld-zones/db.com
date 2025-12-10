@@ -64,6 +64,7 @@ msftconnecttest IN  A  52.164.206.56
 www.msftconnecttest IN  CNAME  msftconnecttest
 msftncsi        IN  A  52.164.206.217
 www.msftncsi    IN  CNAME  msftncsi
+dns.msftncsi.com  IN  A  131.107.255.255
 
 ; Tech & Dev (EQIX4 Seattle - 104.215.95.0/24)
 github          IN  A  104.215.95.20
