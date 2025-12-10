@@ -1,0 +1,67 @@
+configure
+
+########################################
+# System Identity / Base Services
+########################################
+
+set system host-name 'CORE-T0-R1'
+set system domain-name 'cdx.lab'
+set system time-zone 'America/New_York'
+
+set service ntp server '46.244.164.88'
+set service ssh port '2022'
+
+########################################
+# Interfaces
+# eth0: Management
+########################################
+
+# eth0: Management (DHCP from lab management network)
+set interfaces ethernet eth0 description 'Management'
+set interfaces ethernet eth0 address 'dhcp'
+
+# eth1: Tier-0 Core – Americas Peering Segment(s)
+set interfaces ethernet eth1 description 'Tier 0 Gateway - Americas'
+set interfaces ethernet eth1 address '198.32.134.90/28'
+set interfaces ethernet eth1 address '198.32.181.102/28'
+set interfaces ethernet eth1 address '64.191.232.132/28'
+
+# eth2: Transit to ASIA-PAC Tier-0 Core
+set interfaces ethernet eth2 description 'to ASIA-PAC'
+set interfaces ethernet eth2 address '46.127.232.113/30'
+
+# eth3: Transit to EUR-AF Tier-0 Core
+set interfaces ethernet eth3 description 'to EUR-AF'
+set interfaces ethernet eth3 address '46.127.232.121/30'
+
+########################################
+# Static Routing
+########################################
+# (None – Tier-0 core uses OSPF only for these segments)
+########################################
+
+########################################
+# OSPF – Tier-0 Internet Core
+# - All connected core / peering subnets in Area 0
+# - Router-ID sourced from primary Americas peering address
+########################################
+
+# Router-ID for this Tier-0 core
+set protocols ospf parameters router-id '198.32.134.90'
+
+# Core / peering networks in Area 0
+set protocols ospf area 0 network '198.32.134.80/28'
+set protocols ospf area 0 network '198.32.181.96/28'
+set protocols ospf area 0 network '64.191.232.128/28'
+set protocols ospf area 0 network '46.127.232.112/30'
+set protocols ospf area 0 network '46.127.232.120/30'
+
+########################################
+# NAT
+# (None – Tier-0 core is purely routed, no translation)
+########################################
+# (Intentionally no "set nat ..." statements)
+
+commit
+save
+exit
