@@ -1,0 +1,413 @@
+version: '3.8'
+
+# CDX-DNS Stack - Docker Host 1 (Americas)
+# Geographic Region: EQIX4 Seattle, EQIX5 Toronto
+# Containers: 19 total (9 roots + 8 TLD primaries + 2 TLD secondaries)
+# Extract location: /opt/docker-stacks/cdx-dns/bind/
+# Archive: cdx-dns-bind-docker-1-GEOGRAPHIC.tar.gz
+
+services:
+  #
+  # EQIX5 Toronto Root Servers (5 containers)
+  #
+
+  a.root-servers.net:
+    image: ubuntu/bind9:latest
+    container_name: a.root-servers.net
+    hostname: a.root-servers.net
+    networks:
+      eqix5:
+        ipv4_address: 198.41.0.4
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/root-zone/db.root:/etc/bind/db.root:ro
+      - /opt/docker-stacks/cdx-dns/bind/a-root/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/a-root/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/a-root/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  c.root-servers.net:
+    image: ubuntu/bind9:latest
+    container_name: c.root-servers.net
+    hostname: c.root-servers.net
+    networks:
+      eqix5:
+        ipv4_address: 192.33.4.12
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/root-zone/db.root:/etc/bind/db.root:ro
+      - /opt/docker-stacks/cdx-dns/bind/c-root/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/c-root/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/c-root/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  d.root-servers.net:
+    image: ubuntu/bind9:latest
+    container_name: d.root-servers.net
+    hostname: d.root-servers.net
+    networks:
+      eqix5:
+        ipv4_address: 199.7.91.13
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/root-zone/db.root:/etc/bind/db.root:ro
+      - /opt/docker-stacks/cdx-dns/bind/d-root/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/d-root/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/d-root/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  g.root-servers.net:
+    image: ubuntu/bind9:latest
+    container_name: g.root-servers.net
+    hostname: g.root-servers.net
+    networks:
+      eqix5:
+        ipv4_address: 192.112.36.4
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/root-zone/db.root:/etc/bind/db.root:ro
+      - /opt/docker-stacks/cdx-dns/bind/g-root/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/g-root/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/g-root/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  h.root-servers.net:
+    image: ubuntu/bind9:latest
+    container_name: h.root-servers.net
+    hostname: h.root-servers.net
+    networks:
+      eqix5:
+        ipv4_address: 198.97.190.53
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/root-zone/db.root:/etc/bind/db.root:ro
+      - /opt/docker-stacks/cdx-dns/bind/h-root/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/h-root/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/h-root/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  #
+  # EQIX4 Seattle Root Servers (4 containers)
+  #
+
+  b.root-servers.net:
+    image: ubuntu/bind9:latest
+    container_name: b.root-servers.net
+    hostname: b.root-servers.net
+    networks:
+      eqix4:
+        ipv4_address: 199.9.14.201
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/root-zone/db.root:/etc/bind/db.root:ro
+      - /opt/docker-stacks/cdx-dns/bind/b-root/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/b-root/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/b-root/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  e.root-servers.net:
+    image: ubuntu/bind9:latest
+    container_name: e.root-servers.net
+    hostname: e.root-servers.net
+    networks:
+      eqix4:
+        ipv4_address: 192.203.230.10
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/root-zone/db.root:/etc/bind/db.root:ro
+      - /opt/docker-stacks/cdx-dns/bind/e-root/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/e-root/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/e-root/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  f.root-servers.net:
+    image: ubuntu/bind9:latest
+    container_name: f.root-servers.net
+    hostname: f.root-servers.net
+    networks:
+      eqix4:
+        ipv4_address: 192.5.5.241
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/root-zone/db.root:/etc/bind/db.root:ro
+      - /opt/docker-stacks/cdx-dns/bind/f-root/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/f-root/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/f-root/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  l.root-servers.net:
+    image: ubuntu/bind9:latest
+    container_name: l.root-servers.net
+    hostname: l.root-servers.net
+    networks:
+      eqix4:
+        ipv4_address: 199.7.83.42
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/root-zone/db.root:/etc/bind/db.root:ro
+      - /opt/docker-stacks/cdx-dns/bind/l-root/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/l-root/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/l-root/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  #
+  # TLD Primary Servers on EQIX4 (8 containers)
+  #
+
+  com-tld-primary:
+    image: ubuntu/bind9:latest
+    container_name: com-tld-primary
+    hostname: com-tld-primary.cdx.lab
+    networks:
+      eqix4:
+        ipv4_address: 192.5.5.50
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/tld-zones/db.com:/etc/bind/db.com:ro
+      - /opt/docker-stacks/cdx-dns/bind/com-primary/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/com-primary/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/com-primary/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  net-tld-primary:
+    image: ubuntu/bind9:latest
+    container_name: net-tld-primary
+    hostname: net-tld-primary.cdx.lab
+    networks:
+      eqix4:
+        ipv4_address: 192.5.5.51
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/tld-zones/db.net:/etc/bind/db.net:ro
+      - /opt/docker-stacks/cdx-dns/bind/net-primary/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/net-primary/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/net-primary/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  org-tld-primary:
+    image: ubuntu/bind9:latest
+    container_name: org-tld-primary
+    hostname: org-tld-primary.cdx.lab
+    networks:
+      eqix4:
+        ipv4_address: 192.5.5.52
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/tld-zones/db.org:/etc/bind/db.org:ro
+      - /opt/docker-stacks/cdx-dns/bind/org-primary/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/org-primary/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/org-primary/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  edu-tld-primary:
+    image: ubuntu/bind9:latest
+    container_name: edu-tld-primary
+    hostname: edu-tld-primary.cdx.lab
+    networks:
+      eqix4:
+        ipv4_address: 192.5.5.54
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/tld-zones/db.edu:/etc/bind/db.edu:ro
+      - /opt/docker-stacks/cdx-dns/bind/edu-primary/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/edu-primary/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/edu-primary/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  io-tld-primary:
+    image: ubuntu/bind9:latest
+    container_name: io-tld-primary
+    hostname: io-tld-primary.cdx.lab
+    networks:
+      eqix4:
+        ipv4_address: 192.5.5.53
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/tld-zones/db.io:/etc/bind/db.io:ro
+      - /opt/docker-stacks/cdx-dns/bind/io-primary/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/io-primary/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/io-primary/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  gov-tld-primary:
+    image: ubuntu/bind9:latest
+    container_name: gov-tld-primary
+    hostname: gov-tld-primary.cdx.lab
+    networks:
+      eqix4:
+        ipv4_address: 192.5.5.55
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/tld-zones/db.gov:/etc/bind/db.gov:ro
+      - /opt/docker-stacks/cdx-dns/bind/gov-primary/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/gov-primary/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/gov-primary/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  mil-tld-primary:
+    image: ubuntu/bind9:latest
+    container_name: mil-tld-primary
+    hostname: mil-tld-primary.cdx.lab
+    networks:
+      eqix4:
+        ipv4_address: 192.5.5.56
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/tld-zones/db.mil:/etc/bind/db.mil:ro
+      - /opt/docker-stacks/cdx-dns/bind/mil-primary/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/mil-primary/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/mil-primary/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  mrvl-tld-primary:
+    image: ubuntu/bind9:latest
+    container_name: mrvl-tld-primary
+    hostname: mrvl-tld-primary.cdx.lab
+    networks:
+      eqix4:
+        ipv4_address: 192.5.5.57
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/tld-zones/db.mrvl:/etc/bind/db.mrvl:ro
+      - /opt/docker-stacks/cdx-dns/bind/mrvl-primary/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/mrvl-primary/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/mrvl-primary/db.empty:/etc/bind/db.empty:ro
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  #
+  # TLD Secondary Servers on EQIX5 (2 containers)
+  #
+
+  com-tld-secondary:
+    image: ubuntu/bind9:latest
+    container_name: com-tld-secondary
+    hostname: com-tld-secondary.cdx.lab
+    networks:
+      eqix5:
+        ipv4_address: 198.41.0.50
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/com-secondary/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/com-secondary/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/com-secondary/db.empty:/etc/bind/db.empty:ro
+      - com-secondary-cache:/var/cache/bind
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+  net-tld-secondary:
+    image: ubuntu/bind9:latest
+    container_name: net-tld-secondary
+    hostname: net-tld-secondary.cdx.lab
+    networks:
+      eqix5:
+        ipv4_address: 198.41.0.51
+    volumes:
+      - /opt/docker-stacks/cdx-dns/bind/net-secondary/named.conf.local:/etc/bind/named.conf.local:ro
+      - /opt/docker-stacks/cdx-dns/bind/net-secondary/named.conf.options:/etc/bind/named.conf.options:ro
+      - /opt/docker-stacks/cdx-dns/bind/net-secondary/db.empty:/etc/bind/db.empty:ro
+      - net-secondary-cache:/var/cache/bind
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    dns:
+      - 127.0.0.1
+
+#
+# Docker Volumes
+#
+
+volumes:
+  com-secondary-cache:
+  net-secondary-cache:
+
+#
+# Docker Networks
+#
+
+networks:
+  eqix4:
+    driver: macvlan
+    driver_opts:
+      parent: eth4
+    ipam:
+      driver: default
+      config:
+        - subnet: 199.9.14.0/24
+          gateway: 199.9.14.1
+        - subnet: 192.203.230.0/24
+          gateway: 192.203.230.1
+        - subnet: 192.5.5.0/24
+          gateway: 192.5.5.1
+        - subnet: 199.7.83.0/24
+          gateway: 199.7.83.1
+
+  eqix5:
+    driver: macvlan
+    driver_opts:
+      parent: eth5
+    ipam:
+      driver: default
+      config:
+        - subnet: 198.41.0.0/24
+          gateway: 198.41.0.1
+        - subnet: 192.33.4.0/24
+          gateway: 192.33.4.1
+        - subnet: 199.7.91.0/24
+          gateway: 199.7.91.1
+        - subnet: 192.112.36.0/24
+          gateway: 192.112.36.1
+        - subnet: 198.97.190.0/24
+          gateway: 198.97.190.1
