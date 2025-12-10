@@ -1,0 +1,42 @@
+version: '3.8'
+
+# CDX-NTP Stack - Docker Host 3 (Asia-Pacific)
+# Geographic Region: EQIX10 Seoul
+# Containers: 1 NTP server
+# Stack Name: cdx-ntp
+
+services:
+  #
+  # Seoul NTP Server (EQIX10)
+  #
+
+  cdx-ntp-seoul:
+    image: cturra/ntp:latest
+    container_name: cdx-ntp-seoul
+    hostname: ntp-seoul.cdx.lab
+    networks:
+      eqix10:
+        ipv4_address: 202.12.27.101
+    environment:
+      - TZ=Asia/Seoul
+      - NTP_SERVERS=103.140.210.1
+      - LOG_LEVEL=1
+    restart: unless-stopped
+    cap_add:
+      - SYS_TIME
+      - SYS_NICE
+    labels:
+      - "cdx.component=ntp"
+      - "cdx.region=asia-pacific"
+      - "cdx.site=eqix10-seoul"
+      - "cdx.stratum=2"
+
+#
+# Docker Networks
+# Reusing existing networks from DNS deployment
+#
+
+networks:
+  eqix10:
+    external: true
+    name: cdx-dns_eqix10
