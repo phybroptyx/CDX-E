@@ -60,6 +60,10 @@ msn             IN  A  52.164.206.104
 www.msn         IN  CNAME  msn
 microsoft365    IN  A  52.164.206.105
 www.microsoft365 IN  CNAME  microsoft365
+msftconnecttest IN  A  52.164.206.56
+www.msftconnecttest IN  CNAME  msftconnecttest
+msftncsi        IN  A  52.164.206.217
+www.msftncsi    IN  CNAME  msftncsi
 
 ; Tech & Dev (EQIX4 Seattle - 104.215.95.0/24)
 github          IN  A  104.215.95.20
