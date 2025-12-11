@@ -1,0 +1,8 @@
+zone "net" {
+    type secondary;
+    file "/var/cache/bind/db.net";
+    primaries { 192.5.5.51; };
+};
+
+zone "10.in-addr.arpa" { type primary; file "/etc/bind/db.empty"; };
+zone "168.192.in-addr.arpa" { type primary; file "/etc/bind/db.empty"; };

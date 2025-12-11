@@ -1,0 +1,240 @@
+version: '3.8'
+
+# CDX-NTP Stack - Docker Host 1 (Americas)
+# Geographic Region: EQIX4 Seattle, EQIX5 Toronto
+# Containers: 2 NTP servers
+# Stack Name: cdx-ntp
+
+services:
+  #
+  # Seattle NTP Server (EQIX4)
+  #
+
+  cdx-ntp-seattle:
+    image: cturra/ntp:latest
+    container_name: ntp-seattle.cdx.lab
+    hostname: ntp-seattle.cdx.lab
+    networks:
+      eqix4:
+        ipv4_address: 192.5.5.100
+    environment:
+      - TZ=America/Los_Angeles
+      - NTP_SERVERS=103.140.210.1
+      - LOG_LEVEL=1
+    restart: unless-stopped
+    cap_add:
+      - SYS_TIME
+      - SYS_NICE
+    labels:
+      - "cdx.component=ntp"
+      - "cdx.region=americas"
+      - "cdx.site=eqix4-seattle"
+      - "cdx.stratum=2"
+
+  #
+  # Toronto NTP Server (EQIX5)
+  #
+
+  cdx-ntp-toronto:
+    image: cturra/ntp:latest
+    container_name: ntp-toronto.cdx.lab
+    hostname: ntp-toronto.cdx.lab
+    networks:
+      eqix5:
+        ipv4_address: 198.41.0.100
+    environment:
+      - TZ=America/Toronto
+      - NTP_SERVERS=103.140.210.1
+      - LOG_LEVEL=1
+    restart: unless-stopped
+    cap_add:
+      - SYS_TIME
+      - SYS_NICE
+    labels:
+      - "cdx.component=ntp"
+      - "cdx.region=americas"
+      - "cdx.site=eqix5-toronto"
+      - "cdx.stratum=2"
+      
+networks:
+  # ═══════════════════════════════════════════════════════════
+  # EQIX4 - Seattle (Area 4)
+  # Router: IXP-T1-EQIX-4
+  # Parent Interface: eth4
+  # ═══════════════════════════════════════════════════════════
+  
+  eqix4:
+    driver: macvlan
+    driver_opts:
+      parent: eth4
+    ipam:
+      config:
+        # Seattle regional ISP blocks
+        - subnet: 13.248.0.0/15
+          gateway: 13.248.0.174
+        - subnet: 17.66.76.0/22
+          gateway: 17.66.76.1
+        - subnet: 23.96.0.0/13
+          gateway: 23.96.0.1
+        - subnet: 63.239.0.0/19
+          gateway: 63.239.0.46
+        - subnet: 8.225.144.0/20
+          gateway: 8.225.144.37
+        - subnet: 23.51.192.0/20
+          gateway: 23.51.192.71
+        - subnet: 4.244.0.0/16
+          gateway: 4.244.0.49
+        - subnet: 38.145.0.0/17
+          gateway: 38.145.0.123
+        - subnet: 23.36.249.0/24
+          gateway: 23.36.249.17
+        
+        # Microsoft services
+        - subnet: 52.164.206.0/24
+          gateway: 52.164.206.1
+        - subnet: 104.215.95.0/24
+          gateway: 104.215.95.1
+        
+        # NCSI services
+        - subnet: 131.107.0.0/16
+          gateway: 131.107.0.1
+        
+        # Root DNS (Seattle allocation: b, e, f, l)
+        - subnet: 199.9.14.0/24
+          gateway: 199.9.14.1
+        - subnet: 192.203.230.0/24
+          gateway: 192.203.230.1
+        - subnet: 192.5.5.0/24
+          gateway: 192.5.5.1
+        - subnet: 199.7.83.0/24
+          gateway: 199.7.83.1
+
+  # ═══════════════════════════════════════════════════════════
+  # EQIX5 - Toronto (Area 5)
+  # Router: IXP-T1-EQIX-5
+  # Parent Interface: eth5
+  # ═══════════════════════════════════════════════════════════
+  
+  eqix5:
+    driver: macvlan
+    driver_opts:
+      parent: eth5
+    ipam:
+      config:
+        # Toronto regional ISP blocks
+        - subnet: 64.99.32.0/19
+          gateway: 64.99.32.172
+        - subnet: 66.46.176.0/21
+          gateway: 66.46.176.126
+        - subnet: 4.174.128.0/17
+          gateway: 4.174.128.91
+        - subnet: 206.131.208.0/20
+          gateway: 206.131.208.42
+        - subnet: 13.111.0.0/16
+          gateway: 13.111.0.87
+        - subnet: 129.6.15.0/24
+          gateway: 129.6.15.89
+        - subnet: 4.202.0.0/16
+          gateway: 4.202.0.179
+        - subnet: 66.218.176.0/20
+          gateway: 66.218.176.125
+        - subnet: 67.163.104.0/21
+          gateway: 67.163.104.79
+        - subnet: 4.152.0.0/17
+          gateway: 4.152.0.102
+        - subnet: 4.150.0.0/15
+          gateway: 4.150.0.86
+        - subnet: 38.38.136.0/21
+          gateway: 38.38.136.124
+        - subnet: 47.0.0.0/13
+          gateway: 47.0.0.76
+        - subnet: 40.69.96.0/19
+          gateway: 40.69.96.28
+        - subnet: 4.140.0.0/15
+          gateway: 4.140.0.67
+        - subnet: 56.0.0.0/18
+          gateway: 56.0.0.83
+        - subnet: 64.79.0.0/19
+          gateway: 64.79.0.31
+        - subnet: 50.193.224.0/22
+          gateway: 50.193.224.27
+        - subnet: 8.224.168.0/21
+          gateway: 8.224.168.191
+        - subnet: 24.31.48.0/23
+          gateway: 24.31.48.22
+        - subnet: 66.39.0.0/16
+          gateway: 66.39.0.19
+        - subnet: 65.15.108.0/22
+          gateway: 65.15.108.37
+        - subnet: 104.238.230.0/24
+          gateway: 104.238.230.17
+        
+        # Root DNS (Toronto allocation: a, c, d, g, h)
+        - subnet: 198.41.0.0/24
+          gateway: 198.41.0.1
+        - subnet: 192.33.4.0/24
+          gateway: 192.33.4.1
+        - subnet: 199.7.91.0/24
+          gateway: 199.7.91.1
+        - subnet: 192.112.36.0/24
+          gateway: 192.112.36.1
+        - subnet: 198.97.190.0/24
+          gateway: 198.97.190.1
+
+  # ═══════════════════════════════════════════════════════════
+  # EQIX9 - Rio de Janeiro (Area 9)
+  # Router: IXP-T1-EQIX-9
+  # Parent Interface: eth9
+  # ═══════════════════════════════════════════════════════════
+  
+  eqix9:
+    driver: macvlan
+    driver_opts:
+      parent: eth9
+    ipam:
+      config:
+        # Rio/South America regional blocks
+        - subnet: 32.59.16.0/20
+          gateway: 32.59.16.9
+        - subnet: 32.59.184.0/21
+          gateway: 32.59.184.126
+        - subnet: 67.230.59.0/24
+          gateway: 67.230.59.42
+        - subnet: 66.249.152.0/22
+          gateway: 66.249.152.125
+        - subnet: 54.232.0.0/15
+          gateway: 54.232.0.78
+        - subnet: 45.4.184.0/22
+          gateway: 45.4.184.91
+        - subnet: 23.75.112.0/20
+          gateway: 23.75.112.121
+        - subnet: 24.232.168.0/22
+          gateway: 24.232.168.73
+        - subnet: 66.60.0.0/18
+          gateway: 66.60.0.69
+        - subnet: 57.74.160.0/19
+          gateway: 57.74.160.154
+        - subnet: 66.231.64.0/20
+          gateway: 66.231.64.64
+        - subnet: 57.74.224.0/19
+          gateway: 57.74.224.17
+        - subnet: 64.213.56.0/21
+          gateway: 64.213.56.123
+        - subnet: 45.226.64.0/22
+          gateway: 45.226.64.53
+        - subnet: 23.220.64.0/20
+          gateway: 23.220.64.39
+        - subnet: 57.76.0.0/17
+          gateway: 57.76.0.137
+        - subnet: 63.110.122.0/23
+          gateway: 63.110.122.58
+        - subnet: 57.91.32.0/20
+          gateway: 57.91.32.73
+        - subnet: 67.206.208.0/20
+          gateway: 67.206.208.116
+        - subnet: 57.91.64.0/20
+          gateway: 57.91.64.121
+        - subnet: 57.91.96.0/20
+          gateway: 57.91.96.87
+
+

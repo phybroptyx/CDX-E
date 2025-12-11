@@ -1,0 +1,296 @@
+version: '3.8'
+
+services:
+  # ═══════════════════════════════════════════════════════════
+  # Web Server 1 - Sydney (EQIX3)
+  # ═══════════════════════════════════════════════════════════
+  
+  web-sydney:
+    image: nginx:alpine
+    container_name: web-sydney-eqix3
+    hostname: web-sydney.cdx.lab
+    networks:
+      eqix3:
+        ipv4_address: 54.252.0.100
+#    volumes:
+#      - ./web-sydney/index.html:/usr/share/nginx/html/index.html:ro
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════
+  # Web Server 2 - Vladivostok (EQIX7)
+  # ═══════════════════════════════════════════════════════════
+  
+  web-vladivostok:
+    image: nginx:alpine
+    container_name: web-vladivostok-eqix7
+    hostname: web-vladivostok.cdx.lab
+    networks:
+      eqix7:
+        ipv4_address: 5.100.64.100
+#    volumes:
+#      - ./web-vladivostok/index.html:/usr/share/nginx/html/index.html:ro
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════
+  # Web Server 3 - Dubai (EQIX8)
+  # ═══════════════════════════════════════════════════════════
+  
+  web-dubai:
+    image: nginx:alpine
+    container_name: web-dubai-eqix8
+    hostname: web-dubai.cdx.lab
+    networks:
+      eqix8:
+        ipv4_address: 5.195.0.100
+#    volumes:
+#      - ./web-dubai/index.html:/usr/share/nginx/html/index.html:ro
+    restart: unless-stopped
+
+  # ═══════════════════════════════════════════════════════════
+  # Web Server 4 - Seoul (EQIX10)
+  # ═══════════════════════════════════════════════════════════
+  
+  web-seoul:
+    image: nginx:alpine
+    container_name: web-seoul-eqix10
+    hostname: web-seoul.cdx.lab
+    networks:
+      eqix10:
+        ipv4_address: 59.192.0.100
+#    volumes:
+#      - ./web-seoul/index.html:/usr/share/nginx/html/index.html:ro
+    restart: unless-stopped
+
+networks:
+  # ═══════════════════════════════════════════════════════════
+  # EQIX3 - Sydney (Area 3)
+  # Router: IXP-T1-EQIX-3
+  # Parent Interface: eth3
+  # ═══════════════════════════════════════════════════════════
+  
+  eqix3:
+    driver: macvlan
+    driver_opts:
+      parent: eth3
+    ipam:
+      config:
+        # Sydney/Australian regional blocks
+        - subnet: 54.252.0.0/15
+          gateway: 54.252.0.19
+        - subnet: 13.54.0.0/15
+          gateway: 13.54.0.8
+        - subnet: 57.71.80.0/20
+          gateway: 57.71.80.73
+        - subnet: 57.71.16.0/20
+          gateway: 57.71.16.25
+        - subnet: 14.203.128.0/18
+          gateway: 14.203.128.94
+        - subnet: 47.72.0.0/16
+          gateway: 47.72.0.46
+        - subnet: 49.156.48.0/22
+          gateway: 49.156.48.83
+        - subnet: 1.128.0.0/18
+          gateway: 1.128.0.111
+        - subnet: 36.88.0.0/13
+          gateway: 36.88.0.179
+        - subnet: 27.32.86.0/23
+          gateway: 27.32.86.64
+        - subnet: 1.136.0.0/18
+          gateway: 1.136.0.95
+        - subnet: 49.197.150.0/23
+          gateway: 49.197.150.80
+        - subnet: 45.119.100.0/22
+          gateway: 45.119.100.122
+        - subnet: 49.226.76.0/23
+          gateway: 49.226.76.97
+        - subnet: 49.225.30.0/23
+          gateway: 49.225.30.32
+        - subnet: 58.174.176.0/20
+          gateway: 58.174.176.201
+        - subnet: 42.241.172.0/22
+          gateway: 42.241.172.49
+        - subnet: 43.251.64.0/22
+          gateway: 43.251.64.65
+        - subnet: 41.109.117.0/24
+          gateway: 41.109.117.194
+        - subnet: 27.108.32.0/21
+          gateway: 27.108.32.39
+        - subnet: 37.18.138.0/24
+          gateway: 37.18.138.44
+
+  # ═══════════════════════════════════════════════════════════
+  # EQIX7 - Vladivostok (Area 7)
+  # Router: IXP-T1-EQIX-7
+  # Parent Interface: eth7
+  # ═══════════════════════════════════════════════════════════
+  
+  eqix7:
+    driver: macvlan
+    driver_opts:
+      parent: eth7
+    ipam:
+      config:
+        # Vladivostok/Russian regional blocks
+        - subnet: 5.100.64.0/18
+          gateway: 5.100.64.87
+        - subnet: 46.3.0.0/16
+          gateway: 46.3.0.172
+        - subnet: 46.96.0.0/16
+          gateway: 46.96.0.157
+        - subnet: 37.212.0.0/14
+          gateway: 37.212.0.73
+        - subnet: 46.131.64.0/18
+          gateway: 46.131.64.197
+        - subnet: 37.153.0.0/18
+          gateway: 37.153.0.105
+        - subnet: 46.196.128.0/18
+          gateway: 46.196.128.101
+        - subnet: 5.177.0.0/17
+          gateway: 5.177.0.19
+        - subnet: 46.213.54.0/23
+          gateway: 46.213.54.142
+        - subnet: 57.88.64.0/20
+          gateway: 57.88.64.73
+        - subnet: 31.192.240.0/20
+          gateway: 31.192.240.61
+        - subnet: 57.92.0.0/20
+          gateway: 57.92.0.9
+        - subnet: 62.192.128.0/18
+          gateway: 62.192.128.43
+        - subnet: 39.56.0.0/17
+          gateway: 39.56.0.148
+        - subnet: 5.76.32.0/20
+          gateway: 5.76.32.19
+        - subnet: 39.44.0.0/16
+          gateway: 39.44.0.60
+        - subnet: 2.179.128.0/19
+          gateway: 2.179.128.37
+        - subnet: 5.161.0.0/16
+          gateway: 5.161.0.85
+        - subnet: 31.193.64.0/20
+          gateway: 31.193.64.137
+        - subnet: 46.240.128.0/17
+          gateway: 46.240.128.124
+        - subnet: 37.151.16.0/21
+          gateway: 37.151.16.227
+
+  # ═══════════════════════════════════════════════════════════
+  # EQIX8 - Dubai (Area 8)
+  # Router: IXP-T1-EQIX-8
+  # Parent Interface: eth8
+  # ═══════════════════════════════════════════════════════════
+  
+  eqix8:
+    driver: macvlan
+    driver_opts:
+      parent: eth8
+    ipam:
+      config:
+        # Dubai/Middle East regional blocks
+        - subnet: 5.195.0.0/16
+          gateway: 5.195.0.122
+        - subnet: 31.29.64.0/19
+          gateway: 31.29.64.73
+        - subnet: 57.12.0.0/16
+          gateway: 57.12.0.41
+        - subnet: 37.211.6.0/23
+          gateway: 37.211.6.42
+        - subnet: 37.208.224.0/22
+          gateway: 37.208.224.98
+        - subnet: 37.186.32.0/19
+          gateway: 37.186.32.79
+        - subnet: 62.201.205.0/24
+          gateway: 62.201.205.37
+        - subnet: 37.131.12.0/22
+          gateway: 37.131.12.13
+        - subnet: 50.119.0.0/16
+          gateway: 50.119.0.58
+        - subnet: 37.205.116.0/24
+          gateway: 37.205.116.54
+        - subnet: 37.56.28.0/22
+          gateway: 37.56.28.85
+        - subnet: 37.34.134.0/23
+          gateway: 37.34.134.93
+        - subnet: 37.40.28.0/22
+          gateway: 37.40.28.146
+        - subnet: 63.168.168.0/23
+          gateway: 63.168.168.143
+        - subnet: 5.246.96.0/19
+          gateway: 5.246.96.55
+        - subnet: 24.239.204.0/22
+          gateway: 24.239.204.197
+        - subnet: 31.44.128.0/22
+          gateway: 31.44.128.31
+        - subnet: 57.88.160.0/20
+          gateway: 57.88.160.28
+        - subnet: 37.237.16.0/20
+          gateway: 37.237.16.46
+        - subnet: 57.88.144.0/20
+          gateway: 57.88.144.45
+        - subnet: 62.56.128.0/21
+          gateway: 62.56.128.137
+
+  # ═══════════════════════════════════════════════════════════
+  # EQIX10 - Seoul (Area 10)
+  # Router: IXP-T1-EQIX-10
+  # Parent Interface: eth10
+  # ═══════════════════════════════════════════════════════════
+  
+  eqix10:
+    driver: macvlan
+    driver_opts:
+      parent: eth10
+    ipam:
+      config:
+        # Seoul/Korean regional blocks
+        - subnet: 27.160.0.0/12
+          gateway: 27.160.0.79
+        - subnet: 14.206.0.0/20
+          gateway: 14.206.0.63
+        - subnet: 27.35.192.0/21
+          gateway: 27.35.192.66
+        - subnet: 14.45.80.0/21
+          gateway: 14.45.80.39
+        - subnet: 61.70.0.0/15
+          gateway: 61.70.0.51
+        - subnet: 27.109.154.0/23
+          gateway: 27.109.154.115
+        - subnet: 1.3.0.0/16
+          gateway: 1.3.0.7
+        - subnet: 14.224.0.0/15
+          gateway: 14.224.0.78
+        
+        # Chinese Internet services
+        - subnet: 59.192.0.0/10
+          gateway: 59.192.0.3
+        
+        - subnet: 42.204.0.0/14
+          gateway: 42.204.0.31
+        - subnet: 42.192.0.0/15
+          gateway: 42.192.0.74
+        - subnet: 61.165.0.0/16
+          gateway: 61.165.0.117
+        - subnet: 36.249.0.0/19
+          gateway: 36.249.0.114
+        - subnet: 175.45.176.0/23
+          gateway: 175.45.176.69
+        - subnet: 202.72.96.4/30
+          gateway: 202.72.96.5
+        - subnet: 60.255.0.0/16
+          gateway: 60.255.0.187
+        - subnet: 49.120.0.0/23
+          gateway: 49.120.0.87
+        - subnet: 43.0.0.0/9
+          gateway: 43.0.0.16
+        - subnet: 57.92.80.0/20
+          gateway: 57.92.80.19
+        - subnet: 60.56.240.0/20
+          gateway: 60.56.240.98
+        - subnet: 49.100.0.0/17
+          gateway: 49.100.0.88
+        - subnet: 59.179.160.0/19
+          gateway: 59.179.160.58
+        
+        # Root DNS (Seoul allocation: m anycast)
+        - subnet: 202.12.27.0/24
+          gateway: 202.12.27.1

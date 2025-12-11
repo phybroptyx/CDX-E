@@ -1,0 +1,34 @@
+; .net TLD Zone File - CORRECTED WITH CDX-I ROUTED IPS
+; Authoritative zone for .net top-level domain
+; Operator: Verisign
+; Primary: net-tld-primary.cdx.lab (192.5.5.51)
+; Secondary: net-tld-secondary.cdx.lab (198.41.0.51)
+
+$TTL 172800    ; 2 days
+$ORIGIN net.
+
+@   IN  SOA net-tld-primary.cdx.lab. hostmaster.verisign.cdx.lab. (
+                2024121002  ; Serial - UPDATED for IP corrections
+                1800        ; Refresh
+                900         ; Retry
+                604800      ; Expire
+                86400 )     ; Minimum TTL
+
+; Name servers for .net TLD
+@   IN  NS  net-tld-primary.cdx.lab.
+@   IN  NS  net-tld-secondary.cdx.lab.
+
+; Glue records
+net-tld-primary.cdx.lab.    IN  A  192.5.5.51
+net-tld-secondary.cdx.lab.  IN  A  198.41.0.51
+
+;
+; Pre-staged Websites - .net domains
+; ALL IPs use CDX-I routed space for reachability
+;
+
+; WhatsApp (US - EQIX4 Seattle)
+whatsapp        IN  A  104.215.95.91
+www.whatsapp    IN  CNAME  whatsapp
+
+; Add more .net domain delegations here as needed
