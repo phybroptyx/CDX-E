@@ -60,11 +60,11 @@ msn             IN  A  52.164.206.104
 www.msn         IN  CNAME  msn
 microsoft365    IN  A  52.164.206.105
 www.microsoft365 IN  CNAME  microsoft365
-msftconnecttest IN  A  52.164.206.56
+msftconnecttest IN  A  131.107.1.1
 www.msftconnecttest IN  CNAME  msftconnecttest
-msftncsi        IN  A  52.164.206.217
+msftncsi        IN  A  131.107.1.2
 www.msftncsi    IN  CNAME  msftncsi
-dns.msftncsi.com  IN  A  131.107.255.255
+dns.msftncsi  IN  A  131.107.255.255
 
 ; Tech & Dev (EQIX4 Seattle - 104.215.95.0/24)
 github          IN  A  104.215.95.20
