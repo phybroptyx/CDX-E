@@ -1,4 +1,4 @@
-# CDX-I (Cyber Defense eXercise Internet)
+# CDX-I (Cyber Defense eXercise - Internet)
 
 ## Overview
 
