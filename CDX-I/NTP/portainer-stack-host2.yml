@@ -1,0 +1,74 @@
+version: '3.8'
+
+# CDX-NTP Stack - Docker Host 2 (Europe)
+# Geographic Region: EQIX2 Amsterdam, EQIX6 Frankfurt
+# Containers: 2 NTP servers
+# Stack Name: cdx-ntp
+
+services:
+  #
+  # Frankfurt NTP Server (EQIX6)
+  # ⭐ PRIMARY - ntp.nist.gov (46.244.164.88)
+  #
+
+  cdx-ntp-frankfurt:
+    image: cturra/ntp:latest
+    container_name: cdx-ntp-frankfurt
+    hostname: ntp-frankfurt.cdx.lab
+    networks:
+      eqix6:
+        ipv4_address: 46.244.164.88
+    environment:
+      - TZ=Europe/Berlin
+      - NTP_SERVERS=103.140.210.1
+      - LOG_LEVEL=1
+    restart: unless-stopped
+    cap_add:
+      - SYS_TIME
+      - SYS_NICE
+    labels:
+      - "cdx.component=ntp"
+      - "cdx.region=europe"
+      - "cdx.site=eqix6-frankfurt"
+      - "cdx.stratum=2"
+      - "cdx.dns-entry=ntp.nist.gov"
+      - "cdx.critical=true"
+
+  #
+  # Amsterdam NTP Server (EQIX2)
+  #
+
+  cdx-ntp-amsterdam:
+    image: cturra/ntp:latest
+    container_name: cdx-ntp-amsterdam
+    hostname: ntp-amsterdam.cdx.lab
+    networks:
+      eqix2:
+        ipv4_address: 37.74.100.100
+    environment:
+      - TZ=Europe/Amsterdam
+      - NTP_SERVERS=103.140.210.1
+      - LOG_LEVEL=1
+    restart: unless-stopped
+    cap_add:
+      - SYS_TIME
+      - SYS_NICE
+    labels:
+      - "cdx.component=ntp"
+      - "cdx.region=europe"
+      - "cdx.site=eqix2-amsterdam"
+      - "cdx.stratum=2"
+
+#
+# Docker Networks
+# Reusing existing networks from DNS deployment
+#
+
+networks:
+  eqix2:
+    external: true
+    name: cdx-dns_eqix2
+
+  eqix6:
+    external: true
+    name: cdx-dns_eqix6

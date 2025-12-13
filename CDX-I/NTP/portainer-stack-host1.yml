@@ -1,0 +1,71 @@
+version: '3.8'
+
+# CDX-NTP Stack - Docker Host 1 (Americas)
+# Geographic Region: EQIX4 Seattle, EQIX5 Toronto
+# Containers: 2 NTP servers
+# Stack Name: cdx-ntp
+
+services:
+  #
+  # Seattle NTP Server (EQIX4)
+  #
+
+  cdx-ntp-seattle:
+    image: cturra/ntp:latest
+    container_name: cdx-ntp-seattle
+    hostname: ntp-seattle.cdx.lab
+    networks:
+      eqix4:
+        ipv4_address: 192.5.5.100
+    environment:
+      - TZ=America/Los_Angeles
+      - NTP_SERVERS=103.140.210.1
+      - LOG_LEVEL=1
+    restart: unless-stopped
+    cap_add:
+      - SYS_TIME
+      - SYS_NICE
+    labels:
+      - "cdx.component=ntp"
+      - "cdx.region=americas"
+      - "cdx.site=eqix4-seattle"
+      - "cdx.stratum=2"
+
+  #
+  # Toronto NTP Server (EQIX5)
+  #
+
+  cdx-ntp-toronto:
+    image: cturra/ntp:latest
+    container_name: cdx-ntp-toronto
+    hostname: ntp-toronto.cdx.lab
+    networks:
+      eqix5:
+        ipv4_address: 198.41.0.100
+    environment:
+      - TZ=America/Toronto
+      - NTP_SERVERS=103.140.210.1
+      - LOG_LEVEL=1
+    restart: unless-stopped
+    cap_add:
+      - SYS_TIME
+      - SYS_NICE
+    labels:
+      - "cdx.component=ntp"
+      - "cdx.region=americas"
+      - "cdx.site=eqix5-toronto"
+      - "cdx.stratum=2"
+
+#
+# Docker Networks
+# Reusing existing networks from DNS deployment
+#
+
+networks:
+  eqix4:
+    external: true
+    name: cdx-dns_eqix4
+
+  eqix5:
+    external: true
+    name: cdx-dns_eqix5

@@ -1,0 +1,159 @@
+{
+  "_meta": {
+    "exerciseName": "CHILLED_ROCKET",
+    "description": "Stark Industries global enterprise environment",
+    "version": "1.0",
+    "author": "CDX-E Team",
+    "created": "2024-01-15"
+  },
+
+  "sites": [
+    {
+      "name": "StarkTower-NYC",
+      "description": "Stark Industries Global Headquarters, New York City, USA",
+      "subnet": {
+        "cidr": "66.218.180.0/22",
+        "location": "New York, USA"
+      }
+    },
+    {
+      "name": "Malibu-Mansion",
+      "description": "Tony Stark's primary residence and private lab, Malibu, CA, USA",
+      "subnet": {
+        "cidr": "4.150.216.0/22",
+        "location": "Malibu, CA, USA"
+      }
+    },
+    {
+      "name": "Dallas-Branch",
+      "description": "Stark Industries U.S. Manufacturing and Operations Center, Dallas, TX, USA",
+      "subnet": {
+        "cidr": "50.222.72.0/22",
+        "location": "Dallas, TX, USA"
+      }
+    },
+    {
+      "name": "Nagasaki-Facility",
+      "description": "Stark Industries Overseas R&D and Weapons Facility, Nagasaki, Japan",
+      "subnet": {
+        "cidr": "14.206.0.0/22",
+        "location": "Nagasaki, Japan"
+      }
+    },
+    {
+      "name": "Amsterdam-Hub",
+      "description": "Stark Industries European Administration and Logistics Hub, Amsterdam, Netherlands",
+      "subnet": {
+        "cidr": "37.74.124.0/22",
+        "location": "Amsterdam, Netherlands"
+      }
+    }
+  ],
+
+  "siteLinks": [
+    {
+      "name": "US-Backbone-Link",
+      "sites": ["StarkTower-NYC", "Dallas-Branch", "Malibu-Mansion"],
+      "cost": 50,
+      "replicationIntervalMins": 15
+    },
+    {
+      "name": "Transatlantic-Link",
+      "sites": ["StarkTower-NYC", "Amsterdam-Hub"],
+      "cost": 90,
+      "replicationIntervalMins": 60
+    },
+    {
+      "name": "PAC-Link",
+      "sites": ["StarkTower-NYC", "Nagasaki-Facility"],
+      "cost": 110,
+      "replicationIntervalMins": 120
+    },
+    {
+      "name": "EU-APAC-Link",
+      "sites": ["Amsterdam-Hub", "Nagasaki-Facility"],
+      "cost": 120,
+      "replicationIntervalMins": 120
+    }
+  ],
+
+  "organizationalStructure": {
+    "rootOU": "Sites",
+    "rootOUDescription": "Top-level container for all site-specific OUs",
+    
+    "siteMappings": {
+      "HQ": {
+        "siteName": "StarkTower-NYC",
+        "departments": [
+          "Operations",
+          "IT-Core",
+          "Ops-Support",
+          "HR",
+          "Legal",
+          "Gov-Liaison",
+          "Engineering",
+          "Engineering Development",
+          "QA",
+          "CAD"
+        ]
+      },
+      "Dallas": {
+        "siteName": "Dallas-Branch",
+        "departments": [
+          "Operations",
+          "IT-Core",
+          "Ops-Support",
+          "Engineering",
+          "Engineering Development",
+          "QA",
+          "CAD"
+        ]
+      },
+      "Malibu": {
+        "siteName": "Malibu-Mansion",
+        "departments": [
+          "Operations",
+          "Development"
+        ]
+      },
+      "Nagasaki": {
+        "siteName": "Nagasaki-Facility",
+        "departments": [
+          "Operations",
+          "IT-Core",
+          "Ops-Support",
+          "Engineering",
+          "Engineering Development",
+          "QA"
+        ]
+      },
+      "Amsterdam": {
+        "siteName": "Amsterdam-Hub",
+        "departments": [
+          "Operations",
+          "IT-Core",
+          "Ops-Support",
+          "Engineering",
+          "Engineering Development",
+          "QA"
+        ]
+      }
+    },
+
+    "departmentSubOUs": [
+      "Workstations",
+      "Servers",
+      "Users",
+      "Groups",
+      "ServiceAccounts",
+      "Resources"
+    ]
+  },
+
+  "advancedOptions": {
+    "createSiteSubnets": true,
+    "createSiteLinks": true,
+    "protectOUsFromDeletion": false,
+    "ouNamingScheme": "hierarchical"
+  }
+}

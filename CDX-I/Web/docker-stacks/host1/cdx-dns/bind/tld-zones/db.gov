@@ -1,0 +1,43 @@
+; .gov TLD Zone File
+; Authoritative zone for .gov top-level domain
+; Operator: US General Services Administration (GSA)
+; Primary: gov-tld-primary.cdx.lab (192.5.5.55)
+; Secondary: gov-tld-secondary.cdx.lab (198.41.0.55)
+
+$TTL 172800    ; 2 days
+$ORIGIN gov.
+
+@   IN  SOA gov-tld-primary.cdx.lab. hostmaster.dotgov.cdx.lab. (
+                2024121001  ; Serial
+                1800        ; Refresh
+                900         ; Retry
+                604800      ; Expire
+                86400 )     ; Minimum TTL
+
+; Name servers for .gov TLD
+@   IN  NS  gov-tld-primary.cdx.lab.
+@   IN  NS  gov-tld-secondary.cdx.lab.
+
+; Glue records
+gov-tld-primary.cdx.lab.    IN  A  192.5.5.55
+gov-tld-secondary.cdx.lab.  IN  A  198.41.0.55
+
+;
+; US Government Domain Delegations
+;
+
+; NIST NTP Service (CDX-I Timing Source)
+; Located in Frankfurt routing area (46.244.164.0/22)
+ntp             IN  NS  ntp-ns.nist.gov.
+ntp-ns.nist     IN  A   46.244.164.89
+
+; NTP service records
+ntp.nist        IN  A   46.244.164.88
+time.nist       IN  A   46.244.164.88
+time-a.nist     IN  A   46.244.164.88
+time-b.nist     IN  A   46.244.164.88
+
+; Add more .gov domain delegations here as needed
+; Example:
+; whitehouse  IN  NS  ns1.whitehouse.gov.
+; whitehouse  IN  NS  ns2.whitehouse.gov.

@@ -1,0 +1,75 @@
+{
+  "users": [
+    {
+      "sAMAccountName": "tstark",
+      "numericId": "1234567890",
+      
+      "givenName": "Tony",
+      "sn": "Stark",
+      "initials": "H",
+      "displayName": "Stark, Tony H",
+      "title": "Chief Executive Officer",
+
+      "streetAddress": "1000 Union Plaza",
+      "city": "New York",
+      "state": "NY",
+      "postalCode": "10001",
+      "country": "US",
+
+      "telephoneNumber": "+1 (212) 555-0101",
+
+      "ou": "OU=Users,OU=Operations,OU=HQ,OU=Sites",
+      "password": "P@ssw0rd123!",
+      "enabled": true,
+
+      "groups": [
+        "Ops-Users",
+        "IT-Admins"
+      ]
+    },
+    {
+      "sAMAccountName": "ppotts",
+      "numericId": "2345678901",
+
+      "givenName": "Pepper",
+      "sn": "Potts",
+      "initials": "R",
+      "displayName": "Potts, Pepper R",
+      "title": "Operations Analyst",
+
+      "streetAddress": "2000 Commerce Park Drive",
+      "city": "Dallas",
+      "state": "TX",
+      "postalCode": "75201",
+      "country": "US",
+
+      "telephoneNumber": "+1 (214) 555-0203",
+
+      "ou": "OU=Users,OU=Ops-Support,OU=HQ,OU=Sites",
+      "password": "Str0ngPassw0rd!",
+      "enabled": true,
+
+      "groups": [
+        "Ops-Users"
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "name": "Operations Users",
+      "sAMAccountName": "Ops-Users",
+      "scope": "Global",
+      "category": "Security",
+      "description": "All Operations Department Users",
+      "ou": "OU=Groups,OU=Operations,OU=HQ,OU=Sites"
+    },
+    {
+      "name": "IT Administrators",
+      "sAMAccountName": "IT-Admins",
+      "scope": "Global",
+      "category": "Security",
+      "description": "IT Admins",
+      "ou": "OU=Groups,OU=IT-Core,OU=HQ,OU=Sites"
+    }
+  ]
+}

@@ -1,0 +1,111 @@
+configure
+
+########################################
+# System Identity / Base Services
+########################################
+
+set system host-name 'IXP-T1-EQIX-6'
+set system domain-name 'cdx.lab'
+set system time-zone 'Europe/Berlin'
+
+set service ntp server '46.244.164.88'
+set service ssh port '2022'
+
+########################################
+# Interfaces
+# eth0: Management
+########################################
+
+# eth0: Management (DHCP from lab management network)
+set interfaces ethernet eth0 description 'Management'
+set interfaces ethernet eth0 address 'dhcp'
+
+# eth1: Tier-1 Regional Gateway – Frankfurt (Multiple Regional / ISP Peering Blocks)
+set interfaces ethernet eth1 description 'Tier 1 Regional Gateway - Frankfurt'
+set interfaces ethernet eth1 address '18.194.0.22/15'
+set interfaces ethernet eth1 address '41.57.128.19/18'
+set interfaces ethernet eth1 address '53.0.0.94/8'
+set interfaces ethernet eth1 address '31.169.128.63/17'
+set interfaces ethernet eth1 address '46.168.0.31/16'
+set interfaces ethernet eth1 address '46.74.192.39/23'
+set interfaces ethernet eth1 address '5.179.200.113/21'
+set interfaces ethernet eth1 address '37.120.192.69/19'
+set interfaces ethernet eth1 address '37.32.128.96/20'
+set interfaces ethernet eth1 address '41.219.0.122/18'
+set interfaces ethernet eth1 address '41.88.0.19/16'
+set interfaces ethernet eth1 address '41.208.64.53/19'
+set interfaces ethernet eth1 address '41.95.0.72/16'
+set interfaces ethernet eth1 address '41.206.64.101/19'
+set interfaces ethernet eth1 address '46.244.164.91/22'
+set interfaces ethernet eth1 address '41.58.0.111/18'
+set interfaces ethernet eth1 address '41.243.192.67/18'
+set interfaces ethernet eth1 address '41.195.0.29/16'
+set interfaces ethernet eth1 address '41.24.224.49/19'
+set interfaces ethernet eth1 address '41.72.160.107/19'
+set interfaces ethernet eth1 address '37.220.192.88/18'
+
+# Root DNS address space on regional interface (EQIX6 - Frankfurt allocation)
+# NOTE: Previous configuration had ALL 13 root networks here
+# Updated to only include EQIX6-allocated root servers (I and M)
+set interfaces ethernet eth1 address '192.36.148.1/24'    # i.root-servers.net
+set interfaces ethernet eth1 address '202.12.27.1/24'     # m.root-servers.net (Paris instance)
+
+# eth2: Upstream to Tier-0 (including one of the root /24s)
+set interfaces ethernet eth2 description 'to TIER 0'
+set interfaces ethernet eth2 address '185.1.102.74/28'
+
+########################################
+# Static Routing
+########################################
+# (None – Tier-1 router participates in OSPF only)
+########################################
+
+########################################
+# OSPF – Tier-1 Regional IXP (Frankfurt)
+# - Area 0: Link to Tier-0
+# - Area 6: Frankfurt Regional + Root DNS Blocks
+# - Router-ID based on primary Frankfurt address
+########################################
+
+# Router-ID for this Tier-1 IXP
+set protocols ospf parameters router-id '18.194.0.22'
+
+# Tier-0 transit network (Area 0)
+set protocols ospf area 0 network '185.1.102.64/28'
+
+# Frankfurt regional & root DNS networks (Area 6)
+set protocols ospf area 6 network '18.194.0.0/15'
+set protocols ospf area 6 network '41.57.128.0/18'
+set protocols ospf area 6 network '53.0.0.0/8'
+set protocols ospf area 6 network '31.169.128.0/17'
+set protocols ospf area 6 network '46.168.0.0/16'
+set protocols ospf area 6 network '46.74.192.0/23'
+set protocols ospf area 6 network '5.179.200.0/21'
+set protocols ospf area 6 network '37.120.192.0/19'
+set protocols ospf area 6 network '37.32.128.0/20'
+set protocols ospf area 6 network '41.219.0.0/18'
+set protocols ospf area 6 network '41.88.0.0/16'
+set protocols ospf area 6 network '41.208.64.0/19'
+set protocols ospf area 6 network '41.95.0.0/16'
+set protocols ospf area 6 network '41.206.64.0/19'
+set protocols ospf area 6 network '46.244.164.0/22'
+set protocols ospf area 6 network '41.58.0.0/18'
+set protocols ospf area 6 network '41.243.192.0/18'
+set protocols ospf area 6 network '41.195.0.0/16'
+set protocols ospf area 6 network '41.24.224.0/19'
+set protocols ospf area 6 network '41.72.160.0/19'
+set protocols ospf area 6 network '37.220.192.0/18'
+
+# Root DNS networks (Area 6) - EQIX6 Frankfurt allocation ONLY
+set protocols ospf area 6 network '192.36.148.0/24'      # i.root-servers.net
+set protocols ospf area 6 network '202.12.27.0/24'       # m.root-servers.net
+
+########################################
+# NAT
+# (None – Tier-1 regional gateway is purely routed)
+########################################
+# (Intentionally no "set nat ..." statements)
+
+commit
+save
+exit
