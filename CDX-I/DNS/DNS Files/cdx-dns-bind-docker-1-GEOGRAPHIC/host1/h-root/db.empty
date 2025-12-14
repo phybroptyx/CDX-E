@@ -1,9 +1,0 @@
-; Empty zone file for RFC 1918 reverse zones
-$TTL 86400
-@   IN  SOA  localhost. root.localhost. (
-                1       ; Serial
-                3600    ; Refresh
-                1800    ; Retry
-                604800  ; Expire
-                86400 ) ; Minimum TTL
-    IN  NS   localhost.

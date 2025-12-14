@@ -1,8 +1,0 @@
-zone "edu" {
-    type secondary;
-    file "/var/cache/bind/db.edu";
-    primaries { 192.5.5.54; };
-};
-
-zone "10.in-addr.arpa" { type primary; file "/etc/bind/db.empty"; };
-zone "168.192.in-addr.arpa" { type primary; file "/etc/bind/db.empty"; };
