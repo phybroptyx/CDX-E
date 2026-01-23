@@ -1,0 +1,40 @@
+configure
+
+########################################
+# System Identity / Base Services
+########################################
+
+set system host-name 'SDP-NYC-1'
+set system domain-name 'sanctum-santorum.midgard.mrvl'
+set system time-zone 'America/New_York'
+
+set service ntp server '46.244.164.88'
+set service ssh port '22'
+
+########################################
+# Interfaces
+# eth0: Management (pre-configured, do NOT modify here)
+########################################
+
+# eth1: Core Services - 37.74.124.64/26
+set interfaces ethernet eth1 description 'Internal'
+set interfaces ethernet eth1 address '38.38.140.1/24'
+
+# eth2: External / Upstream toward Tier-1 (Toronto IXP)
+set interfaces ethernet eth2 description 'to ISP'
+set interfaces ethernet eth2 address '38.38.139.225/21'
+
+########################################
+# Routing
+########################################
+
+# Default route: send all non-local traffic toward ISP
+set protocols static route 0.0.0.0/0 next-hop '38.38.136.124'
+
+########################################
+# Commit & Save
+########################################
+
+commit
+save
+exit
