@@ -14,9 +14,9 @@ exercise:
   classification: "mission_partner"
 
 ssh:
-  host: "cdx-pve-03"
   user: "root"
   auth: "key"
+  template_node: "cdx-pve-01"  # Node where templates reside (used for clone operations)
 
 # =============================================================================
 # Virtual Machine Specifications
