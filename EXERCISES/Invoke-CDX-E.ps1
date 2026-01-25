@@ -84,6 +84,7 @@
     2.2  2025-01-23  Cloud-init integration for static IP configuration
     2.3  2025-01-23  Cloud-init fix (qm cloudinit update), auto-generated descriptions
     2.4  2025-01-23  Markdown-formatted VM descriptions
+    2.5  2025-01-23  Mixed-node deployment support (template_node vs target node)
     
     Requires:   
         - PowerShell 5.1+ or PowerShell Core
@@ -91,14 +92,6 @@
         - SSH key authentication configured to Proxmox node
         - Cloud-init enabled templates with ide2 cloud-init drive
 #>
-
-# =============================================================================
-# Script Information
-# =============================================================================
-$Script:Version = "2.4"
-$Script:Name = "Invoke-CDX-E"
-$Script:Author = "CDX-E Framework / J.A.R.V.I.S."
-$Script:Updated = "2025-01-23"
 
 [CmdletBinding()]
 param(
@@ -122,6 +115,14 @@ param(
     [Parameter(Mandatory = $false)]
     [switch]$NoStart
 )
+
+# =============================================================================
+# Script Information
+# =============================================================================
+$Script:Version = "2.5"
+$Script:Name = "Invoke-CDX-E"
+$Script:Author = "CDX-E Framework / J.A.R.V.I.S."
+$Script:Updated = "2025-01-23"
 
 # =============================================================================
 # Module Check
@@ -355,29 +356,31 @@ function Invoke-DeployAction {
     )
     
     $results = @()
+    $sshUser = $SSH.user
+    $templateNode = $SSH.template_node  # Node where templates reside
     
     foreach ($vm in $VMs) {
         Write-Host ""
         Write-Host "-----------------------------------------------------------------------" -ForegroundColor Cyan
         Write-Host "  Deploying: $($vm.name) (VM $($vm.vmid))" -ForegroundColor Cyan
+        Write-Host "  Template Node: $templateNode -> Target Node: $($vm.proxmox.node)" -ForegroundColor DarkCyan
         Write-Host "-----------------------------------------------------------------------" -ForegroundColor Cyan
         
         $success = $true
         $vmid = $vm.vmid
-        $sshHost = $SSH.host
-        $sshUser = $SSH.user
+        $targetNode = $vm.proxmox.node  # Node where VM will run
         
-        # Step 1: Clone
-        Write-Log "Cloning template $($vm.template.id) to VM $vmid..." -Level Info
+        # Step 1: Clone (execute on TEMPLATE node)
+        Write-Log "Cloning template $($vm.template.id) to VM $vmid (via $templateNode)..." -Level Info
         
         if ($vm.clone.type -eq "full") {
-            $cloneCmd = "qm clone $($vm.template.id) $vmid --name $($vm.name) --pool $($vm.proxmox.pool) --target $($vm.proxmox.node) --storage $($vm.clone.target_storage) --full"
+            $cloneCmd = "qm clone $($vm.template.id) $vmid --name $($vm.name) --pool $($vm.proxmox.pool) --target $targetNode --storage $($vm.clone.target_storage) --full"
         }
         else {
-            $cloneCmd = "qm clone $($vm.template.id) $vmid --name $($vm.name) --pool $($vm.proxmox.pool) --target $($vm.proxmox.node)"
+            $cloneCmd = "qm clone $($vm.template.id) $vmid --name $($vm.name) --pool $($vm.proxmox.pool) --target $targetNode"
         }
         
-        $result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $cloneCmd -DryRun:$DryRun
+        $result = Invoke-SSHCommand -TargetHost $templateNode -User $sshUser -Command $cloneCmd -DryRun:$DryRun
         
         if (-not $result.Success -and -not $DryRun) {
             Write-Log "Clone failed: $($result.Output)" -Level Error
@@ -388,15 +391,15 @@ function Invoke-DeployAction {
         
         if (-not $DryRun) { Start-Sleep -Seconds 8 }
         
-        # Step 2: Configure Resources and Auto-Generate Description
-        Write-Log "Configuring VM resources..." -Level Info
+        # Step 2: Configure Resources (execute on TARGET node)
+        Write-Log "Configuring VM resources (via $targetNode)..." -Level Info
         
         $autoDescription = Build-VMDescription -VM $vm
         $escapedDescription = $autoDescription -replace "'", "'\''"
         $tags = $vm.proxmox.tags -join ";"
         $configCmd = "qm set $vmid --memory $($vm.resources.memory_mb) --cores $($vm.resources.cores) --sockets $($vm.resources.sockets) --description '$escapedDescription' --tags $tags"
         
-        $result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $configCmd -DryRun:$DryRun
+        $result = Invoke-SSHCommand -TargetHost $targetNode -User $sshUser -Command $configCmd -DryRun:$DryRun
         
         if (-not $result.Success -and -not $DryRun) {
             Write-Log "Resource configuration failed: $($result.Output)" -Level Error
@@ -406,7 +409,7 @@ function Invoke-DeployAction {
         Write-Log "Resources configured." -Level Success
         Write-Log "Description: $autoDescription" -Level Info
         
-        # Step 3: Add NICs
+        # Step 3: Add NICs (execute on TARGET node)
         if ($vm.network.additional_nics -and $vm.network.additional_nics.Count -gt 0) {
             Write-Log "Adding $($vm.network.additional_nics.Count) network interface(s)..." -Level Info
             
@@ -414,7 +417,7 @@ function Invoke-DeployAction {
                 $nicConfig = Build-NicConfigString -NicConfig $nic
                 $nicCmd = "qm set $vmid --net$($nic.nic_id) $nicConfig"
                 
-                $result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $nicCmd -DryRun:$DryRun
+                $result = Invoke-SSHCommand -TargetHost $targetNode -User $sshUser -Command $nicCmd -DryRun:$DryRun
                 
                 if (-not $result.Success -and -not $DryRun) {
                     Write-Log "NIC configuration failed: $($result.Output)" -Level Error
@@ -430,7 +433,7 @@ function Invoke-DeployAction {
             }
         }
         
-        # Step 4: Configure cloud-init (if specified)
+        # Step 4: Configure cloud-init (execute on TARGET node)
         if ($vm.cloud_init -and $vm.cloud_init.ip) {
             Write-Log "Configuring cloud-init for net1..." -Level Info
             
@@ -445,7 +448,7 @@ function Invoke-DeployAction {
             # Build cloud-init command with proper quoting
             $cloudInitCmd = "qm set $vmid --ipconfig1 '$ipconfigValue' --nameserver $dns"
             
-            $result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $cloudInitCmd -DryRun:$DryRun
+            $result = Invoke-SSHCommand -TargetHost $targetNode -User $sshUser -Command $cloudInitCmd -DryRun:$DryRun
             
             if (-not $result.Success -and -not $DryRun) {
                 Write-Log "Cloud-init configuration failed: $($result.Output)" -Level Error
@@ -457,7 +460,7 @@ function Invoke-DeployAction {
             # Step 4b: Regenerate cloud-init image
             Write-Log "Regenerating cloud-init image..." -Level Info
             $regenCmd = "qm cloudinit update $vmid"
-            $result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $regenCmd -DryRun:$DryRun
+            $result = Invoke-SSHCommand -TargetHost $targetNode -User $sshUser -Command $regenCmd -DryRun:$DryRun
             
             if (-not $result.Success -and -not $DryRun) {
                 Write-Log "Cloud-init regeneration warning: $($result.Output)" -Level Warning
@@ -468,13 +471,13 @@ function Invoke-DeployAction {
             }
         }
         
-        # Step 5: Start VM
+        # Step 5: Start VM (execute on TARGET node)
         $shouldStart = $vm.clone.start_after_clone -and (-not $NoStart)
         
         if ($shouldStart) {
             Write-Log "Starting VM..." -Level Info
             $startCmd = "qm start $vmid"
-            $result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $startCmd -DryRun:$DryRun
+            $result = Invoke-SSHCommand -TargetHost $targetNode -User $sshUser -Command $startCmd -DryRun:$DryRun
             
             if (-not $result.Success -and -not $DryRun) {
                 Write-Log "VM start failed: $($result.Output)" -Level Error
@@ -504,21 +507,21 @@ function Invoke-DestroyAction {
     )
     
     $results = @()
-    $sshHost = $SSH.host
     $sshUser = $SSH.user
     
     foreach ($vm in $VMs) {
         Write-Host ""
         Write-Host "-----------------------------------------------------------------------" -ForegroundColor Red
-        Write-Host "  Destroying: $($vm.name) (VM $($vm.vmid))" -ForegroundColor Red
+        Write-Host "  Destroying: $($vm.name) (VM $($vm.vmid)) on $($vm.proxmox.node)" -ForegroundColor Red
         Write-Host "-----------------------------------------------------------------------" -ForegroundColor Red
         
         $vmid = $vm.vmid
+        $targetNode = $vm.proxmox.node  # Execute on VM's host node
         
         # Step 1: Stop VM (ignore errors if already stopped)
-        Write-Log "Stopping VM $vmid..." -Level Info
+        Write-Log "Stopping VM $vmid (via $targetNode)..." -Level Info
         $stopCmd = "qm stop $vmid --skiplock 1"
-        $result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $stopCmd -DryRun:$DryRun
+        $result = Invoke-SSHCommand -TargetHost $targetNode -User $sshUser -Command $stopCmd -DryRun:$DryRun
         
         if ($result.Success -or $DryRun) {
             Write-Log "VM stopped (or was already stopped)." -Level Success
@@ -529,7 +532,7 @@ function Invoke-DestroyAction {
         # Step 2: Destroy VM
         Write-Log "Destroying VM $vmid..." -Level Info
         $destroyCmd = "qm destroy $vmid --purge 1 --skiplock 1"
-        $result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $destroyCmd -DryRun:$DryRun
+        $result = Invoke-SSHCommand -TargetHost $targetNode -User $sshUser -Command $destroyCmd -DryRun:$DryRun
         
         if (-not $result.Success -and -not $DryRun) {
             Write-Log "Destroy failed: $($result.Output)" -Level Error
@@ -555,15 +558,15 @@ function Invoke-StartAction {
     )
     
     $results = @()
-    $sshHost = $SSH.host
     $sshUser = $SSH.user
     
     foreach ($vm in $VMs) {
         $vmid = $vm.vmid
-        Write-Log "Starting VM $vmid ($($vm.name))..." -Level Info
+        $targetNode = $vm.proxmox.node  # Execute on VM's host node
+        Write-Log "Starting VM $vmid ($($vm.name)) on $targetNode..." -Level Info
         
         $startCmd = "qm start $vmid"
-        $result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $startCmd -DryRun:$DryRun
+        $result = Invoke-SSHCommand -TargetHost $targetNode -User $sshUser -Command $startCmd -DryRun:$DryRun
         
         if (-not $result.Success -and -not $DryRun) {
             # Check if already running
@@ -596,15 +599,15 @@ function Invoke-StopAction {
     )
     
     $results = @()
-    $sshHost = $SSH.host
     $sshUser = $SSH.user
     
     foreach ($vm in $VMs) {
         $vmid = $vm.vmid
-        Write-Log "Stopping VM $vmid ($($vm.name))..." -Level Info
+        $targetNode = $vm.proxmox.node  # Execute on VM's host node
+        Write-Log "Stopping VM $vmid ($($vm.name)) on $targetNode..." -Level Info
         
         $stopCmd = "qm stop $vmid"
-        $result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $stopCmd -DryRun:$DryRun
+        $result = Invoke-SSHCommand -TargetHost $targetNode -User $sshUser -Command $stopCmd -DryRun:$DryRun
         
         if (-not $result.Success -and -not $DryRun) {
             # Check if already stopped
@@ -637,7 +640,6 @@ function Invoke-StatusAction {
     )
     
     $results = @()
-    $sshHost = $SSH.host
     $sshUser = $SSH.user
     
     Write-Host ""
@@ -649,6 +651,7 @@ function Invoke-StatusAction {
     
     foreach ($vm in $VMs) {
         $vmid = $vm.vmid
+        $targetNode = $vm.proxmox.node  # Query on VM's host node
         
         # Extract IP from cloud_init config for display
         $ipAddress = "DHCP"
@@ -662,7 +665,7 @@ function Invoke-StatusAction {
         }
         else {
             $statusCmd = "qm status $vmid"
-            $result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $statusCmd -DryRun:$false -Silent
+            $result = Invoke-SSHCommand -TargetHost $targetNode -User $sshUser -Command $statusCmd -DryRun:$false -Silent
             
             if ($result.Success) {
                 if ($result.Output -match "running") {
