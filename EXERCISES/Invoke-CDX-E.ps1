@@ -71,20 +71,21 @@
 .NOTES
     Script:     Invoke-CDX-E.ps1
     Author:     CDX-E Framework / J.A.R.V.I.S.
-    Version:    2.4
-    Created:    2025-01-22
-    Updated:    2025-01-23
+    Version:    2.5.1
+    Created:    2026-01-22
+    Updated:    2026-01-23
     
     Version History:
-    1.0  2025-01-22  Initial release (Deploy-ProxmoxVM.ps1) - Single VM deployment
-    1.1  2025-01-22  Fixed ASCII encoding, linked clone logic, SSH quoting
-    1.2  2025-01-22  Multi-NIC support with optional MAC addresses
-    2.0  2025-01-23  Multi-VM support, -VmFilter, -Confirm parameter
-    2.1  2025-01-23  Multi-action refactor (-Action: Deploy, Destroy, Start, Stop, Status)
-    2.2  2025-01-23  Cloud-init integration for static IP configuration
-    2.3  2025-01-23  Cloud-init fix (qm cloudinit update), auto-generated descriptions
-    2.4  2025-01-23  Markdown-formatted VM descriptions
-    2.5  2025-01-23  Mixed-node deployment support (template_node vs target node)
+    1.0  2026-01-22  Initial release (Deploy-ProxmoxVM.ps1) - Single VM deployment
+    1.1  2026-01-22  Fixed ASCII encoding, linked clone logic, SSH quoting
+    1.2  2026-01-22  Multi-NIC support with optional MAC addresses
+    2.0  2026-01-23  Multi-VM support, -VmFilter, -Confirm parameter
+    2.1  2026-01-23  Multi-action refactor (-Action: Deploy, Destroy, Start, Stop, Status)
+    2.2  2026-01-23  Cloud-init integration for static IP configuration
+    2.3  2026-01-23  Cloud-init fix (qm cloudinit update), auto-generated descriptions
+    2.4  2026-01-23  Markdown-formatted VM descriptions
+    2.5  2026-01-23  Mixed-node deployment support (template_node vs target node)
+    2.5.1 2026-01-23  Fixed Proxmox Access statement URLs
     
     Requires:   
         - PowerShell 5.1+ or PowerShell Core
@@ -122,7 +123,7 @@ param(
 $Script:Version = "2.5"
 $Script:Name = "Invoke-CDX-E"
 $Script:Author = "CDX-E Framework / J.A.R.V.I.S."
-$Script:Updated = "2025-01-23"
+$Script:Updated = "2026-01-23"
 
 # =============================================================================
 # Module Check
@@ -845,6 +846,11 @@ if ($Action -ne "Status") {
 Write-Host ""
 
 if (-not $DryRun -and $Action -eq "Deploy") {
-    Write-Log "Access Proxmox at: https://$($ssh.host):8006" -Level Info
+    # Get unique target nodes from deployed VMs
+    $targetNodes = $filteredVMs | Select-Object -ExpandProperty proxmox | Select-Object -ExpandProperty node -Unique
+    Write-Log "Access Proxmox cluster:" -Level Info
+    foreach ($node in $targetNodes) {
+        Write-Host "       https://${node}:8006" -ForegroundColor Cyan
+    }
     Write-Host ""
 }
