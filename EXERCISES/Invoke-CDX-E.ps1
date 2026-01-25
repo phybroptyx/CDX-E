@@ -1,64 +1,72 @@
 <#
 .SYNOPSIS
-    Deploy-ProxmoxVM.ps1 - Deploy multiple Proxmox VMs from YAML specification via SSH
+    Invoke-CDX-E.ps1 - Comprehensive Proxmox VM lifecycle management for CDX-E exercises
 
 .DESCRIPTION
-    Reads a YAML specification file containing one or more VM definitions and
-    executes Proxmox qm commands via SSH to clone templates, configure resources,
-    add network interfaces, and optionally start the VMs.
+    Manages the complete lifecycle of Proxmox VMs defined in a YAML specification file.
+    Supports deployment, destruction, start/stop operations, and status reporting.
     
-    Supports filtering to deploy specific VMs by ID or name.
+    All operations can target individual VMs, multiple VMs, or all exercise VMs.
     
-    Part of the CDX-E Framework for Operation OBSIDIAN DAGGER.
+    Part of the CDX-E Framework.
+
+.PARAMETER Action
+    The operation to perform. Valid options:
+    - Deploy   : Clone templates and configure new VMs
+    - Destroy  : Stop and permanently remove VMs
+    - Start    : Start stopped VMs
+    - Stop     : Stop running VMs
+    - Status   : Report current state of VMs
 
 .PARAMETER YamlPath
     Path to the YAML specification file containing VM configurations.
 
 .PARAMETER VmFilter
-    Optional filter to deploy specific VMs. Can be:
-    - VM ID (e.g., 5001)
-    - VM name (e.g., "test-2016")
-    - Comma-separated list (e.g., "5001,5002" or "test-2016,Test-2025")
-    - "all" to deploy all VMs (default)
+    Optional filter to target specific VMs.
 
 .PARAMETER Confirm
-    If specified, bypasses the confirmation prompt and proceeds immediately.
+    If specified, bypasses the confirmation prompt.
 
 .PARAMETER DryRun
-    If specified, displays the commands that would be executed without running them.
+    If specified, displays commands without executing.
 
 .PARAMETER NoStart
-    If specified, overrides start_after_clone and leaves all VMs stopped.
+    For Deploy action only: leaves VMs stopped.
 
 .NOTES
-    Script:     Deploy-ProxmoxVM.ps1
+    Script:     Invoke-CDX-E.ps1
     Author:     CDX-E Framework / J.A.R.V.I.S.
-    Version:    2.0
+    Version:    2.1
     Created:    2025-01-22
     Updated:    2025-01-23
     
     Version History:
-    1.0  2025-01-22  Initial release - Single VM deployment from YAML
+    1.0  2025-01-22  Initial release (Deploy-ProxmoxVM.ps1) - Single VM deployment
     1.1  2025-01-22  Fixed ASCII encoding, linked clone logic, SSH quoting
     1.2  2025-01-22  Multi-NIC support with optional MAC addresses
     2.0  2025-01-23  Multi-VM support, -VmFilter, -Confirm parameter
+    2.1  2025-01-23  Multi-action refactor (-Action: Deploy, Destroy, Start, Stop, Status)
     
     Requires:   
         - PowerShell 5.1+ or PowerShell Core
-        - powershell-yaml module (Install-Module powershell-yaml)
+        - powershell-yaml module
         - SSH key authentication configured to Proxmox node
 #>
 
 # =============================================================================
 # Script Information
 # =============================================================================
-$Script:Version = "2.0"
-$Script:Name = "Deploy-ProxmoxVM"
+$Script:Version = "2.1"
+$Script:Name = "Invoke-CDX-E"
 $Script:Author = "CDX-E Framework / J.A.R.V.I.S."
 $Script:Updated = "2025-01-23"
 
 [CmdletBinding()]
 param(
+    [Parameter(Mandatory = $true)]
+    [ValidateSet("Deploy", "Destroy", "Start", "Stop", "Status")]
+    [string]$Action,
+    
     [Parameter(Mandatory = $true)]
     [ValidateScript({ Test-Path $_ -PathType Leaf })]
     [string]$YamlPath,
@@ -76,20 +84,23 @@ param(
     [switch]$NoStart
 )
 
-# NOTE: This is a summary version showing the key structural changes in 2.0
-# The full implementation includes all helper functions and deployment logic
-# Key changes from 1.2:
-# - YAML now uses virtual_machines array instead of single vm_specification
-# - Added -VmFilter parameter for selective deployment
-# - Added -Confirm parameter to bypass prompts
-# - Added -NoStart parameter
-# - Iterates through VMs with Deploy-SingleVM function
-# - Results summary at completion
+# NOTE: This is a summary version showing the key structural changes in 2.1
+# Key changes from 2.0:
+# - Renamed from Deploy-ProxmoxVM.ps1 to Invoke-CDX-E.ps1
+# - Added -Action parameter with ValidateSet
+# - Implemented action functions:
+#   - Invoke-DeployAction
+#   - Invoke-DestroyAction (qm stop + qm destroy --purge)
+#   - Invoke-StartAction
+#   - Invoke-StopAction
+#   - Invoke-StatusAction (formatted table output)
+# - Color-coded output per action type
+# - Switch statement for action dispatch
 
-Write-Host "Deploy-ProxmoxVM v$Script:Version - Multi-VM Support"
+Write-Host "Invoke-CDX-E v$Script:Version - Multi-Action Lifecycle Management"
 Write-Host "This version introduced:"
-Write-Host "  - virtual_machines array in YAML"
-Write-Host "  - -VmFilter parameter (ID, name, comma-list, or 'all')"
-Write-Host "  - -Confirm parameter for auto-approval"
-Write-Host "  - -NoStart parameter"
-Write-Host "  - Deployment results summary"
+Write-Host "  - Renamed to Invoke-CDX-E.ps1"
+Write-Host "  - -Action parameter: Deploy, Destroy, Start, Stop, Status"
+Write-Host "  - Destroy action: qm stop + qm destroy --purge"
+Write-Host "  - Status action: formatted table with VM states"
+Write-Host "  - Color-coded output per action type"
