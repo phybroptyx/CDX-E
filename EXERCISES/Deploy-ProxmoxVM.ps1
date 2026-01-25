@@ -23,11 +23,13 @@
 .NOTES
     Script:     Deploy-ProxmoxVM.ps1
     Author:     CDX-E Framework / J.A.R.V.I.S.
-    Version:    1.0
+    Version:    1.1
     Created:    2025-01-22
+    Updated:    2025-01-22
     
     Version History:
     1.0  2025-01-22  Initial release - Single VM deployment from YAML
+    1.1  2025-01-22  Fixed ASCII encoding, linked clone logic, SSH quoting
     
     Requires:   
         - PowerShell 5.1+ or PowerShell Core
@@ -38,7 +40,7 @@
 # =============================================================================
 # Script Information
 # =============================================================================
-$Script:Version = "1.0"
+$Script:Version = "1.1"
 $Script:Name = "Deploy-ProxmoxVM"
 $Script:Author = "CDX-E Framework / J.A.R.V.I.S."
 $Script:Updated = "2025-01-22"
@@ -174,6 +176,7 @@ $cores        = $vm.resources.cores
 $sockets      = if ($vm.resources.sockets) { $vm.resources.sockets } else { 1 }
 $targetStorage = $vm.clone.target_storage
 $startAfter   = $vm.clone.start_after_clone
+$cloneType    = $vm.clone.type
 
 # Secondary NIC configuration
 $net1Bridge   = $vm.network.net1.bridge
@@ -222,9 +225,16 @@ if (-not $DryRun) {
 # =============================================================================
 # Step 1: Clone the Template
 # =============================================================================
-Write-Log "STEP 1: Cloning template $templateId to VM $newVmId..." -Level Info
+Write-Log "STEP 1: Cloning template $templateId to VM $newVmId ($cloneType clone)..." -Level Info
 
-$cloneCmd = "qm clone $templateId $newVmId --name $vmName --pool $pool --target $targetNode --storage $targetStorage"
+# Build the clone command - linked clones cannot specify storage, full clones can
+if ($cloneType -eq "full") {
+    $cloneCmd = "qm clone $templateId $newVmId --name $vmName --pool $pool --target $targetNode --storage $targetStorage --full"
+}
+else {
+    # Linked clone - storage parameter not allowed, uses template storage
+    $cloneCmd = "qm clone $templateId $newVmId --name $vmName --pool $pool --target $targetNode"
+}
 
 $result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $cloneCmd -DryRun:$DryRun
 
@@ -244,7 +254,9 @@ if (-not $DryRun) {
 # =============================================================================
 Write-Log "STEP 2: Configuring VM resources..." -Level Info
 
-$configCmd = "qm set $newVmId --memory $memoryMB --cores $cores --sockets $sockets --description `"$description`" --tags $tags"
+# Escape description for SSH passthrough using single quotes
+$escapedDescription = $description -replace "'", "'\''"
+$configCmd = "qm set $newVmId --memory $memoryMB --cores $cores --sockets $sockets --description '$escapedDescription' --tags $tags"
 
 $result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $configCmd -DryRun:$DryRun
 
