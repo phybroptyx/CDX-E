@@ -6,6 +6,8 @@
     Reads a YAML specification file and executes Proxmox qm commands via SSH
     to clone a template, configure resources, and optionally start the VM.
     
+    Supports multiple additional NICs with optional MAC address specification.
+    
     Part of the CDX-E Framework for Operation OBSIDIAN DAGGER.
 
 .PARAMETER YamlPath
@@ -23,13 +25,14 @@
 .NOTES
     Script:     Deploy-ProxmoxVM.ps1
     Author:     CDX-E Framework / J.A.R.V.I.S.
-    Version:    1.1
+    Version:    1.2
     Created:    2025-01-22
     Updated:    2025-01-22
     
     Version History:
     1.0  2025-01-22  Initial release - Single VM deployment from YAML
     1.1  2025-01-22  Fixed ASCII encoding, linked clone logic, SSH quoting
+    1.2  2025-01-22  Multi-NIC support with optional MAC addresses
     
     Requires:   
         - PowerShell 5.1+ or PowerShell Core
@@ -40,7 +43,7 @@
 # =============================================================================
 # Script Information
 # =============================================================================
-$Script:Version = "1.1"
+$Script:Version = "1.2"
 $Script:Name = "Deploy-ProxmoxVM"
 $Script:Author = "CDX-E Framework / J.A.R.V.I.S."
 $Script:Updated = "2025-01-22"
@@ -135,6 +138,34 @@ function Invoke-SSHCommand {
     }
 }
 
+function Build-NicConfigString {
+    param(
+        [object]$NicConfig
+    )
+    
+    # Start with model
+    $configParts = @($NicConfig.model)
+    
+    # Add MAC if specified
+    if ($NicConfig.mac) {
+        $configParts[0] = "$($NicConfig.model)=$($NicConfig.mac)"
+    }
+    
+    # Add bridge
+    $configParts += "bridge=$($NicConfig.bridge)"
+    
+    # Add firewall setting
+    $firewallValue = if ($NicConfig.firewall) { 1 } else { 0 }
+    $configParts += "firewall=$firewallValue"
+    
+    # Add VLAN tag if specified
+    if ($NicConfig.tag) {
+        $configParts += "tag=$($NicConfig.tag)"
+    }
+    
+    return ($configParts -join ",")
+}
+
 # =============================================================================
 # Main Execution
 # =============================================================================
@@ -164,25 +195,22 @@ catch {
 $vm = $config.vm_specification
 $ssh = $config.ssh
 
-$templateId   = $vm.template.id
-$newVmId      = $vm.vmid
-$vmName       = $vm.name
-$description  = $vm.description
-$targetNode   = $vm.proxmox.node
-$pool         = $vm.proxmox.pool
-$tags         = $vm.proxmox.tags -join ";"
-$memoryMB     = $vm.resources.memory_mb
-$cores        = $vm.resources.cores
-$sockets      = if ($vm.resources.sockets) { $vm.resources.sockets } else { 1 }
+$templateId    = $vm.template.id
+$newVmId       = $vm.vmid
+$vmName        = $vm.name
+$description   = $vm.description
+$targetNode    = $vm.proxmox.node
+$pool          = $vm.proxmox.pool
+$tags          = $vm.proxmox.tags -join ";"
+$memoryMB      = $vm.resources.memory_mb
+$cores         = $vm.resources.cores
+$sockets       = if ($vm.resources.sockets) { $vm.resources.sockets } else { 1 }
 $targetStorage = $vm.clone.target_storage
-$startAfter   = $vm.clone.start_after_clone
-$cloneType    = $vm.clone.type
+$startAfter    = $vm.clone.start_after_clone
+$cloneType     = $vm.clone.type
 
-# Secondary NIC configuration
-$net1Bridge   = $vm.network.net1.bridge
-$net1Tag      = $vm.network.net1.tag
-$net1Model    = $vm.network.net1.model
-$net1Firewall = if ($vm.network.net1.firewall) { 1 } else { 0 }
+# Network configuration
+$additionalNics = $vm.network.additional_nics
 
 $sshHost = $ssh.host
 $sshUser = $ssh.user
@@ -202,9 +230,22 @@ Write-Host "|  Pool:             $pool" -ForegroundColor White
 Write-Host "|  Tags:             $tags" -ForegroundColor White
 Write-Host "|  Memory:           $memoryMB MB" -ForegroundColor White
 Write-Host "|  CPUs:             $cores cores x $sockets socket(s)" -ForegroundColor White
-Write-Host "|  Secondary NIC:    $net1Model / $net1Bridge / VLAN $net1Tag" -ForegroundColor White
 Write-Host "|  Start After:      $startAfter" -ForegroundColor White
 Write-Host "+-------------------------------------------------------------------+" -ForegroundColor DarkGray
+
+# Display additional NICs
+if ($additionalNics -and $additionalNics.Count -gt 0) {
+    Write-Host "|  ADDITIONAL NETWORK INTERFACES                                    |" -ForegroundColor DarkGray
+    Write-Host "+-------------------------------------------------------------------+" -ForegroundColor DarkGray
+    foreach ($nic in $additionalNics) {
+        $nicId = $nic.nic_id
+        $macDisplay = if ($nic.mac) { $nic.mac } else { "(auto-generate)" }
+        $tagDisplay = if ($nic.tag) { "VLAN $($nic.tag)" } else { "untagged" }
+        Write-Host "|  net$nicId : $($nic.model) / $($nic.bridge) / $tagDisplay" -ForegroundColor White
+        Write-Host "|         MAC: $macDisplay" -ForegroundColor White
+    }
+    Write-Host "+-------------------------------------------------------------------+" -ForegroundColor DarkGray
+}
 Write-Host ""
 
 if ($DryRun) {
@@ -227,12 +268,10 @@ if (-not $DryRun) {
 # =============================================================================
 Write-Log "STEP 1: Cloning template $templateId to VM $newVmId ($cloneType clone)..." -Level Info
 
-# Build the clone command - linked clones cannot specify storage, full clones can
 if ($cloneType -eq "full") {
     $cloneCmd = "qm clone $templateId $newVmId --name $vmName --pool $pool --target $targetNode --storage $targetStorage --full"
 }
 else {
-    # Linked clone - storage parameter not allowed, uses template storage
     $cloneCmd = "qm clone $templateId $newVmId --name $vmName --pool $pool --target $targetNode"
 }
 
@@ -254,7 +293,6 @@ if (-not $DryRun) {
 # =============================================================================
 Write-Log "STEP 2: Configuring VM resources..." -Level Info
 
-# Escape description for SSH passthrough using single quotes
 $escapedDescription = $description -replace "'", "'\''"
 $configCmd = "qm set $newVmId --memory $memoryMB --cores $cores --sockets $sockets --description '$escapedDescription' --tags $tags"
 
@@ -267,20 +305,30 @@ if (-not $result.Success -and -not $DryRun) {
 Write-Log "VM resources configured successfully." -Level Success
 
 # =============================================================================
-# Step 3: Add Secondary NIC
+# Step 3: Add Additional NICs
 # =============================================================================
-Write-Log "STEP 3: Adding secondary NIC..." -Level Info
-
-$net1Config = "$net1Model,bridge=$net1Bridge,firewall=$net1Firewall,tag=$net1Tag"
-$nicCmd = "qm set $newVmId --net1 $net1Config"
-
-$result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $nicCmd -DryRun:$DryRun
-
-if (-not $result.Success -and -not $DryRun) {
-    Write-Log "NIC configuration failed: $($result.Output)" -Level Error
-    exit 1
+if ($additionalNics -and $additionalNics.Count -gt 0) {
+    Write-Log "STEP 3: Configuring $($additionalNics.Count) additional network interface(s)..." -Level Info
+    
+    foreach ($nic in $additionalNics) {
+        $nicId = $nic.nic_id
+        $nicConfigString = Build-NicConfigString -NicConfig $nic
+        
+        Write-Log "Adding net$nicId : $nicConfigString" -Level Info
+        
+        $nicCmd = "qm set $newVmId --net$nicId $nicConfigString"
+        $result = Invoke-SSHCommand -TargetHost $sshHost -User $sshUser -Command $nicCmd -DryRun:$DryRun
+        
+        if (-not $result.Success -and -not $DryRun) {
+            Write-Log "NIC net$nicId configuration failed: $($result.Output)" -Level Error
+            exit 1
+        }
+        Write-Log "net$nicId added successfully." -Level Success
+    }
 }
-Write-Log "Secondary NIC added: $net1Config" -Level Success
+else {
+    Write-Log "STEP 3: No additional NICs configured, skipping." -Level Info
+}
 
 # =============================================================================
 # Step 4: Start VM
@@ -313,6 +361,16 @@ Write-Host ""
 if (-not $DryRun) {
     Write-Log "VM $newVmId ($vmName) deployed to pool $pool" -Level Success
     Write-Log "Access via: https://${sshHost}:8006/#v1:0:=qemu%2F$newVmId" -Level Info
+    
+    if ($additionalNics -and $additionalNics.Count -gt 0) {
+        Write-Host ""
+        Write-Log "Network interfaces configured:" -Level Info
+        Write-Host "  net0: (inherited from template)" -ForegroundColor White
+        foreach ($nic in $additionalNics) {
+            $macDisplay = if ($nic.mac) { $nic.mac } else { "auto-generated" }
+            Write-Host "  net$($nic.nic_id): $($nic.bridge) - MAC: $macDisplay" -ForegroundColor White
+        }
+    }
 }
 else {
     Write-Log "DRY RUN complete. Review commands above before executing." -Level Info
