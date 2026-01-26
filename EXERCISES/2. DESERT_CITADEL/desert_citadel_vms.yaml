@@ -3,7 +3,7 @@
 # =============================================================================
 # CDX-E Framework VM Specification
 # Generated: 2026-01-22
-# Updated:   2026-01-23
+# Updated:   2026-01-25
 # Purpose: Mission Partner Network (MPNET) infrastructure
 # Organization: Madripoor (fictional nation-state partner network)
 # =============================================================================
@@ -16,29 +16,25 @@ exercise:
 ssh:
   user: "root"
   auth: "key"
-  template_node: "cdx-pve-01"  # Node where templates reside (used for clone operations)
 
 # =============================================================================
 # Virtual Machine Specifications
-# Each entry is fully self-contained with all required parameters
-# Description is auto-generated from: hostname, role, site, ip, template.os
+# =============================================================================
+# Template is now referenced by NAME (resolved via templates.yaml)
+# OS name is auto-populated from template registry
 # =============================================================================
 virtual_machines:
 
   # ---------------------------------------------------------------------------
-  # VM 1: SDP-MDP-1 - Service Delivery Point Router, Singapore Site
+  # VM 1: SDP-MDP-1 - Service Delivery Point Router
   # ---------------------------------------------------------------------------
   - vmid: 5100
     name: "SDP-MDP-1"
-    
-    # Structured fields for auto-generated description
     role: "Service Delivery Point"
     site: "Singapore"
     organization: "Madripoor"
     
-    template:
-      id: 2014
-      os: "VyOS 2025"
+    template: "vyos"  # Resolved from templates.yaml
     
     clone:
       type: "linked"
@@ -65,12 +61,6 @@ virtual_machines:
           bridge: "mdp_sng_ex"
           firewall: true
     
-#    cloud_init:
-#      ip: "57.92.89.71"
-#      cidr: 24
-#      gateway: "57.92.89.1"
-#      nameserver: "127.0.0.1"
-    
     proxmox:
       node: "cdx-pve-03"
       pool: "EX_DESERT_CITADEL"
@@ -78,19 +68,15 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 2: MDP-DC-01 - Primary Domain Controller, Singapore Site
+  # VM 2: MDP-DC-01 - Primary Domain Controller
   # ---------------------------------------------------------------------------
   - vmid: 5101
     name: "MDP-DC-01"
-    
-    # Structured fields for auto-generated description
     role: "Primary Domain Controller"
     site: "Singapore"
     organization: "Madripoor"
     
-    template:
-      id: 2006
-      os: "Windows Server 2012 R2"
+    template: "server_2012r2"  # Resolved from templates.yaml
     
     clone:
       type: "linked"
@@ -124,19 +110,15 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 3: MDP-FS-01 - File Server, Singapore Site
+  # VM 3: MDP-FS-01 - File Server
   # ---------------------------------------------------------------------------
   - vmid: 5102
     name: "MDP-FS-01"
-    
-    # Structured fields for auto-generated description
     role: "File Server"
     site: "Singapore"
     organization: "Madripoor"
     
-    template:
-      id: 2006
-      os: "Windows Server 2012 R2"
+    template: "server_2012r2"
     
     clone:
       type: "linked"
@@ -170,19 +152,15 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 4: MDP-EX-01 - Exchange Server, Singapore Site
+  # VM 4: MDP-EX-01 - Exchange Server
   # ---------------------------------------------------------------------------
   - vmid: 5103
     name: "MDP-EX-01"
-    
-    # Structured fields for auto-generated description
     role: "Exchange Server"
     site: "Singapore"
     organization: "Madripoor"
     
-    template:
-      id: 2006
-      os: "Windows Server 2012 R2"
+    template: "server_2012r2"
     
     clone:
       type: "linked"
@@ -216,19 +194,15 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 5: MDP-AS-01 - Application Server, Singapore Site
+  # VM 5: MDP-AS-01 - Application Server
   # ---------------------------------------------------------------------------
   - vmid: 5104
     name: "MDP-AS-01"
-    
-    # Structured fields for auto-generated description
     role: "Application Server"
     site: "Singapore"
     organization: "Madripoor"
     
-    template:
-      id: 2006
-      os: "Windows Server 2012 R2"
+    template: "server_2012r2"
     
     clone:
       type: "linked"
@@ -262,19 +236,15 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 6: MDP-DC-02 - Domain Controller, Singapore Site
+  # VM 6: MDP-DC-02 - Domain Controller
   # ---------------------------------------------------------------------------
   - vmid: 5105
     name: "MDP-DC-02"
-    
-    # Structured fields for auto-generated description
     role: "Domain Controller"
     site: "Singapore"
     organization: "Madripoor"
     
-    template:
-      id: 2006
-      os: "Windows Server 2012 R2"
+    template: "server_2012r2"
     
     clone:
       type: "linked"
@@ -308,19 +278,15 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 7: MDP-HST-01 - SCADA Historian, Singapore Site
+  # VM 7: MDP-HST-01 - SCADA Historian
   # ---------------------------------------------------------------------------
   - vmid: 5106
     name: "MDP-HST-01"
-    
-    # Structured fields for auto-generated description
     role: "SCADA Historian"
     site: "Singapore"
     organization: "Madripoor"
     
-    template:
-      id: 2008
-      os: "Windows Server 2008 R2"
+    template: "server_2008r2"
     
     clone:
       type: "linked"
@@ -354,19 +320,15 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 8: MDP-FHM-01 - Facilities Host Management, Singapore Site
+  # VM 8: MDP-FHM-01 - Facilities Host Management
   # ---------------------------------------------------------------------------
   - vmid: 5107
     name: "MDP-FHM-01"
-    
-    # Structured fields for auto-generated description
     role: "Facilities Host Management Interface"
     site: "Singapore"
     organization: "Madripoor"
     
-    template:
-      id: 2008
-      os: "Windows Server 2008 R2"
+    template: "server_2008r2"
     
     clone:
       type: "linked"
@@ -400,19 +362,15 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 9: MDP-LHM-01 - SCADA HMI, Singapore Site
+  # VM 9: MDP-LHM-01 - SCADA HMI
   # ---------------------------------------------------------------------------
   - vmid: 5108
     name: "MDP-LHM-01"
-    
-    # Structured fields for auto-generated description
     role: "SCADA HMI"
     site: "Singapore"
     organization: "Madripoor"
     
-    template:
-      id: 2008
-      os: "Windows Server 2008 R2"
+    template: "server_2008r2"
     
     clone:
       type: "linked"
@@ -444,16 +402,3 @@ virtual_machines:
       pool: "EX_DESERT_CITADEL"
       tags:
         - "mpnet"
-
-# =============================================================================
-# Deployment Notes
-# =============================================================================
-# - Description auto-generated: "Hostname | Role | Site | IP | OS"
-# - Template IDs: 2001=Server 2025, 2004=Server 2016, 2006=Server 2012 R2
-# - All VMs use linked clones on template storage (QNAP)
-# - net0: Inherited from template (OOB management, DHCP) - NOT configured
-# - net1: Mission Partner Network (static IP via cloud-init)
-# - VLAN 1101 designated for mission partner segmentation
-# - cloud_init section configures net1 (ipconfig1) static IP addressing
-# - Use -VmFilter parameter to deploy specific VMs by ID or name
-# =============================================================================
