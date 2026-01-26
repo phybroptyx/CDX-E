@@ -11,6 +11,10 @@
     Supports cloud-init configuration for static IP addressing on deployment.
     Auto-generates VM descriptions from structured YAML fields.
     
+    Template Registry: Edit $Script:Templates and $Script:TemplateNode at the top
+    of this script when template IDs change. Exercise YAMLs can reference templates
+    by name (e.g., "server_2012r2") which resolves to the current ID.
+    
     Part of the CDX-E Framework.
 
 .PARAMETER Action
@@ -41,12 +45,12 @@
     For Deploy action only: leaves VMs in stopped state after creation.
 
 .EXAMPLE
-    .\Invoke-CDX-E.ps1 -Action Deploy -YamlPath ".\obsidian_dagger_vms.yaml"
+    .\Invoke-CDX-E.ps1 -Action Deploy -YamlPath ".\desert_citadel_vms.yaml"
     Deploys all VMs defined in the YAML file with confirmation prompt.
 
 .EXAMPLE
-    .\Invoke-CDX-E.ps1 -Action Deploy -YamlPath ".\obsidian_dagger_vms.yaml" -Confirm
-    Deploys all VMs without confirmation prompt.
+    .\Invoke-CDX-E.ps1 -Action Deploy -YamlPath ".\vms.yaml" -Confirm
+    Deploys VMs without confirmation prompt.
 
 .EXAMPLE
     .\Invoke-CDX-E.ps1 -Action Destroy -YamlPath ".\obsidian_dagger_vms.yaml" -VmFilter 5102 -Confirm
@@ -71,21 +75,21 @@
 .NOTES
     Script:     Invoke-CDX-E.ps1
     Author:     CDX-E Framework / J.A.R.V.I.S.
-    Version:    2.5.1
-    Created:    2026-01-22
-    Updated:    2026-01-23
+    Version:    2.4
+    Created:    2025-01-22
+    Updated:    2025-01-23
     
     Version History:
-    1.0  2026-01-22  Initial release (Deploy-ProxmoxVM.ps1) - Single VM deployment
-    1.1  2026-01-22  Fixed ASCII encoding, linked clone logic, SSH quoting
-    1.2  2026-01-22  Multi-NIC support with optional MAC addresses
-    2.0  2026-01-23  Multi-VM support, -VmFilter, -Confirm parameter
-    2.1  2026-01-23  Multi-action refactor (-Action: Deploy, Destroy, Start, Stop, Status)
-    2.2  2026-01-23  Cloud-init integration for static IP configuration
-    2.3  2026-01-23  Cloud-init fix (qm cloudinit update), auto-generated descriptions
-    2.4  2026-01-23  Markdown-formatted VM descriptions
-    2.5  2026-01-23  Mixed-node deployment support (template_node vs target node)
-    2.5.1 2026-01-23  Fixed Proxmox Access statement URLs
+    1.0  2025-01-22  Initial release (Deploy-ProxmoxVM.ps1) - Single VM deployment
+    1.1  2025-01-22  Fixed ASCII encoding, linked clone logic, SSH quoting
+    1.2  2025-01-22  Multi-NIC support with optional MAC addresses
+    2.0  2025-01-23  Multi-VM support, -VmFilter, -Confirm parameter
+    2.1  2025-01-23  Multi-action refactor (-Action: Deploy, Destroy, Start, Stop, Status)
+    2.2  2025-01-23  Cloud-init integration for static IP configuration
+    2.3  2025-01-23  Cloud-init fix (qm cloudinit update), auto-generated descriptions
+    2.4  2025-01-23  Markdown-formatted VM descriptions
+    2.5  2025-01-23  Mixed-node deployment support (template_node vs target node)
+    3.0  2026-01-25  Embedded template registry (edit $Script:Templates in script)
     
     Requires:   
         - PowerShell 5.1+ or PowerShell Core
@@ -120,10 +124,39 @@ param(
 # =============================================================================
 # Script Information
 # =============================================================================
-$Script:Version = "2.5"
+$Script:Version = "3.0"
 $Script:Name = "Invoke-CDX-E"
 $Script:Author = "CDX-E Framework / J.A.R.V.I.S."
-$Script:Updated = "2026-01-23"
+$Script:Updated = "2026-01-25"
+
+# =============================================================================
+# TEMPLATE REGISTRY - Edit this section when templates change
+# =============================================================================
+# When you recreate a template with a new ID, update the 'id' value here.
+# All exercise YAMLs referencing the template name will use the new ID.
+# =============================================================================
+
+$Script:TemplateNode = "cdx-pve-01"  # Node where all templates reside
+
+$Script:Templates = @{
+    # Windows Server Templates
+    "server_2025"   = @{ id = 2001; os = "Windows Server 2025" }
+    "server_2022"   = @{ id = 2002; os = "Windows Server 2022" }
+    "server_2019"   = @{ id = 2003; os = "Windows Server 2019" }
+    "server_2016"   = @{ id = 2004; os = "Windows Server 2016" }
+    "server_2012r2" = @{ id = 2006; os = "Windows Server 2012 R2" }
+    "server_2008r2" = @{ id = 2008; os = "Windows Server 2008 R2" }
+    
+    # Windows Desktop Templates
+    "windows_11"    = @{ id = 2009; os = "Windows 11" }
+    "windows_10"    = @{ id = 2010; os = "Windows 10" }
+    "windows_8.1"   = @{ id = 2011; os = "Windows 8.1" }
+    "windows_7"     = @{ id = 2016; os = "Windows 7" }
+    
+    # Linux / Network Templates
+    "kali_purple"   = @{ id = 2007; os = "Kali Purple 2025.3" }
+    "vyos"          = @{ id = 2015; os = "VyOS 2025" }
+}
 
 # =============================================================================
 # Module Check
@@ -740,10 +773,55 @@ catch {
     exit 1
 }
 
+# =============================================================================
+# =============================================================================
+# Resolve Templates for Each VM
+# =============================================================================
 $ssh = $config.ssh
 $allVMs = $config.virtual_machines
 $exerciseName = $config.exercise.name
 
+# Set template_node from script variable (overrides YAML if present)
+if ($Script:TemplateNode) {
+    $ssh.template_node = $Script:TemplateNode
+}
+
+# Process each VM to resolve template references
+foreach ($vm in $allVMs) {
+    # Check if template is a string (name reference) or object (direct config)
+    if ($vm.template -is [string]) {
+        # Template specified by name - resolve from embedded registry
+        $templateName = $vm.template
+        
+        if ($Script:Templates.ContainsKey($templateName)) {
+            $templateInfo = $Script:Templates[$templateName]
+            
+            # Create template object with resolved values
+            $vm.template = @{
+                id = $templateInfo.id
+                os = $templateInfo.os
+                name = $templateName
+            }
+            
+            Write-Log "Resolved template '$templateName' -> ID $($templateInfo.id) ($($templateInfo.os))" -Level Info
+        }
+        else {
+            Write-Log "Template '$templateName' not found in script registry!" -Level Error
+            Write-Log "Available templates: $($Script:Templates.Keys -join ', ')" -Level Info
+            exit 1
+        }
+    }
+    elseif ($vm.template.id) {
+        # Template specified directly with id/os - use as-is (backwards compatible)
+        Write-Log "Using direct template ID $($vm.template.id) for $($vm.name)" -Level Info
+    }
+    else {
+        Write-Log "VM $($vm.name): Invalid template specification (no id found)" -Level Error
+        exit 1
+    }
+}
+
+Write-Log "Template node: $($ssh.template_node)" -Level Info
 Write-Log "Exercise: $exerciseName" -Level Info
 Write-Log "Total VMs defined: $($allVMs.Count)" -Level Info
 
@@ -846,8 +924,8 @@ if ($Action -ne "Status") {
 Write-Host ""
 
 if (-not $DryRun -and $Action -eq "Deploy") {
-    # Get unique target nodes from deployed VMs
-    $targetNodes = $filteredVMs | Select-Object -ExpandProperty proxmox | Select-Object -ExpandProperty node -Unique
+    # Get unique target nodes from deployed VMs (handle hashtable structure)
+    $targetNodes = $selectedVMs | ForEach-Object { $_.proxmox.node } | Select-Object -Unique
     Write-Log "Access Proxmox cluster:" -Level Info
     foreach ($node in $targetNodes) {
         Write-Host "       https://${node}:8006" -ForegroundColor Cyan
