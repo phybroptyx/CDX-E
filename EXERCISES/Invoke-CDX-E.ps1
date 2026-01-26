@@ -156,7 +156,7 @@ $Script:Templates = @{
     
     # Linux / Network Templates
     "kali_purple"   = @{ id = 2007; os = "Kali Purple 2025.3" }
-    "vyos"          = @{ id = 2015; os = "VyOS 2025" }
+    "vyos"          = @{ id = 2017; os = "VyOS 2025" }
 }
 
 # =============================================================================
