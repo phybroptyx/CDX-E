@@ -75,21 +75,22 @@
 .NOTES
     Script:     Invoke-CDX-E.ps1
     Author:     CDX-E Framework / J.A.R.V.I.S.
-    Version:    2.4
-    Created:    2025-01-22
-    Updated:    2025-01-23
+    Version:    3.1
+    Created:    2026-01-22
+    Updated:    2026-01-25
     
     Version History:
-    1.0  2025-01-22  Initial release (Deploy-ProxmoxVM.ps1) - Single VM deployment
-    1.1  2025-01-22  Fixed ASCII encoding, linked clone logic, SSH quoting
-    1.2  2025-01-22  Multi-NIC support with optional MAC addresses
-    2.0  2025-01-23  Multi-VM support, -VmFilter, -Confirm parameter
-    2.1  2025-01-23  Multi-action refactor (-Action: Deploy, Destroy, Start, Stop, Status)
-    2.2  2025-01-23  Cloud-init integration for static IP configuration
-    2.3  2025-01-23  Cloud-init fix (qm cloudinit update), auto-generated descriptions
-    2.4  2025-01-23  Markdown-formatted VM descriptions
-    2.5  2025-01-23  Mixed-node deployment support (template_node vs target node)
+    1.0  2026-01-22  Initial release (Deploy-ProxmoxVM.ps1) - Single VM deployment
+    1.1  2026-01-22  Fixed ASCII encoding, linked clone logic, SSH quoting
+    1.2  2026-01-22  Multi-NIC support with optional MAC addresses
+    2.0  2026-01-23  Multi-VM support, -VmFilter, -Confirm parameter
+    2.1  2026-01-23  Multi-action refactor (-Action: Deploy, Destroy, Start, Stop, Status)
+    2.2  2026-01-23  Cloud-init integration for static IP configuration
+    2.3  2026-01-23  Cloud-init fix (qm cloudinit update), auto-generated descriptions
+    2.4  2026-01-23  Markdown-formatted VM descriptions
+    2.5  2026-01-23  Mixed-node deployment support (template_node vs target node)
     3.0  2026-01-25  Embedded template registry (edit $Script:Templates in script)
+    3.1  2026-01-25  Idempotency checks for Deploy/Destroy actions
     
     Requires:   
         - PowerShell 5.1+ or PowerShell Core
@@ -124,7 +125,7 @@ param(
 # =============================================================================
 # Script Information
 # =============================================================================
-$Script:Version = "3.0"
+$Script:Version = "3.1"
 $Script:Name = "Invoke-CDX-E"
 $Script:Author = "CDX-E Framework / J.A.R.V.I.S."
 $Script:Updated = "2026-01-25"
@@ -155,7 +156,7 @@ $Script:Templates = @{
     
     # Linux / Network Templates
     "kali_purple"   = @{ id = 2007; os = "Kali Purple 2025.3" }
-    "vyos"          = @{ id = 2017; os = "VyOS 2025" }
+    "vyos"          = @{ id = 2015; os = "VyOS 2025" }
 }
 
 # =============================================================================
@@ -379,6 +380,46 @@ function Request-Confirmation {
 }
 
 # =============================================================================
+# VM Existence Check Function
+# =============================================================================
+function Get-VMExistence {
+    param(
+        [int]$VMID,
+        [string]$ExpectedName,
+        [string]$TargetNode,
+        [string]$SSHUser
+    )
+    
+    # First check if VM exists by querying its status
+    $statusCmd = "qm status $VMID"
+    $statusResult = Invoke-SSHCommand -TargetHost $TargetNode -User $SSHUser -Command $statusCmd -DryRun:$false -Silent
+    
+    if (-not $statusResult.Success) {
+        # VM does not exist
+        return @{
+            Exists = $false
+            Name = $null
+            NameMatches = $false
+        }
+    }
+    
+    # VM exists - get its name from config
+    $configCmd = "qm config $VMID | grep '^name:' | cut -d' ' -f2"
+    $configResult = Invoke-SSHCommand -TargetHost $TargetNode -User $SSHUser -Command $configCmd -DryRun:$false -Silent
+    
+    $actualName = $null
+    if ($configResult.Success -and $configResult.Output) {
+        $actualName = ($configResult.Output -join "").Trim()
+    }
+    
+    return @{
+        Exists = $true
+        Name = $actualName
+        NameMatches = ($actualName -eq $ExpectedName)
+    }
+}
+
+# =============================================================================
 # Action: Deploy
 # =============================================================================
 function Invoke-DeployAction {
@@ -403,6 +444,25 @@ function Invoke-DeployAction {
         $success = $true
         $vmid = $vm.vmid
         $targetNode = $vm.proxmox.node  # Node where VM will run
+        
+        # Idempotency Check: Does VM already exist?
+        if (-not $DryRun) {
+            $existCheck = Get-VMExistence -VMID $vmid -ExpectedName $vm.name -TargetNode $targetNode -SSHUser $sshUser
+            
+            if ($existCheck.Exists) {
+                if ($existCheck.NameMatches) {
+                    Write-Log "VM $vmid ($($vm.name)) already exists - skipping creation" -Level Warning
+                    $results += @{ vmid = $vmid; name = $vm.name; status = "SKIPPED"; stage = "Already Exists" }
+                    continue
+                }
+                else {
+                    Write-Log "VM ID $vmid exists but has different name: '$($existCheck.Name)' (expected: '$($vm.name)')" -Level Error
+                    Write-Log "Skipping to prevent accidental overwrite - resolve ID conflict manually" -Level Error
+                    $results += @{ vmid = $vmid; name = $vm.name; status = "CONFLICT"; stage = "ID Mismatch" }
+                    continue
+                }
+            }
+        }
         
         # Step 1: Clone (execute on TEMPLATE node)
         Write-Log "Cloning template $($vm.template.id) to VM $vmid (via $templateNode)..." -Level Info
@@ -551,6 +611,24 @@ function Invoke-DestroyAction {
         
         $vmid = $vm.vmid
         $targetNode = $vm.proxmox.node  # Execute on VM's host node
+        
+        # Idempotency Check: Does VM exist?
+        if (-not $DryRun) {
+            $existCheck = Get-VMExistence -VMID $vmid -ExpectedName $vm.name -TargetNode $targetNode -SSHUser $sshUser
+            
+            if (-not $existCheck.Exists) {
+                Write-Log "VM $vmid does not exist - skipping destruction" -Level Warning
+                $results += @{ vmid = $vmid; name = $vm.name; status = "SKIPPED"; stage = "Not Found" }
+                continue
+            }
+            
+            if (-not $existCheck.NameMatches) {
+                Write-Log "VM ID $vmid exists but has different name: '$($existCheck.Name)' (expected: '$($vm.name)')" -Level Error
+                Write-Log "Skipping destruction for safety - verify correct VM before manual removal" -Level Error
+                $results += @{ vmid = $vmid; name = $vm.name; status = "SKIPPED"; stage = "Name Mismatch" }
+                continue
+            }
+        }
         
         # Step 1: Stop VM (ignore errors if already stopped)
         Write-Log "Stopping VM $vmid (via $targetNode)..." -Level Info
