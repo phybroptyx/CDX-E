@@ -1,0 +1,81 @@
+configure
+
+########################################
+# System Identity / Base Services
+########################################
+
+set system host-name 'MDP-SDP-1'
+set system domain-name 'madripoor.midgard.mrvl'
+set system time-zone 'Asia/Singapore'
+
+set service ntp server '46.244.164.88'
+set service ssh port '22'
+
+########################################
+# Interfaces
+# eth0: Management (pre-configured, do NOT touch here)
+########################################
+
+# eth1: Internal Interface
+set interfaces ethernet eth1 description 'Internal Interface'
+set interfaces ethernet eth1 vif 1189 address '57.92.89.1/24'
+set interfaces ethernet eth1 vif 1189 description 'VLAN 89'
+set interfaces ethernet eth1 vif 1190 address '57.92.90.1/24'
+set interfaces ethernet eth1 vif 1190 description 'VLAN 90'
+
+# eth2: Blue Team SOC Interface
+set interfaces ethernet eth2 description 'SOC'
+set interfaces ethernet eth2 address '10.30.3.1/24'
+
+# eth3: External / Upstream toward Tier-1 (Seoul IXP)
+set interfaces ethernet eth3 description 'to WAN'
+set interfaces ethernet eth3 address '57.92.88.143/20'
+
+########################################
+# Static Routing
+########################################
+
+# Default route to the upstream Tier-1 router
+set protocols static route 0.0.0.0/0 next-hop '57.92.80.19'
+
+########################################
+# OSPF – “Public Internet” View Only
+# - OSPF only on external segment (Area 10, matches Seoul T1)
+# - Redistribute ONLY the Madripoor public summary into OSPF
+# - No RFC1918 (10.30.3.0/30) leaked into the Internet LSDB
+########################################
+
+# Use external IP as OSPF router-id for clarity
+set protocols ospf parameters router-id '57.92.88.143'
+
+# Enable OSPF on the external link toward CDX-IXP-T1-EQIX-105 in Area 10
+# (Tier-1 already has "area 10 network 57.92.80.0/20")
+set protocols ospf area 10 network '57.92.80.0/20'
+
+# Policy: only advertise the MDP internal /22 summary into OSPF
+
+# Prefix-list for MDP internal Stark public space
+set policy prefix-list MDP-INTERNAL rule 10 action 'permit'
+set policy prefix-list MDP-INTERNAL rule 10 prefix '57.92.80.0/20'
+
+# Explicit deny-any to avoid leaking other statics
+set policy prefix-list MDP-INTERNAL rule 100 action 'deny'
+set policy prefix-list MDP-INTERNAL rule 100 prefix '0.0.0.0/0'
+
+# Route-map to control redistribution of static routes into OSPF
+set policy route-map OSPF-REDIST-STATIC-MDP rule 10 action 'permit'
+set policy route-map OSPF-REDIST-STATIC-MDP rule 10 match ip address prefix-list 'MDP-INTERNAL'
+
+# Optional hard stop: deny everything else
+set policy route-map OSPF-REDIST-STATIC-MDP rule 100 action 'deny'
+
+# Redistribute static routes into OSPF using the route-map
+set protocols ospf redistribute static route-map 'OSPF-REDIST-STATIC-MDP'
+
+########################################
+# NAT
+# (None – this SDP is purely routed, no translation)
+########################################
+# (Intentionally no "set nat ..." statements)
+
+commit; save; exit

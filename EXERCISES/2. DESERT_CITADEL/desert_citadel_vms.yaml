@@ -1,0 +1,1844 @@
+# =============================================================================
+# OPERATION DESERT CITADEL - Multi-VM Deployment Specification
+# =============================================================================
+# CDX-E Framework VM Specification
+# Generated: 2026-01-22
+# Updated:   2026-01-25
+# Purpose: Mission Partner Network (MPNET) infrastructure
+# Organization: Madripoor (fictional nation-state partner network)
+# =============================================================================
+
+exercise:
+  name: "DESERT_CITADEL"
+  description: "IT/OT Convergence Training Environment"
+  classification: "mission_partner"
+
+ssh:
+  user: "root"
+  auth: "key"
+
+# =============================================================================
+# Virtual Machine Specifications
+# =============================================================================
+# Template is now referenced by NAME (resolved via templates.yaml)
+# OS name is auto-populated from template registry
+# =============================================================================
+virtual_machines:
+
+  # ---------------------------------------------------------------------------
+  # VM 1: SDP-MDP-1 - Service Delivery Point Router
+  # ---------------------------------------------------------------------------
+  - vmid: 5100
+    name: "SDP-MDP-1"
+    role: "Service Delivery Point"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "vyos"  # Resolved from templates.yaml
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 2048
+      cores: 1
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          firewall: true
+        - nic_id: 2
+          model: "virtio"
+          bridge: "SOC"
+          firewall: true
+        - nic_id: 3
+          model: "virtio"
+          bridge: "mdp_sng_ex"
+          firewall: true
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 2: MDP-DC-01 - Primary Domain Controller
+  # ---------------------------------------------------------------------------
+  - vmid: 5101
+    name: "MDP-DC-01"
+    role: "Primary Domain Controller"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "server_2012r2"  # Resolved from templates.yaml
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "14:18:77:6B:A3:83"
+    
+    cloud_init:
+      ip: "57.92.89.71"
+      cidr: 24
+      gateway: "57.92.89.1"
+      nameserver: "127.0.0.1"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 3: MDP-FS-01 - File Server
+  # ---------------------------------------------------------------------------
+  - vmid: 5102
+    name: "MDP-FS-01"
+    role: "File Server"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "server_2012r2"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "14:18:77:6B:BB:64"
+    
+    cloud_init:
+      ip: "57.92.89.68"
+      cidr: 24
+      gateway: "57.92.89.1"
+      nameserver: "57.92.89.71"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 4: MDP-EX-01 - Exchange Server
+  # ---------------------------------------------------------------------------
+  - vmid: 5103
+    name: "MDP-EX-01"
+    role: "Exchange Server"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "server_2012r2"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "14:18:77:6B:C1:16"
+    
+    cloud_init:
+      ip: "57.92.89.95"
+      cidr: 24
+      gateway: "57.92.89.1"
+      nameserver: "57.92.89.71"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 5: MDP-AS-01 - Application Server
+  # ---------------------------------------------------------------------------
+  - vmid: 5104
+    name: "MDP-AS-01"
+    role: "Application Server"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "server_2012r2"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "14:18:77:6B:F9:E7"
+    
+    cloud_init:
+      ip: "57.92.89.101"
+      cidr: 24
+      gateway: "57.92.89.1"
+      nameserver: "57.92.89.71"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 6: MDP-DC-02 - Domain Controller
+  # ---------------------------------------------------------------------------
+  - vmid: 5105
+    name: "MDP-DC-02"
+    role: "Domain Controller"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "server_2012r2"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "14:18:77:6B:11:3C"
+    
+    cloud_init:
+      ip: "57.92.89.72"
+      cidr: 24
+      gateway: "57.92.89.1"
+      nameserver: "57.92.89.71"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 7: MDP-HST-01 - SCADA Historian
+  # ---------------------------------------------------------------------------
+  - vmid: 5106
+    name: "MDP-HST-01"
+    role: "SCADA Historian"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "server_2008r2"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "14:18:77:6B:FF:21"
+    
+    cloud_init:
+      ip: "57.92.89.131"
+      cidr: 24
+      gateway: "57.92.89.1"
+      nameserver: "57.92.89.71"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 8: MDP-FHM-01 - Facilities Host Management
+  # ---------------------------------------------------------------------------
+  - vmid: 5107
+    name: "MDP-FHM-01"
+    role: "Facilities Host Management Interface"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "server_2008r2"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "14:18:77:6B:CD:A9"
+    
+    cloud_init:
+      ip: "57.92.89.162"
+      cidr: 24
+      gateway: "57.92.89.1"
+      nameserver: "57.92.89.71"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 9: MDP-LHM-01 - SCADA HMI
+  # ---------------------------------------------------------------------------
+  - vmid: 5108
+    name: "MDP-LHM-01"
+    role: "SCADA HMI"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "server_2008r2"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "14:18:77:6B:BF:46"
+    
+    cloud_init:
+      ip: "57.92.89.187"
+      cidr: 24
+      gateway: "57.92.89.1"
+      nameserver: "57.92.89.71"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 10: MDP-DEV-01 - Development Workstation 1
+  # ---------------------------------------------------------------------------
+  - vmid: 5109
+    name: "MDP-DEV-01"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:A0:16"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 11: MDP-DEV-02 - Development Workstation 2
+  # ---------------------------------------------------------------------------
+  - vmid: 5110
+    name: "MDP-DEV-02"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:27:B9"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 12: MDP-DEV-03 - Development Workstation 3
+  # ---------------------------------------------------------------------------
+  - vmid: 5111
+    name: "MDP-DEV-03"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:C6:10"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 13: MDP-DEV-04 - Development Workstation 4
+  # ---------------------------------------------------------------------------
+  - vmid: 5112
+    name: "MDP-DEV-04"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:A8:05"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 14: MDP-DEV-05 - Development Workstation 5
+  # ---------------------------------------------------------------------------
+  - vmid: 5113
+    name: "MDP-DEV-05"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:99:F0"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 15: MDP-DEV-06 - Development Workstation 6
+  # ---------------------------------------------------------------------------
+  - vmid: 5114
+    name: "MDP-DEV-06"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:A0:16"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 16: MDP-DEV-07 - Development Workstation 7
+  # ---------------------------------------------------------------------------
+  - vmid: 5115
+    name: "MDP-DEV-07"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:27:B9"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 17: MDP-DEV-08 - Development Workstation 8
+  # ---------------------------------------------------------------------------
+  - vmid: 5116
+    name: "MDP-DEV-08"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:C6:10"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 18: MDP-DEV-09 - Development Workstation 9
+  # ---------------------------------------------------------------------------
+  - vmid: 5117
+    name: "MDP-DEV-09"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:A8:05"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 19: MDP-DEV-10 - Development Workstation 10
+  # ---------------------------------------------------------------------------
+  - vmid: 5118
+    name: "MDP-DEV-10"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:99:F0"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 20: MDP-OPS-01 - Operations Workstation 1
+  # ---------------------------------------------------------------------------
+  - vmid: 5119
+    name: "MDP-OPS-01"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:BC:12"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 21: MDP-OPS-02 - Operations Workstation 2
+  # ---------------------------------------------------------------------------
+  - vmid: 5120
+    name: "MDP-OPS-02"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:BC:B9"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 22: MDP-OPS-03 - Operations Workstation 3
+  # ---------------------------------------------------------------------------
+  - vmid: 5121
+    name: "MDP-OPS-03"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:C6:94"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 23: MDP-OPS-04 - Operations Workstation 4
+  # ---------------------------------------------------------------------------
+  - vmid: 5122
+    name: "MDP-OPS-04"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:DE:08"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 24: MDP-OPS-05 - Operations Workstation 5
+  # ---------------------------------------------------------------------------
+  - vmid: 5123
+    name: "MDP-OPS-05"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:DE:1A"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 25: MDP-OPS-06 - Operations Workstation 6
+  # ---------------------------------------------------------------------------
+  - vmid: 5124
+    name: "MDP-OPS-06"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:12:15"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 26: MDP-OPS-07 - Operations Workstation 7
+  # ---------------------------------------------------------------------------
+  - vmid: 5125
+    name: "MDP-OPS-07"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:9F:16"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 27: MDP-OPS-08 - Operations Workstation 8
+  # ---------------------------------------------------------------------------
+  - vmid: 5126
+    name: "MDP-OPS-08"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:C5:14"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 28: MDP-OPS-09 - Operations Workstation 9
+  # ---------------------------------------------------------------------------
+  - vmid: 5127
+    name: "MDP-OPS-09"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:B8:75"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 29: MDP-OPS-10 - Operations Workstation 10
+  # ---------------------------------------------------------------------------
+  - vmid: 5128
+    name: "MDP-OPS-10"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:2F:A0"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 30: MDP-QA-01 - Quality Assurance Workstation 1
+  # ---------------------------------------------------------------------------
+  - vmid: 5129
+    name: "MDP-QA-01"
+    role: "Quality Assurance Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:AA:08"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 31: MDP-QA-02 - Quality Assurance Workstation 2
+  # ---------------------------------------------------------------------------
+  - vmid: 5130
+    name: "MDP-QA-02"
+    role: "Quality Assurance Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:08:CA"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 32: MDP-QA-03 - Quality Assurance Workstation 3
+  # ---------------------------------------------------------------------------
+  - vmid: 5131
+    name: "MDP-QA-03"
+    role: "Quality Assurance Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:E6:E7"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 33: MDP-QA-04 - Quality Assurance Workstation 4
+  # ---------------------------------------------------------------------------
+  - vmid: 5132
+    name: "MDP-QA-04"
+    role: "Quality Assurance Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:A8:26"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 34: MDP-QA-05 - Quality Assurance Workstation 5
+  # ---------------------------------------------------------------------------
+  - vmid: 5133
+    name: "MDP-QA-05"
+    role: "Quality Assurance Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:13:16"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 35: MDP-QA-06 - Quality Assurance Workstation 6
+  # ---------------------------------------------------------------------------
+  - vmid: 5134
+    name: "MDP-QA-06"
+    role: "Quality Assurance Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:C9:FE"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 36: MDP-QA-07 - Quality Assurance Workstation 7
+  # ---------------------------------------------------------------------------
+  - vmid: 5135
+    name: "MDP-QA-07"
+    role: "Quality Assurance Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:28:15"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 37: MDP-QA-08 - Quality Assurance Workstation 8
+  # ---------------------------------------------------------------------------
+  - vmid: 5136
+    name: "MDP-QA-08"
+    role: "Quality Assurance Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:CC:C3"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 38: MDP-QA-09 - Quality Assurance Workstation 9
+  # ---------------------------------------------------------------------------
+  - vmid: 5137
+    name: "MDP-QA-09"
+    role: "Quality Assurance Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:BA:55"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 39: MDP-QA-10 - Quality Assurance Workstation 10
+  # ---------------------------------------------------------------------------
+  - vmid: 5138
+    name: "MDP-QA-10"
+    role: "Quality Assurance Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:91:EA"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 40: MDP-HR-01 - Human Reseources Workstation 1
+  # ---------------------------------------------------------------------------
+  - vmid: 5139
+    name: "MDP-HR-01"
+    role: "Human Reseources Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:B1:19"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 41: MDP-HR-02 - Human Reseources Workstation 2
+  # ---------------------------------------------------------------------------
+  - vmid: 5140
+    name: "MDP-HR-02"
+    role: "Human Reseources Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:A3:32"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 42: MDP-HR-03 - Human Reseources Workstation 3
+  # ---------------------------------------------------------------------------
+  - vmid: 5141
+    name: "MDP-HR-03"
+    role: "Human Reseources Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:A3:C7"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 43: MDP-HR-04 - Human Reseources Workstation 4
+  # ---------------------------------------------------------------------------
+  - vmid: 5142
+    name: "MDP-HR-04"
+    role: "Human Reseources Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:B8:17"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 44: MDP-HR-05 - Human Reseources Workstation 5
+  # ---------------------------------------------------------------------------
+  - vmid: 5143
+    name: "MDP-HR-05"
+    role: "Human Reseources Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:AE:BC"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 45: MDP-HR-06 - Human Reseources Workstation 6
+  # ---------------------------------------------------------------------------
+  - vmid: 5144
+    name: "MDP-HR-06"
+    role: "Human Reseources Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:C4:4E"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 46: MDP-HR-07 - Human Reseources Workstation 7
+  # ---------------------------------------------------------------------------
+  - vmid: 5145
+    name: "MDP-HR-07"
+    role: "Human Reseources Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:B5:49"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 47: MDP-HR-08 - Human Reseources Workstation 8
+  # ---------------------------------------------------------------------------
+  - vmid: 5146
+    name: "MDP-HR-08"
+    role: "Human Reseources Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:C3:D5"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 48: MDP-HR-09 - Human Reseources Workstation 9
+  # ---------------------------------------------------------------------------
+  - vmid: 5147
+    name: "MDP-HR-09"
+    role: "Human Reseources Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:DD:91"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 49: MDP-HR-10 - Human Reseources Workstation 10
+  # ---------------------------------------------------------------------------
+  - vmid: 5148
+    name: "MDP-HR-10"
+    role: "Human Reseources Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "windows_11"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:DE:95"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
