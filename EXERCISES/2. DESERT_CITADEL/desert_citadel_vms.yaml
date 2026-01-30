@@ -3,9 +3,10 @@
 # =============================================================================
 # CDX-E Framework VM Specification
 # Generated: 2026-01-22
-# Updated:   2026-01-25
+# Updated:   2026-01-29
 # Purpose: Mission Partner Network (MPNET) infrastructure
 # Organization: Madripoor (fictional nation-state partner network)
+# Adversary: Err0r Squ@d
 # =============================================================================
 
 exercise:
@@ -420,7 +421,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -456,7 +457,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -492,7 +493,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -528,7 +529,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -564,7 +565,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -600,7 +601,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -636,7 +637,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -672,7 +673,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -708,7 +709,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -744,7 +745,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -764,9 +765,189 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 20: MDP-OPS-01 - Operations Workstation 1
+  # VM 20: MDP-DEV-11 - Development Workstation 11
   # ---------------------------------------------------------------------------
   - vmid: 5119
+    name: "MDP-DEV-11"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "centos_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 1
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:A0:16"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 21: MDP-DEV-12 - Development Workstation 12
+  # ---------------------------------------------------------------------------
+  - vmid: 5120
+    name: "MDP-DEV-12"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "centos_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 1
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:27:B9"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 22: MDP-DEV-13 - Development Workstation 13
+  # ---------------------------------------------------------------------------
+  - vmid: 5121
+    name: "MDP-DEV-13"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "centos_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 1
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:C6:10"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 23: MDP-DEV-14 - Development Workstation 14
+  # ---------------------------------------------------------------------------
+  - vmid: 5122
+    name: "MDP-DEV-14"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "centos_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 1
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:A8:05"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 24: MDP-DEV-15 - Development Workstation 15
+  # ---------------------------------------------------------------------------
+  - vmid: 5123
+    name: "MDP-DEV-15"
+    role: "Development Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "centos_7"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 1
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1190
+          firewall: true
+          mac: "D4:85:64:87:99:F0"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 25: MDP-OPS-01 - Operations Workstation 1
+  # ---------------------------------------------------------------------------
+  - vmid: 5124
     name: "MDP-OPS-01"
     role: "Operations Workstation"
     site: "Singapore"
@@ -780,7 +961,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -800,9 +981,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 21: MDP-OPS-02 - Operations Workstation 2
+  # VM 26: MDP-OPS-02 - Operations Workstation 2
   # ---------------------------------------------------------------------------
-  - vmid: 5120
+  - vmid: 5125
     name: "MDP-OPS-02"
     role: "Operations Workstation"
     site: "Singapore"
@@ -816,7 +997,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -836,9 +1017,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 22: MDP-OPS-03 - Operations Workstation 3
+  # VM 27: MDP-OPS-03 - Operations Workstation 3
   # ---------------------------------------------------------------------------
-  - vmid: 5121
+  - vmid: 5126
     name: "MDP-OPS-03"
     role: "Operations Workstation"
     site: "Singapore"
@@ -852,7 +1033,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -872,9 +1053,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 23: MDP-OPS-04 - Operations Workstation 4
+  # VM 28: MDP-OPS-04 - Operations Workstation 4
   # ---------------------------------------------------------------------------
-  - vmid: 5122
+  - vmid: 5127
     name: "MDP-OPS-04"
     role: "Operations Workstation"
     site: "Singapore"
@@ -888,7 +1069,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -908,9 +1089,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 24: MDP-OPS-05 - Operations Workstation 5
+  # VM 29: MDP-OPS-05 - Operations Workstation 5
   # ---------------------------------------------------------------------------
-  - vmid: 5123
+  - vmid: 5128
     name: "MDP-OPS-05"
     role: "Operations Workstation"
     site: "Singapore"
@@ -924,7 +1105,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -944,9 +1125,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 25: MDP-OPS-06 - Operations Workstation 6
+  # VM 30: MDP-OPS-06 - Operations Workstation 6
   # ---------------------------------------------------------------------------
-  - vmid: 5124
+  - vmid: 5129
     name: "MDP-OPS-06"
     role: "Operations Workstation"
     site: "Singapore"
@@ -960,7 +1141,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -980,9 +1161,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 26: MDP-OPS-07 - Operations Workstation 7
+  # VM 31: MDP-OPS-07 - Operations Workstation 7
   # ---------------------------------------------------------------------------
-  - vmid: 5125
+  - vmid: 5130
     name: "MDP-OPS-07"
     role: "Operations Workstation"
     site: "Singapore"
@@ -996,7 +1177,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1016,9 +1197,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 27: MDP-OPS-08 - Operations Workstation 8
+  # VM 32: MDP-OPS-08 - Operations Workstation 8
   # ---------------------------------------------------------------------------
-  - vmid: 5126
+  - vmid: 5131
     name: "MDP-OPS-08"
     role: "Operations Workstation"
     site: "Singapore"
@@ -1032,7 +1213,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1052,9 +1233,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 28: MDP-OPS-09 - Operations Workstation 9
+  # VM 33: MDP-OPS-09 - Operations Workstation 9
   # ---------------------------------------------------------------------------
-  - vmid: 5127
+  - vmid: 5132
     name: "MDP-OPS-09"
     role: "Operations Workstation"
     site: "Singapore"
@@ -1068,7 +1249,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1088,9 +1269,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 29: MDP-OPS-10 - Operations Workstation 10
+  # VM 34: MDP-OPS-10 - Operations Workstation 10
   # ---------------------------------------------------------------------------
-  - vmid: 5128
+  - vmid: 5133
     name: "MDP-OPS-10"
     role: "Operations Workstation"
     site: "Singapore"
@@ -1104,7 +1285,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1124,9 +1305,189 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 30: MDP-QA-01 - Quality Assurance Workstation 1
+  # VM 35: MDP-OPS-11 - Operations Workstation 11
   # ---------------------------------------------------------------------------
-  - vmid: 5129
+  - vmid: 5134
+    name: "MDP-OPS-11"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "ubuntu_dsk_2110"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 1
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:12:15"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 36: MDP-OPS-12 - Operations Workstation 12
+  # ---------------------------------------------------------------------------
+  - vmid: 5135
+    name: "MDP-OPS-12"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "ubuntu_dsk_2110"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 1
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:9F:16"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 37: MDP-OPS-13 - Operations Workstation 13
+  # ---------------------------------------------------------------------------
+  - vmid: 5136
+    name: "MDP-OPS-13"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "ubuntu_dsk_2110"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 1
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:C5:14"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 38: MDP-OPS-14 - Operations Workstation 14
+  # ---------------------------------------------------------------------------
+  - vmid: 5137
+    name: "MDP-OPS-14"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "ubuntu_dsk_2110"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 1
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:B8:75"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 39: MDP-OPS-15 - Operations Workstation 15
+  # ---------------------------------------------------------------------------
+  - vmid: 5138
+    name: "MDP-OPS-15"
+    role: "Operations Workstation"
+    site: "Singapore"
+    organization: "Madripoor"
+    
+    template: "ubuntu_dsk_2110"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 1
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "mdp_sng_in"
+          tag: 1189
+          firewall: true
+          mac: "D4:85:64:87:2F:A0"
+    
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 40: MDP-QA-01 - Quality Assurance Workstation 1
+  # ---------------------------------------------------------------------------
+  - vmid: 5139
     name: "MDP-QA-01"
     role: "Quality Assurance Workstation"
     site: "Singapore"
@@ -1140,7 +1501,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1160,9 +1521,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 31: MDP-QA-02 - Quality Assurance Workstation 2
+  # VM 41: MDP-QA-02 - Quality Assurance Workstation 2
   # ---------------------------------------------------------------------------
-  - vmid: 5130
+  - vmid: 5140
     name: "MDP-QA-02"
     role: "Quality Assurance Workstation"
     site: "Singapore"
@@ -1176,7 +1537,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1196,9 +1557,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 32: MDP-QA-03 - Quality Assurance Workstation 3
+  # VM 42: MDP-QA-03 - Quality Assurance Workstation 3
   # ---------------------------------------------------------------------------
-  - vmid: 5131
+  - vmid: 5141
     name: "MDP-QA-03"
     role: "Quality Assurance Workstation"
     site: "Singapore"
@@ -1212,7 +1573,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1232,9 +1593,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 33: MDP-QA-04 - Quality Assurance Workstation 4
+  # VM 43: MDP-QA-04 - Quality Assurance Workstation 4
   # ---------------------------------------------------------------------------
-  - vmid: 5132
+  - vmid: 5142
     name: "MDP-QA-04"
     role: "Quality Assurance Workstation"
     site: "Singapore"
@@ -1248,7 +1609,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1268,9 +1629,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 34: MDP-QA-05 - Quality Assurance Workstation 5
+  # VM 44: MDP-QA-05 - Quality Assurance Workstation 5
   # ---------------------------------------------------------------------------
-  - vmid: 5133
+  - vmid: 5143
     name: "MDP-QA-05"
     role: "Quality Assurance Workstation"
     site: "Singapore"
@@ -1284,7 +1645,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1304,9 +1665,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 35: MDP-QA-06 - Quality Assurance Workstation 6
+  # VM 45: MDP-QA-06 - Quality Assurance Workstation 6
   # ---------------------------------------------------------------------------
-  - vmid: 5134
+  - vmid: 5144
     name: "MDP-QA-06"
     role: "Quality Assurance Workstation"
     site: "Singapore"
@@ -1320,7 +1681,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1340,9 +1701,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 36: MDP-QA-07 - Quality Assurance Workstation 7
+  # VM 46: MDP-QA-07 - Quality Assurance Workstation 7
   # ---------------------------------------------------------------------------
-  - vmid: 5135
+  - vmid: 5145
     name: "MDP-QA-07"
     role: "Quality Assurance Workstation"
     site: "Singapore"
@@ -1356,7 +1717,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1376,9 +1737,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 37: MDP-QA-08 - Quality Assurance Workstation 8
+  # VM 47: MDP-QA-08 - Quality Assurance Workstation 8
   # ---------------------------------------------------------------------------
-  - vmid: 5136
+  - vmid: 5146
     name: "MDP-QA-08"
     role: "Quality Assurance Workstation"
     site: "Singapore"
@@ -1392,7 +1753,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1412,9 +1773,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 38: MDP-QA-09 - Quality Assurance Workstation 9
+  # VM 48: MDP-QA-09 - Quality Assurance Workstation 9
   # ---------------------------------------------------------------------------
-  - vmid: 5137
+  - vmid: 5147
     name: "MDP-QA-09"
     role: "Quality Assurance Workstation"
     site: "Singapore"
@@ -1428,7 +1789,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1448,9 +1809,9 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 39: MDP-QA-10 - Quality Assurance Workstation 10
+  # VM 49: MDP-QA-10 - Quality Assurance Workstation 10
   # ---------------------------------------------------------------------------
-  - vmid: 5138
+  - vmid: 5148
     name: "MDP-QA-10"
     role: "Quality Assurance Workstation"
     site: "Singapore"
@@ -1464,7 +1825,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1484,11 +1845,11 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 40: MDP-HR-01 - Human Reseources Workstation 1
+  # VM 50: MDP-HR-01 - Human Resources Workstation 1
   # ---------------------------------------------------------------------------
-  - vmid: 5139
+  - vmid: 5149
     name: "MDP-HR-01"
-    role: "Human Reseources Workstation"
+    role: "Human Resources Workstation"
     site: "Singapore"
     organization: "Madripoor"
     
@@ -1500,7 +1861,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1520,11 +1881,11 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 41: MDP-HR-02 - Human Reseources Workstation 2
+  # VM 51: MDP-HR-02 - Human Resources Workstation 2
   # ---------------------------------------------------------------------------
-  - vmid: 5140
+  - vmid: 5150
     name: "MDP-HR-02"
-    role: "Human Reseources Workstation"
+    role: "Human Resources Workstation"
     site: "Singapore"
     organization: "Madripoor"
     
@@ -1536,7 +1897,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1556,11 +1917,11 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 42: MDP-HR-03 - Human Reseources Workstation 3
+  # VM 52: MDP-HR-03 - Human Resources Workstation 3
   # ---------------------------------------------------------------------------
-  - vmid: 5141
+  - vmid: 5151
     name: "MDP-HR-03"
-    role: "Human Reseources Workstation"
+    role: "Human Resources Workstation"
     site: "Singapore"
     organization: "Madripoor"
     
@@ -1572,7 +1933,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1592,11 +1953,11 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 43: MDP-HR-04 - Human Reseources Workstation 4
+  # VM 53: MDP-HR-04 - Human Resources Workstation 4
   # ---------------------------------------------------------------------------
-  - vmid: 5142
+  - vmid: 5152
     name: "MDP-HR-04"
-    role: "Human Reseources Workstation"
+    role: "Human Resources Workstation"
     site: "Singapore"
     organization: "Madripoor"
     
@@ -1608,7 +1969,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1628,11 +1989,11 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 44: MDP-HR-05 - Human Reseources Workstation 5
+  # VM 54: MDP-HR-05 - Human Resources Workstation 5
   # ---------------------------------------------------------------------------
-  - vmid: 5143
+  - vmid: 5153
     name: "MDP-HR-05"
-    role: "Human Reseources Workstation"
+    role: "Human Resources Workstation"
     site: "Singapore"
     organization: "Madripoor"
     
@@ -1644,7 +2005,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1664,11 +2025,11 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 45: MDP-HR-06 - Human Reseources Workstation 6
+  # VM 55: MDP-HR-06 - Human Resources Workstation 6
   # ---------------------------------------------------------------------------
-  - vmid: 5144
+  - vmid: 5154
     name: "MDP-HR-06"
-    role: "Human Reseources Workstation"
+    role: "Human Resources Workstation"
     site: "Singapore"
     organization: "Madripoor"
     
@@ -1680,7 +2041,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1700,11 +2061,11 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 46: MDP-HR-07 - Human Reseources Workstation 7
+  # VM 56: MDP-HR-07 - Human Resources Workstation 7
   # ---------------------------------------------------------------------------
-  - vmid: 5145
+  - vmid: 5155
     name: "MDP-HR-07"
-    role: "Human Reseources Workstation"
+    role: "Human Resources Workstation"
     site: "Singapore"
     organization: "Madripoor"
     
@@ -1716,7 +2077,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1736,11 +2097,11 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 47: MDP-HR-08 - Human Reseources Workstation 8
+  # VM 57: MDP-HR-08 - Human Resources Workstation 8
   # ---------------------------------------------------------------------------
-  - vmid: 5146
+  - vmid: 5156
     name: "MDP-HR-08"
-    role: "Human Reseources Workstation"
+    role: "Human Resources Workstation"
     site: "Singapore"
     organization: "Madripoor"
     
@@ -1752,7 +2113,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1772,11 +2133,11 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 48: MDP-HR-09 - Human Reseources Workstation 9
+  # VM 58: MDP-HR-09 - Human Resources Workstation 9
   # ---------------------------------------------------------------------------
-  - vmid: 5147
+  - vmid: 5157
     name: "MDP-HR-09"
-    role: "Human Reseources Workstation"
+    role: "Human Resources Workstation"
     site: "Singapore"
     organization: "Madripoor"
     
@@ -1788,7 +2149,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1808,11 +2169,11 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 49: MDP-HR-10 - Human Reseources Workstation 10
+  # VM 59: MDP-HR-10 - Human Resources Workstation 10
   # ---------------------------------------------------------------------------
-  - vmid: 5148
+  - vmid: 5158
     name: "MDP-HR-10"
-    role: "Human Reseources Workstation"
+    role: "Human Resources Workstation"
     site: "Singapore"
     organization: "Madripoor"
     
@@ -1824,7 +2185,7 @@ virtual_machines:
     
     resources:
       memory_mb: 8192
-      cores: 2
+      cores: 1
       sockets: 1
     
     network:
@@ -1842,3 +2203,77 @@ virtual_machines:
       pool: "EX_DESERT_CITADEL"
       tags:
         - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 60: ERR-SDP-01 - Service Delivery Point Router
+  # ---------------------------------------------------------------------------
+  - vmid: 5159
+    name: "SDP-ERR-1"
+    role: "Service Delivery Point"
+    site: "Liverpool"
+    organization: "Err0r Squ@d"
+    
+    template: "vyos"  # Resolved from templates.yaml
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 2048
+      cores: 1
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "apt_err_in"
+          firewall: true
+        - nic_id: 2
+          model: "virtio"
+          bridge: "EQIX1"
+          tag: 1303
+          firewall: true
+    
+    proxmox:
+      node: "cdx-pve-02"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "apt"
+
+  # ---------------------------------------------------------------------------
+  # VM 61: ERRTRM01 - Err0r Squ@d Terminal #1
+  # ---------------------------------------------------------------------------
+  - vmid: 5158
+    name: "ERRTRM01"
+    role: "Err0r Squ@d Terminal #1"
+    site: "Liverpool"
+    organization: "Err0r Squ@d"
+    
+    template: "kali_linux"
+    
+    clone:
+      type: "linked"
+      start_after_clone: true
+    
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "apt_err_in"
+          tag: 1303
+          firewall: true
+    
+    proxmox:
+      node: "cdx-pve-02"
+      pool: "EX_DESERT_CITADEL"
+      tags:
+        - "apt"
