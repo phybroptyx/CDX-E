@@ -1,0 +1,95 @@
+configure
+
+########################################
+# System Identity / Base Services
+########################################
+
+set system host-name 'SDP-SCT-1'
+set system domain-name 'sanctum-sanctorum.midgard.mrvl'
+set system time-zone 'America/New_York'
+
+set service ntp server '46.244.164.88'
+set service ssh port '22'
+
+########################################
+# Interfaces
+# eth0: Management (pre-configured, do NOT modify here)
+########################################
+
+# eth1: Transit link to SCT Firewall (192.168.203.0/30)
+set interfaces ethernet eth1 description 'to SCT-FW'
+set interfaces ethernet eth1 address '192.168.203.1/30'
+
+# eth2: External / Upstream toward Tier-1 (Toronto IXP - EQIX-5)
+set interfaces ethernet eth2 description 'to EQIX-5'
+set interfaces ethernet eth2 address '206.131.208.19/20'
+
+########################################
+# Static Routing
+########################################
+
+# Default route to the upstream Tier-1 router (EQIX-5)
+set protocols static route 0.0.0.0/0 next-hop '206.131.208.42'
+
+# Internal routes via SCT Firewall
+set protocols static route 206.131.209.0/28 next-hop '192.168.203.2'
+set protocols static route 206.131.210.0/24 next-hop '192.168.203.2'
+set protocols static route 206.131.211.0/24 next-hop '192.168.203.2'
+set protocols static route 206.131.212.0/24 next-hop '192.168.203.2'
+set protocols static route 206.131.213.0/24 next-hop '192.168.203.2'
+
+########################################
+# OSPF – "Public Internet" View Only
+# - OSPF only on external segment (Area 5, matches Toronto T1)
+# - Redistribute SCT internal routes into OSPF
+# - No RFC1918 (192.168.203.0/30, 10.30.3.0/24, 10.0.0.0/30)
+#   leaked into the Internet LSDB
+########################################
+
+# Use external IP as OSPF router-id for clarity
+set protocols ospf parameters router-id '206.131.208.19'
+
+# Enable OSPF on the external link toward CDX-IXP-T1-EQIX-5 in Area 5
+set protocols ospf area 5 network '206.131.208.0/20'
+
+# Policy: only advertise SCT internal networks into OSPF
+
+# Prefix-list for SCT internal address space
+set policy prefix-list SCT-INTERNAL rule 10 action 'permit'
+set policy prefix-list SCT-INTERNAL rule 10 prefix '206.131.209.0/28'
+set policy prefix-list SCT-INTERNAL rule 20 action 'permit'
+set policy prefix-list SCT-INTERNAL rule 20 prefix '206.131.210.0/24'
+set policy prefix-list SCT-INTERNAL rule 30 action 'permit'
+set policy prefix-list SCT-INTERNAL rule 30 prefix '206.131.211.0/24'
+set policy prefix-list SCT-INTERNAL rule 40 action 'permit'
+set policy prefix-list SCT-INTERNAL rule 40 prefix '206.131.212.0/24'
+set policy prefix-list SCT-INTERNAL rule 50 action 'permit'
+set policy prefix-list SCT-INTERNAL rule 50 prefix '206.131.213.0/24'
+
+# Explicit deny-any to avoid leaking other statics
+set policy prefix-list SCT-INTERNAL rule 100 action 'deny'
+set policy prefix-list SCT-INTERNAL rule 100 prefix '0.0.0.0/0'
+
+# Route-map to control redistribution of static routes into OSPF
+set policy route-map OSPF-REDIST-STATIC-SCT rule 10 action 'permit'
+set policy route-map OSPF-REDIST-STATIC-SCT rule 10 match ip address prefix-list 'SCT-INTERNAL'
+
+# Optional hard stop: deny everything else
+set policy route-map OSPF-REDIST-STATIC-SCT rule 100 action 'deny'
+
+# Redistribute static routes into OSPF using the route-map
+set protocols ospf redistribute static route-map 'OSPF-REDIST-STATIC-SCT'
+
+########################################
+# NAT
+# (None – this SDP is purely routed, no translation)
+########################################
+# (Intentionally no "set nat ..." statements)
+
+########################################
+# Commit & Save
+########################################
+
+commit
+save
+exit

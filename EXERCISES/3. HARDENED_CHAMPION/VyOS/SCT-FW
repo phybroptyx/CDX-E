@@ -1,0 +1,70 @@
+configure
+
+########################################
+# System Identity / Base Services
+########################################
+
+set system host-name 'SCT-FW'
+set system domain-name 'sanctum-sanctorum.midgard.mrvl'
+set system time-zone 'America/New_York'
+
+set service ntp server '46.244.164.88'
+set service ssh port '22'
+
+########################################
+# Interfaces
+# eth0: Management (pre-configured, do NOT modify here)
+# NOTE: This is a VyOS placeholder config.
+#       Will be replaced with OPNsense when template is built.
+########################################
+
+# eth1: Internal / Core network (206.131.209.0/28)
+set interfaces ethernet eth1 description 'Core Network'
+set interfaces ethernet eth1 address '206.131.209.1/28'
+
+# eth2: Transit link to SDP Router (192.168.203.0/30)
+set interfaces ethernet eth2 description 'to SDP-SCT-1'
+set interfaces ethernet eth2 address '192.168.203.2/30'
+
+# eth3: SOC Network (10.30.3.0/24)
+set interfaces ethernet eth3 description 'SOC'
+set interfaces ethernet eth3 address '10.30.3.1/24'
+
+########################################
+# Static Routing
+########################################
+
+# Default route via SDP Router
+set protocols static route 0.0.0.0/0 next-hop '192.168.203.1'
+
+# VLANs 210, 211 via SCT-RTR-1
+set protocols static route 206.131.210.0/24 next-hop '206.131.209.2'
+set protocols static route 206.131.211.0/24 next-hop '206.131.209.2'
+
+# VLANs 212, 213 via SCT-RTR-2
+set protocols static route 206.131.212.0/24 next-hop '206.131.209.3'
+set protocols static route 206.131.213.0/24 next-hop '206.131.209.3'
+
+# Cross-connect network via either router (RTR-1 as primary)
+set protocols static route 10.0.0.0/30 next-hop '206.131.209.2'
+
+########################################
+# Firewall (placeholder - basic zone-based)
+# Full firewall rules will be implemented in OPNsense
+########################################
+# (Placeholder – no VyOS firewall rules defined)
+# (OPNsense will handle stateful inspection, IDS/IPS, etc.)
+
+########################################
+# NAT
+# (None – purely routed, no translation)
+########################################
+# (Intentionally no "set nat ..." statements)
+
+########################################
+# Commit & Save
+########################################
+
+commit
+save
+exit
