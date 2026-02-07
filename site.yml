@@ -1,0 +1,42 @@
+---
+# =============================================================================
+# CDX-E Framework - Exercise Lifecycle Management (Ansible)
+# =============================================================================
+# Replaces: init-cdx-e.ps1 + Invoke-CDX-E.ps1
+#
+# Usage:
+#   ansible-playbook site.yml -e "action=deploy exercise_yaml=../hardened_champion_vms.yaml"
+#   ansible-playbook site.yml -e "action=destroy exercise_yaml=../hardened_champion_vms.yaml"
+#   ansible-playbook site.yml -e "action=start exercise_yaml=../hardened_champion_vms.yaml"
+#   ansible-playbook site.yml -e "action=stop exercise_yaml=../hardened_champion_vms.yaml"
+#   ansible-playbook site.yml -e "action=status exercise_yaml=../hardened_champion_vms.yaml"
+#
+# Optional variables:
+#   vm_filter    - Comma-separated VMIDs or names (default: "all")
+#   no_start     - Leave VMs stopped after deploy (default: false)
+#   dry_run      - Preview without executing (default: false)
+#
+# API credentials (set via vault, env, or extra-vars):
+#   proxmox_api_token_id
+#   proxmox_api_token_secret
+#
+# Examples:
+#   ansible-playbook site.yml -e "action=deploy exercise_yaml=../hardened_champion_vms.yaml no_start=true"
+#   ansible-playbook site.yml -e "action=stop exercise_yaml=../hardened_champion_vms.yaml vm_filter=5205,5206"
+#   ansible-playbook site.yml -e "action=destroy exercise_yaml=../hardened_champion_vms.yaml" --check
+# =============================================================================
+
+- name: CDX-E Exercise Lifecycle Management
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    cdx_action: "{{ action | default('status') }}"
+    cdx_exercise_yaml: "{{ exercise_yaml }}"
+    cdx_vm_filter: "{{ vm_filter | default('all') }}"
+    cdx_no_start: "{{ no_start | default(false) | bool }}"
+    cdx_dry_run: "{{ dry_run | default(false) | bool }}"
+
+  roles:
+    - cdx_e
