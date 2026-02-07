@@ -1,0 +1,24 @@
+---
+# =============================================================================
+# Phase: Resource Pool Deletion
+# Deletes the exercise resource pool via Proxmox API
+# =============================================================================
+
+- name: "POOL DELETE - Deleting resource pool '{{ exercise_pool }}'"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/pools/{{ exercise_pool }}"
+    method: DELETE
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 400, 404]  # 400/404 if pool doesn't exist
+  register: pool_result
+  when: not cdx_dry_run | bool
+  ignore_errors: true
+
+- name: Report pool deletion result
+  debug:
+    msg: >-
+      {% if pool_result is skipped %}DRY RUN - Would delete pool '{{ exercise_pool }}'
+      {% elif pool_result is failed or pool_result.status in [400, 404] %}Pool '{{ exercise_pool }}' does not exist - continuing
+      {% else %}Pool '{{ exercise_pool }}' deleted{% endif %}

@@ -1,0 +1,34 @@
+---
+# =============================================================================
+# Action: Destroy (Full Exercise Teardown)
+# Phase 1: VM destruction
+# Phase 2: Resource pool deletion
+# Phase 3: Network revert on all Proxmox hosts
+# =============================================================================
+
+# Phase 1: VM Destruction
+- name: "Phase 1 - Destroy VMs"
+  include_tasks: destroy_single_vm.yml
+  loop: "{{ all_vms }}"
+  loop_control:
+    loop_var: vm
+    label: "{{ vm.vmid }} - {{ vm.name }}"
+  when: >-
+    cdx_vm_filter == 'all' or
+    (vm.vmid | string) in vm_filter_list or
+    vm.name in vm_filter_list
+
+# Phase 2: Pool Deletion
+- name: "Phase 2 - Pool Deletion"
+  include_tasks: pool_delete.yml
+
+# Phase 3: Network Revert
+- name: "Phase 3 - Network Revert"
+  include_tasks: network_revert.yml
+
+- name: "TEARDOWN COMPLETE"
+  debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════════════
+        TEARDOWN COMPLETE - {{ exercise_name }}
+      ═══════════════════════════════════════════════════════════════════════

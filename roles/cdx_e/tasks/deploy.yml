@@ -1,0 +1,36 @@
+---
+# =============================================================================
+# Action: Deploy (Full Exercise Setup)
+# Phase 1: Network setup on all Proxmox hosts
+# Phase 2: Resource pool creation
+# Phase 3: VM deployment
+# =============================================================================
+
+# Phase 1: Network Setup
+- name: "Phase 1 - Network Setup"
+  include_tasks: network_setup.yml
+
+# Phase 2: Pool Creation
+- name: "Phase 2 - Pool Creation"
+  include_tasks: pool_create.yml
+
+# Phase 3: VM Deployment
+- name: "Phase 3 - Deploy VMs"
+  include_tasks: deploy_single_vm.yml
+  loop: "{{ all_vms }}"
+  loop_control:
+    loop_var: vm
+    label: "{{ vm.vmid }} - {{ vm.name }}"
+  when: >-
+    cdx_vm_filter == 'all' or
+    (vm.vmid | string) in vm_filter_list or
+    vm.name in vm_filter_list
+
+- name: "DEPLOY COMPLETE"
+  debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════════════
+        DEPLOYMENT COMPLETE - {{ exercise_name }}
+        Pool: {{ exercise_pool }}
+        Access Proxmox: https://{{ proxmox_api_host }}:{{ proxmox_api_port }}
+      ═══════════════════════════════════════════════════════════════════════
