@@ -1,0 +1,113 @@
+---
+# =============================================================================
+# Phase: Network Revert
+# Removes exercise OVS bridges from Proxmox nodes via the API (no SSH required)
+#
+# Guard: Only runs when cdx_vm_filter == 'all' (full teardown).
+#        Partial VM destroys preserve bridges for remaining VMs.
+#
+# Logic:
+#   1. Extract unique bridges per node from VM definitions
+#   2. Delete each bridge via DELETE (tolerant of already-gone bridges)
+#   3. Apply network config on affected nodes
+# =============================================================================
+
+# ---- Guard: skip bridge removal on partial destroys -----------------------
+- name: "NETWORK REVERT - Skip (partial destroy preserves bridges)"
+  debug:
+    msg: "vm_filter is '{{ cdx_vm_filter }}' (not 'all') - skipping bridge removal to preserve networking for remaining VMs"
+  when: cdx_vm_filter != 'all'
+
+- name: "NETWORK REVERT - End block (partial destroy)"
+  meta: end_play
+  when: false  # Placeholder - actual skip handled by when conditions below
+
+# ---- Step 1: Build bridge-per-node map from VM definitions ----------------
+- name: "NETWORK REVERT - Build bridge map from VM definitions"
+  set_fact:
+    _bridges_per_node: >-
+      {%- set result = {} -%}
+      {%- for vm in all_vms -%}
+        {%- set node = vm.proxmox.node -%}
+        {%- for nic in vm.network.additional_nics | default([]) -%}
+          {%- if node not in result -%}
+            {%- set _ = result.update({node: []}) -%}
+          {%- endif -%}
+          {%- if nic.bridge not in result[node] -%}
+            {%- set _ = result[node].append(nic.bridge) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ result }}
+  when: cdx_vm_filter == 'all'
+
+- name: "NETWORK REVERT - Display bridges to remove"
+  debug:
+    msg: "Node {{ item.key }}: {{ item.value | join(', ') }}"
+  loop: "{{ _bridges_per_node | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: cdx_vm_filter == 'all'
+
+# ---- Step 2: Delete OVS bridges ------------------------------------------
+- name: "NETWORK REVERT - Build flat deletion list"
+  set_fact:
+    _bridges_to_delete: >-
+      {%- set result = [] -%}
+      {%- for node, bridges in _bridges_per_node.items() -%}
+        {%- for br in bridges -%}
+          {%- set _ = result.append({'node': node, 'bridge': br}) -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ result }}
+  when: cdx_vm_filter == 'all'
+
+- name: "NETWORK REVERT - Delete OVS bridge '{{ item.bridge }}' on {{ item.node }}"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ item.node }}/network/{{ item.bridge }}"
+    method: DELETE
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 400, 404]
+  loop: "{{ _bridges_to_delete }}"
+  loop_control:
+    label: "{{ item.node }}:{{ item.bridge }}"
+  when:
+    - cdx_vm_filter == 'all'
+    - not cdx_dry_run | bool
+  ignore_errors: true
+
+# ---- Step 3: Apply network config on affected nodes -----------------------
+- name: "NETWORK REVERT - Determine nodes needing apply"
+  set_fact:
+    _nodes_to_apply: "{{ _bridges_to_delete | map(attribute='node') | unique | list }}"
+  when: cdx_vm_filter == 'all'
+
+- name: "NETWORK REVERT - Apply network configuration on {{ item }}"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ item }}/network"
+    method: PUT
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  loop: "{{ _nodes_to_apply }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - cdx_vm_filter == 'all'
+    - not cdx_dry_run | bool
+    - _nodes_to_apply | length > 0
+  ignore_errors: true
+
+- name: "NETWORK REVERT - Complete"
+  debug:
+    msg: >-
+      {% if cdx_vm_filter == 'all' %}
+      Network revert complete.
+      Removed {{ _bridges_to_delete | default([]) | length }} bridge(s)
+      across {{ _nodes_to_apply | default([]) | length }} node(s).
+      {% else %}
+      Network revert skipped (partial destroy).
+      {% endif %}

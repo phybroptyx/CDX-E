@@ -1,0 +1,141 @@
+---
+# =============================================================================
+# Phase: Network Setup
+# Creates OVS bridges on Proxmox nodes via the API (no SSH required)
+#
+# Logic:
+#   1. Extract unique bridges per node from VM definitions
+#   2. Query existing network interfaces on each affected node
+#   3. Compute delta (required - existing)
+#   4. Create missing OVS bridges via POST
+#   5. Apply network config on nodes that received new bridges
+# =============================================================================
+
+# ---- Step 1: Build bridge-per-node map from VM definitions -----------------
+- name: "NETWORK SETUP - Build required bridge map"
+  set_fact:
+    _bridges_per_node: >-
+      {%- set result = {} -%}
+      {%- for vm in all_vms -%}
+        {%- set node = vm.proxmox.node -%}
+        {%- for nic in vm.network.additional_nics | default([]) -%}
+          {%- if node not in result -%}
+            {%- set _ = result.update({node: []}) -%}
+          {%- endif -%}
+          {%- if nic.bridge not in result[node] -%}
+            {%- set _ = result[node].append(nic.bridge) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ result }}
+
+- name: "NETWORK SETUP - Display required bridges"
+  debug:
+    msg: "Node {{ item.key }}: {{ item.value | join(', ') }}"
+  loop: "{{ _bridges_per_node | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+# ---- Step 2: Query existing interfaces on each affected node ---------------
+- name: "NETWORK SETUP - Query existing network interfaces"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ item }}/network"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+  register: _node_networks
+  loop: "{{ _bridges_per_node.keys() | list }}"
+  loop_control:
+    label: "{{ item }}"
+  when: not cdx_dry_run | bool
+
+- name: "NETWORK SETUP - Build existing interface lookup"
+  set_fact:
+    _existing_ifaces: >-
+      {%- set result = {} -%}
+      {%- for resp in _node_networks.results | default([]) -%}
+        {%- set node = resp.item -%}
+        {%- set names = resp.json.data | map(attribute='iface') | list -%}
+        {%- set _ = result.update({node: names}) -%}
+      {%- endfor -%}
+      {{ result }}
+  when: not cdx_dry_run | bool
+
+- name: "NETWORK SETUP - Set empty lookup for dry run"
+  set_fact:
+    _existing_ifaces: >-
+      {%- set result = {} -%}
+      {%- for node in _bridges_per_node.keys() -%}
+        {%- set _ = result.update({node: []}) -%}
+      {%- endfor -%}
+      {{ result }}
+  when: cdx_dry_run | bool
+
+# ---- Step 3: Compute delta ------------------------------------------------
+- name: "NETWORK SETUP - Compute bridges to create"
+  set_fact:
+    _bridges_to_create: >-
+      {%- set result = [] -%}
+      {%- for node, bridges in _bridges_per_node.items() -%}
+        {%- set existing = _existing_ifaces[node] | default([]) -%}
+        {%- for br in bridges -%}
+          {%- if br not in existing -%}
+            {%- set _ = result.append({'node': node, 'bridge': br}) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ result }}
+
+- name: "NETWORK SETUP - Display creation plan"
+  debug:
+    msg: >-
+      {{ _bridges_to_create | length }} bridge(s) to create:
+      {{ _bridges_to_create | map(attribute='bridge') | list | join(', ') if _bridges_to_create | length > 0 else '(none - all bridges exist)' }}
+
+# ---- Step 4: Create OVS bridges -------------------------------------------
+- name: "NETWORK SETUP - Create OVS bridge '{{ item.bridge }}' on {{ item.node }}"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ item.node }}/network"
+    method: POST
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    body_format: form-urlencoded
+    body:
+      iface: "{{ item.bridge }}"
+      type: "OVSBridge"
+      autostart: "1"
+      comments: "CDX exercise: {{ exercise_name }}"
+    status_code: [200]
+  loop: "{{ _bridges_to_create }}"
+  loop_control:
+    label: "{{ item.node }}:{{ item.bridge }}"
+  when: not cdx_dry_run | bool
+
+# ---- Step 5: Apply network config on affected nodes -----------------------
+- name: "NETWORK SETUP - Determine nodes needing apply"
+  set_fact:
+    _nodes_to_apply: "{{ _bridges_to_create | map(attribute='node') | unique | list }}"
+
+- name: "NETWORK SETUP - Apply network configuration on {{ item }}"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ item }}/network"
+    method: PUT
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  loop: "{{ _nodes_to_apply }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - not cdx_dry_run | bool
+    - _nodes_to_apply | length > 0
+
+- name: "NETWORK SETUP - Complete"
+  debug:
+    msg: >-
+      Network setup complete.
+      Created {{ _bridges_to_create | length }} bridge(s)
+      across {{ _nodes_to_apply | default([]) | length }} node(s).
