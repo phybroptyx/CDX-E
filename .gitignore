@@ -1,0 +1,43 @@
+# =============================================================================
+# CDX-E .gitignore
+# =============================================================================
+
+# Generated files (auto-created by generate_structure.ps1)
+EXERCISES/*/structure.json
+
+# PowerShell artifacts
+*.psm1.bak
+*.ps1.bak
+
+# Ansible artifacts
+*.retry
+.ansible/
+inventory/*.cache
+
+# Logs
+*.log
+logs/
+
+# Windows artifacts
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.tmp
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Secrets (actual credentials — use secrets.example/ as template)
+secrets/
+
+# Scenario instruction files (ad-hoc session context)
+*_instructions.*
+
+# Scratch / working files
+scratch/
+temp/
+tmp/
