@@ -197,23 +197,19 @@ Deny: Cross-department traffic (except IT-Core)
 
 ## Deployment Configuration
 
-### Proxmox Network Bridge Setup
+### Ansible-Managed Bridge Setup
 
-#### Example: Creating HQ Core Servers Bridge
+Network bridges are created automatically by Ansible during exercise deployment. The `network_topology` section in the exercise YAML defines all OVS bridges, CDX-I patch ports, and VLAN tags. Ansible templates `/etc/network/interfaces` on each affected Proxmox node and runs `ifreload -a`.
+
 ```bash
-# On Proxmox host
-cat >> /etc/network/interfaces << EOF
-
-auto stk100
-iface stk100 inet manual
-    bridge-ports none
-    bridge-stp off
-    bridge-fd 0
-    # HQ Core Servers - 66.218.180.0/22
-EOF
-
-systemctl restart networking
+# Deploy exercise (creates bridges + VMs)
+ansible-playbook site.yml \
+  -e action=deploy \
+  -e exercise_yaml=EXERCISES/10.\ CHILLED_ROCKET/chilled_rocket_vms.yaml \
+  -e proxmox_api_token_secret="your-secret-here"
 ```
+
+Per-site bridges and CDX-I patch ports (with VLAN tags and STP settings) are defined in the exercise YAML's `network_topology.sites` section rather than manually on each host. See `inventory/host_vars/` for per-host base network configuration.
 
 ### Assigning Bridge to VM (CLI)
 ```bash

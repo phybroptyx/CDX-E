@@ -379,7 +379,7 @@ pvecm status
 ```
 
 ### Bridge Availability
-All bridges (stk100-stk140) must exist on all nodes where VMs will use them:
+All bridges (stk100-stk140) must exist on the nodes where VMs will use them:
 
 **cdx-pve-01 requires:**
 - stk100-stk110 (HQ)
@@ -392,23 +392,19 @@ All bridges (stk100-stk140) must exist on all nodes where VMs will use them:
 **cdx-pve-03 requires:**
 - stk125-stk132 (Nagasaki)
 
-### Creating Bridges on Specific Nodes
+### Bridge Creation (Ansible-Managed)
+
+Bridges are created automatically during exercise deployment. The `network_topology` section in the exercise YAML defines which OVS bridges go on which node. Ansible templates `/etc/network/interfaces` on each affected node via SSH.
 
 ```bash
-# SSH to cdx-pve-01 and create HQ bridges
-cat >> /etc/network/interfaces << 'EOF'
-
-auto stk100
-iface stk100 inet manual
-    bridge-ports none
-    bridge-stp off
-    bridge-fd 0
-    # HQ Core Servers
-EOF
-
-# Repeat for all required bridges...
-systemctl restart networking
+# Exercise deployment handles bridge creation automatically
+ansible-playbook site.yml \
+  -e action=deploy \
+  -e exercise_yaml=EXERCISES/10.\ CHILLED_ROCKET/chilled_rocket_vms.yaml \
+  -e proxmox_api_token_secret="your-secret-here"
 ```
+
+Per-host base networking (management IPs, physical interfaces, vmbr0/1/2/303) is defined in `inventory/host_vars/<node>.yml`. Exercise-specific bridges, CDX-I OVS patch ports, and VLAN tags are defined in the exercise YAML and rendered into the interfaces file by the Jinja2 template at `roles/cdx_e/templates/interfaces.j2`.
 
 ---
 

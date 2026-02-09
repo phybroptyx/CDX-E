@@ -1,0 +1,42 @@
+---
+# =============================================================================
+# cdx-pve-01 - Proxmox VE Host Network Configuration
+# =============================================================================
+# Host-specific infrastructure networking.
+# Exercise bridges are managed via network_topology in exercise YAMLs.
+# =============================================================================
+
+base_network:
+  # Physical interfaces (brought up by parent bridges, no 'auto' needed)
+  physical_interfaces:
+    - name: "eno1"
+    - name: "eno2"
+    - name: "eno4"
+
+  # SOC Trunk - OVS port carrying tagged VLANs to CDX-I bridge
+  soc_trunk:
+    interface: "eno3"
+    bridge: "vmbr303"
+    trunks: "2-4094"
+
+  # Management network
+  management:
+    bridge: "vmbr0"
+    port: "eno1"
+    vlan: 130
+    address: "172.30.3.49/24"
+    gateway: "172.30.3.1"
+
+  # Cluster network (corosync / live migration)
+  cluster:
+    bridge: "vmbr1"
+    port: "eno2"
+    address: "172.30.140.49/24"
+    vlan: 140
+
+  # Storage network (Ceph / NFS / iSCSI)
+  storage:
+    bridge: "vmbr2"
+    port: "none"
+    address: "172.30.141.49/24"
+    vlan: 141

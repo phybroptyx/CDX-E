@@ -1,113 +1,113 @@
 ---
 # =============================================================================
 # Phase: Network Revert
-# Removes exercise OVS bridges from Proxmox nodes via the API (no SSH required)
+# Restores base-only network configuration on Proxmox hosts (removes exercise
+# bridges, OVS patch ports, and VLAN tags).
+#
+# Replaces: exercise.sh revert
 #
 # Guard: Only runs when cdx_vm_filter == 'all' (full teardown).
 #        Partial VM destroys preserve bridges for remaining VMs.
 #
 # Logic:
-#   1. Extract unique bridges per node from VM definitions
-#   2. Delete each bridge via DELETE (tolerant of already-gone bridges)
-#   3. Apply network config on affected nodes
+#   1. Determine which nodes were configured by this exercise
+#   2. Re-template /etc/network/interfaces with base config only (no sites)
+#   3. Reload networking via ifreload -a
 # =============================================================================
 
-# ---- Guard: skip bridge removal on partial destroys -----------------------
-- name: "NETWORK REVERT - Skip (partial destroy preserves bridges)"
+# ---- Guard: skip on partial destroy ----------------------------------------
+- name: "NETWORK REVERT - Skip (partial destroy preserves networking)"
   debug:
-    msg: "vm_filter is '{{ cdx_vm_filter }}' (not 'all') - skipping bridge removal to preserve networking for remaining VMs"
+    msg: "vm_filter is '{{ cdx_vm_filter }}' (not 'all') — skipping network revert to preserve bridges for remaining VMs"
   when: cdx_vm_filter != 'all'
 
-- name: "NETWORK REVERT - End block (partial destroy)"
-  meta: end_play
-  when: false  # Placeholder - actual skip handled by when conditions below
-
-# ---- Step 1: Build bridge-per-node map from VM definitions ----------------
-- name: "NETWORK REVERT - Build bridge map from VM definitions"
-  set_fact:
-    _bridges_per_node: >-
-      {%- set result = {} -%}
-      {%- for vm in all_vms -%}
-        {%- set node = vm.proxmox.node -%}
-        {%- for nic in vm.network.additional_nics | default([]) -%}
-          {%- if node not in result -%}
-            {%- set _ = result.update({node: []}) -%}
-          {%- endif -%}
-          {%- if nic.bridge not in result[node] -%}
-            {%- set _ = result[node].append(nic.bridge) -%}
-          {%- endif -%}
-        {%- endfor -%}
-      {%- endfor -%}
-      {{ result }}
-  when: cdx_vm_filter == 'all'
-
-- name: "NETWORK REVERT - Display bridges to remove"
+- name: "NETWORK REVERT - Skip (no network topology defined)"
   debug:
-    msg: "Node {{ item.key }}: {{ item.value | join(', ') }}"
-  loop: "{{ _bridges_per_node | dict2items }}"
-  loop_control:
-    label: "{{ item.key }}"
-  when: cdx_vm_filter == 'all'
-
-# ---- Step 2: Delete OVS bridges ------------------------------------------
-- name: "NETWORK REVERT - Build flat deletion list"
-  set_fact:
-    _bridges_to_delete: >-
-      {%- set result = [] -%}
-      {%- for node, bridges in _bridges_per_node.items() -%}
-        {%- for br in bridges -%}
-          {%- set _ = result.append({'node': node, 'bridge': br}) -%}
-        {%- endfor -%}
-      {%- endfor -%}
-      {{ result }}
-  when: cdx_vm_filter == 'all'
-
-- name: "NETWORK REVERT - Delete OVS bridge '{{ item.bridge }}' on {{ item.node }}"
-  uri:
-    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ item.node }}/network/{{ item.bridge }}"
-    method: DELETE
-    headers:
-      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
-    validate_certs: "{{ proxmox_validate_certs }}"
-    status_code: [200, 400, 404]
-  loop: "{{ _bridges_to_delete }}"
-  loop_control:
-    label: "{{ item.node }}:{{ item.bridge }}"
+    msg: "No network_topology defined in exercise config — skipping network revert"
   when:
     - cdx_vm_filter == 'all'
-    - not cdx_dry_run | bool
-  ignore_errors: true
+    - network_topology.sites is not defined or network_topology.sites | length == 0
 
-# ---- Step 3: Apply network config on affected nodes -----------------------
-- name: "NETWORK REVERT - Determine nodes needing apply"
+# ---- Step 1: Determine affected nodes --------------------------------------
+- name: "NETWORK REVERT - Determine affected nodes"
   set_fact:
-    _nodes_to_apply: "{{ _bridges_to_delete | map(attribute='node') | unique | list }}"
-  when: cdx_vm_filter == 'all'
+    _revert_nodes: >-
+      {%- set nodes = [] -%}
+      {%- for site in network_topology.sites | default([]) -%}
+        {%- if site.node not in nodes -%}
+          {%- set _ = nodes.append(site.node) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {%- for bridge in network_topology.common_bridges | default([]) -%}
+        {%- for node in bridge.nodes | default([]) -%}
+          {%- if node not in nodes -%}
+            {%- set _ = nodes.append(node) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ nodes }}
+  when:
+    - cdx_vm_filter == 'all'
+    - network_topology.sites is defined
+    - network_topology.sites | length > 0
 
-- name: "NETWORK REVERT - Apply network configuration on {{ item }}"
-  uri:
-    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ item }}/network"
-    method: PUT
-    headers:
-      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
-    validate_certs: "{{ proxmox_validate_certs }}"
-    status_code: [200]
-  loop: "{{ _nodes_to_apply }}"
+# ---- Step 2: Display plan --------------------------------------------------
+- name: "NETWORK REVERT - Display revert plan"
+  debug:
+    msg: >-
+      Reverting to base network configuration on {{ _revert_nodes | length }}
+      node(s): {{ _revert_nodes | join(', ') }}
+  when:
+    - cdx_vm_filter == 'all'
+    - _revert_nodes is defined
+    - _revert_nodes | length > 0
+
+# ---- Step 3: Template base-only config -------------------------------------
+- name: "NETWORK REVERT - Deploy base interfaces configuration on {{ item }}"
+  template:
+    src: interfaces.j2
+    dest: /etc/network/interfaces
+    owner: root
+    group: root
+    mode: '0644'
+    backup: yes
+  delegate_to: "{{ item }}"
+  vars:
+    node_name: "{{ item }}"
+    node_sites: []
+    node_common_bridges: []
+    base_network: "{{ hostvars[item].base_network }}"
+    exercise_name: ""
+  loop: "{{ _revert_nodes | default([]) }}"
   loop_control:
     label: "{{ item }}"
+  register: _revert_results
+  when:
+    - cdx_vm_filter == 'all'
+    - _revert_nodes is defined
+    - _revert_nodes | length > 0
+    - not cdx_dry_run | bool
+
+# ---- Step 4: Reload networking ---------------------------------------------
+- name: "NETWORK REVERT - Reload networking on {{ item.item }}"
+  command: ifreload -a
+  delegate_to: "{{ item.item }}"
+  loop: "{{ _revert_results.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
   when:
     - cdx_vm_filter == 'all'
     - not cdx_dry_run | bool
-    - _nodes_to_apply | length > 0
-  ignore_errors: true
+    - item.changed | default(false)
 
+# ---- Summary ---------------------------------------------------------------
 - name: "NETWORK REVERT - Complete"
   debug:
     msg: >-
       {% if cdx_vm_filter == 'all' %}
       Network revert complete.
-      Removed {{ _bridges_to_delete | default([]) | length }} bridge(s)
-      across {{ _nodes_to_apply | default([]) | length }} node(s).
+      Restored base config on {{ _revert_nodes | default([]) | length }} node(s).
+      {% if cdx_dry_run | bool %}(DRY RUN — no changes made){% endif %}
       {% else %}
       Network revert skipped (partial destroy).
       {% endif %}

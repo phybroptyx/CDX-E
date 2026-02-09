@@ -23,6 +23,41 @@ cloud_init_defaults:
   ssh_public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDSryHEGJrvRhhvzZtNkPY4amvSEZuG+296CoPdxiOQ88FWsmJYD29UB4i90MUd8v4GMVDCFrgmqQAD0zIR/uJPSzGvo0w1MNmIsV2ZH8UmmgLGVNmhRTtjsZxLNjk5nMBoGSoT9lcXzCVRXHGraU3fMEZX+kq1INbC3R5cmOMffAgJX6QiHmpmg92urUHs+frIL55tNJLE2sTBitOfe6/qG2XaBLt0XlvNYdco62i2w5RGbvSiWUzIh5EVzFX7SJ1eOKYfVoJDMTHI1PmJshbKht4EoEJJlsAfHvLChfHi70c+jEnygqEkmBLyS9IYQxEz3Kb3wvBhcVhUAPmHAS12Wu+wNUticpJS2HooyK7hWrwKFNJRKryPXGkq69T59MI5nWucy3XUR5lbAWzxT9mSGqc7ECQZmtkpC/dehKHyyB/sdY+KJnazF0uqJQ5TKbjOKZ/md0iLp1xKt2y0dBN4UouMju2S/tzkFYtErBYTry/qKxxbAHWNE0UH6UhBZ+8= vyos@CDX-GATEWAY"
 
 # =============================================================================
+# Network Topology
+# =============================================================================
+# Defines OVS bridges and CDX-I patch ports per Proxmox node.
+# Replaces per-host interfaces.<exercise> files and exercise.sh.
+#
+# Bridge types:
+#   - Internal (_in): Isolated site LAN, no CDX-I uplink
+#   - External (_ex): CDX-I uplink via OVS patch port + VLAN tag
+#
+# cdxi_patch fields:
+#   site_code  - Short identifier used in patch port names
+#                (patch-<site_code>-to-cdxi <-> patch-cdxi-to-<site_code>)
+#   vlan_tag   - CDX-I VLAN on the IXP/T2 segment for this site's SDP
+# =============================================================================
+network_topology:
+  common_bridges:
+    - name: "SOC"
+      description: "SOC Network Bridge"
+      nodes:
+        - "cdx-pve-03"
+
+  sites:
+    - name: "tl"
+      label: "Talokan"
+      node: "cdx-pve-03"
+      bridges:
+        - name: "tl_in"
+          description: "Talokan Internal Networks Bridge"
+        - name: "tl_ex"
+          description: "Talokan External/DMZ Bridge"
+          cdxi_patch:
+            site_code: "tl"
+            vlan_tag: 505
+
+# =============================================================================
 # Virtual Machine Specifications
 # =============================================================================
 # Template is now referenced by NAME (resolved via templates.yaml)

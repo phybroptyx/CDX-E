@@ -11,10 +11,17 @@ CDX-E/
 ├── site.yml                       # Main playbook (entry point)
 ├── ansible.cfg                    # Ansible configuration
 ├── requirements.yml               # Galaxy collection dependencies
-├── inventory/hosts.yml            # Proxmox cluster inventory
+├── inventory/
+│   ├── hosts.yml                  # Proxmox cluster inventory
+│   └── host_vars/                 # Per-host base network configuration
+│       ├── cdx-pve-01.yml
+│       ├── cdx-pve-02.yml
+│       └── cdx-pve-03.yml
 ├── roles/cdx_e/                   # Shared lifecycle role
 │   ├── defaults/main.yml          #   API connection & timing defaults
 │   ├── vars/main.yml              #   Template registry (VMID mappings)
+│   ├── templates/
+│   │   └── interfaces.j2          #   Proxmox /etc/network/interfaces template
 │   └── tasks/                     #   Action task files
 │       ├── main.yml               #     Entry point & action router
 │       ├── load_exercise.yml      #     Exercise YAML loader & idempotency setup
@@ -25,14 +32,14 @@ CDX-E/
 │       ├── start.yml              #     Start VMs
 │       ├── stop.yml               #     Stop VMs
 │       ├── status.yml             #     Query & display VM status
-│       ├── network_setup.yml      #     OVS bridge creation via API
-│       ├── network_revert.yml     #     OVS bridge removal via API
+│       ├── network_setup.yml      #     OVS bridge + patch port setup via SSH
+│       ├── network_revert.yml     #     Network revert to base config via SSH
 │       ├── pool_create.yml        #     Resource pool creation
 │       └── pool_delete.yml        #     Resource pool deletion
 │
 └── EXERCISES/
     └── <EXERCISE_NAME>/
-        ├── <exercise>_vms.yaml    # VM specification (exercise data)
+        ├── <exercise>_vms.yaml    # VM + network topology specification
         └── VyOS/                  # Router configs (if applicable)
 ```
 
@@ -42,7 +49,8 @@ CDX-E/
 - **Python** `proxmoxer` library (for `community.general.proxmox_kvm`)
 - **community.general** collection >= 8.0.0
 - **Proxmox VE** cluster with API token configured
-- **Proxmox API token** with `Sys.Modify` on `/nodes/{node}` (for OVS bridge management)
+- **Proxmox API token** with `Sys.Modify` on `/nodes/{node}` (for VM/pool management)
+- **SSH access** from Ansible control node to all Proxmox hosts as root (for network configuration)
 
 Install dependencies:
 
@@ -201,7 +209,7 @@ ansible-playbook site.yml -e proxmox_api_token_secret="$PROXMOX_API_TOKEN_SECRET
 
 The `deploy` action executes three phases in order:
 
-1. **Network Setup** - Creates OVS bridges on Proxmox nodes via the API (only on nodes with VMs referencing them; idempotent)
+1. **Network Setup** - Templates `/etc/network/interfaces` on each affected Proxmox node via SSH, creating OVS bridges, patch ports to CDX-I (vmbr303), VLAN tags, and STP settings. Reloads networking with `ifreload -a`.
 2. **Pool Creation** - Creates a Proxmox resource pool (`EX_<EXERCISE_NAME>`) via the API
 3. **VM Deployment** - For each VM in the specification:
    - Clones from the template registered in `roles/cdx_e/vars/main.yml`
@@ -216,7 +224,7 @@ The `destroy` action executes three phases in reverse order:
 
 1. **VM Destruction** - For each VM: force-stop, then remove (with name-match safety check)
 2. **Pool Deletion** - Removes the resource pool via the API
-3. **Network Revert** - Removes exercise OVS bridges via the API (only on full teardown; partial destroys preserve bridges)
+3. **Network Revert** - Re-templates `/etc/network/interfaces` with base-only config (no exercise bridges) on affected nodes via SSH and reloads networking (only on full teardown; partial destroys preserve bridges)
 
 ## Idempotency
 
@@ -232,7 +240,7 @@ Each exercise is defined by a YAML specification file. The schema:
 
 ```yaml
 exercise:
-  name: "EXERCISE_NAME"           # Used for pool naming, network scripts
+  name: "EXERCISE_NAME"           # Used for pool naming, tagging
   description: "Description"      # Displayed in status output
 
 ssh:
@@ -243,6 +251,24 @@ cloud_init_defaults:              # Shared cloud-init credentials
   username: "cdxadmin"
   password: "P@ssw0rd"
   ssh_public_key: "ssh-rsa ..."
+
+network_topology:                 # OVS bridge + CDX-I patch port definitions
+  common_bridges:                 # Bridges shared across sites (optional)
+    - name: "SOC"
+      description: "SOC Network Bridge"
+      nodes: ["cdx-pve-03"]
+  sites:
+    - name: "site_code"           # Short code for patch port naming
+      label: "Human Label"
+      node: "cdx-pve-01"          # Which Proxmox host owns this site
+      bridges:
+        - name: "bridge_name_in"
+          description: "Internal Networks Bridge"
+        - name: "bridge_name_ex"
+          description: "External/DMZ Bridge"
+          cdxi_patch:             # Only on bridges needing CDX-I uplink
+            site_code: "site_code"
+            vlan_tag: 505         # CDX-I IXP/T2 VLAN
 
 virtual_machines:
   - vmid: 5201                    # Unique Proxmox VMID
