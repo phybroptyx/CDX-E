@@ -1,0 +1,50 @@
+---
+# =============================================================================
+# Configure: Discover Management IP for a Single VM
+# =============================================================================
+# Polls the QEMU guest agent for network interfaces and extracts the
+# management IP (matching 10.0.0.0/22 range).
+#
+# Expected variables:
+#   vm           - VM dict from configure_vms loop
+#   _vm_mgmt_ips - Accumulator dict (set by caller)
+# =============================================================================
+
+- name: "DISCOVER {{ vm.name }} - Poll guest agent for interfaces"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ vm.proxmox.node }}/qemu/{{ vm.vmid }}/agent/network-get-interfaces"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 500]
+  register: _ga_result
+  until: >-
+    _ga_result.status == 200 and
+    _ga_result.json.data | default([])
+      | map(attribute='ip-addresses', default=[]) | flatten
+      | selectattr('ip-address-type', 'equalto', 'ipv4')
+      | map(attribute='ip-address') | select('match', '^10\\.0\\.[0-3]\\.')
+      | list | length > 0
+  retries: "{{ guest_agent_poll_retries }}"
+  delay: "{{ guest_agent_poll_interval }}"
+  ignore_errors: true
+
+- name: "DISCOVER {{ vm.name }} - Extract management IP"
+  set_fact:
+    _discovered_ip: >-
+      {{ _ga_result.json.data | default([])
+         | map(attribute='ip-addresses', default=[]) | flatten
+         | selectattr('ip-address-type', 'equalto', 'ipv4')
+         | map(attribute='ip-address') | select('match', '^10\\.0\\.[0-3]\\.')
+         | list | first | default('UNDISCOVERED') }}
+  when: _ga_result is succeeded
+
+- name: "DISCOVER {{ vm.name }} - Mark undiscovered (agent timeout)"
+  set_fact:
+    _discovered_ip: "UNDISCOVERED"
+  when: _ga_result is failed
+
+- name: "DISCOVER {{ vm.name }} - Store result"
+  set_fact:
+    _vm_mgmt_ips: "{{ _vm_mgmt_ips | combine({vm.vmid | string: _discovered_ip | trim}) }}"

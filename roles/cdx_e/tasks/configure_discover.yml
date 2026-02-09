@@ -1,0 +1,56 @@
+---
+# =============================================================================
+# Configure Phase 2: Management IP Discovery
+# =============================================================================
+# Waits for VMs to boot, then polls each VM's QEMU guest agent to discover
+# management network IPs (10.0.0.0/22).
+#
+# Expected variables:
+#   configure_vms - List of VM dicts with os_type annotation
+# =============================================================================
+
+- name: "DISCOVER - Wait for VMs to boot ({{ guest_agent_initial_delay }}s)"
+  pause:
+    seconds: "{{ guest_agent_initial_delay }}"
+
+- name: "DISCOVER - Initialize IP accumulator"
+  set_fact:
+    _vm_mgmt_ips: {}
+
+- name: "DISCOVER - Poll each VM for management IP"
+  include_tasks: configure_discover_single_vm.yml
+  loop: "{{ configure_vms }}"
+  loop_control:
+    loop_var: vm
+    label: "{{ vm.vmid }} - {{ vm.name }}"
+
+- name: "DISCOVER - Annotate VMs with management IPs"
+  set_fact:
+    configure_vms: >-
+      {{ configure_vms | map('combine',
+           {'mgmt_ip': _vm_mgmt_ips[item.vmid | string] | default('UNDISCOVERED') | trim})
+         | list }}
+  loop: "{{ configure_vms }}"
+  loop_control:
+    loop_var: item
+    label: "{{ item.vmid }}"
+  run_once: true
+
+- name: "DISCOVER - IP Mapping"
+  debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════════════
+        MANAGEMENT IP DISCOVERY RESULTS
+      ═══════════════════════════════════════════════════════════════════════
+      {% for vm in configure_vms %}
+        {{ '%-6s' | format(vm.vmid) }} {{ '%-25s' | format(vm.name) }} {{ '%-8s' | format(vm.os_type) }} {{ vm.mgmt_ip }}
+      {% endfor %}
+      ═══════════════════════════════════════════════════════════════════════
+
+- name: "DISCOVER - Warn about undiscovered VMs"
+  debug:
+    msg: "WARNING: {{ item.name }} ({{ item.vmid }}) - management IP not discovered, will be skipped in bootstrap/push phases"
+  loop: "{{ configure_vms | selectattr('mgmt_ip', 'equalto', 'UNDISCOVERED') | list }}"
+  loop_control:
+    label: "{{ item.vmid }} - {{ item.name }}"
+  when: configure_vms | selectattr('mgmt_ip', 'equalto', 'UNDISCOVERED') | list | length > 0

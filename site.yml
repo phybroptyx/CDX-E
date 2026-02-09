@@ -6,6 +6,7 @@
 #
 # Usage:
 #   ansible-playbook site.yml -e "action=deploy exercise_yaml=../hardened_champion_vms.yaml"
+#   ansible-playbook site.yml -e "action=configure exercise_yaml=../hardened_champion_vms.yaml" -e "@secrets/credentials.yml"
 #   ansible-playbook site.yml -e "action=destroy exercise_yaml=../hardened_champion_vms.yaml"
 #   ansible-playbook site.yml -e "action=start exercise_yaml=../hardened_champion_vms.yaml"
 #   ansible-playbook site.yml -e "action=stop exercise_yaml=../hardened_champion_vms.yaml"

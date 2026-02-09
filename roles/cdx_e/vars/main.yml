@@ -33,3 +33,27 @@ template_registry:
 
   # Network
   vyos:            { id: 2017, os: "VyOS 2025" }
+
+# =============================================================================
+# OS Type Map
+# =============================================================================
+# Maps template names to OS categories for configure-phase logic.
+# Every template_registry key must have a matching entry here.
+# =============================================================================
+
+os_type_map:
+  vyos: "vyos"
+  server_2025: "windows"
+  server_2022: "windows"
+  server_2019: "windows"
+  server_2016: "windows"
+  server_2012r2: "windows"
+  server_2008r2: "windows"
+  windows_11: "windows"
+  windows_10: "windows"
+  "windows_8.1": "windows"
+  windows_7: "windows"
+  centos_7: "linux"
+  centos_7_server: "linux"
+  ubuntu_2110: "linux"
+  kali_purple: "linux"

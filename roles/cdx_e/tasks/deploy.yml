@@ -4,6 +4,7 @@
 # Phase 1: Network setup on all Proxmox hosts
 # Phase 2: Resource pool creation
 # Phase 3: VM deployment
+# Phase 4: Post-deploy configuration (skipped when no_start or dry_run)
 # =============================================================================
 
 # Phase 1: Network Setup
@@ -25,6 +26,26 @@
     cdx_vm_filter == 'all' or
     (vm.vmid | string) in vm_filter_list or
     vm.name in vm_filter_list
+
+# Phase 4: Post-Deploy Configuration
+- name: "Phase 4 - Set configure flags"
+  set_fact:
+    _cdx_configure_keygen: true
+    _cdx_configure_force_keygen: true
+  when:
+    - not cdx_no_start | bool
+    - not cdx_dry_run | bool
+
+- name: "Phase 4 - Post-Deploy Configuration"
+  include_tasks: configure.yml
+  when:
+    - not cdx_no_start | bool
+    - not cdx_dry_run | bool
+
+- name: "Phase 4 - Skipped (no_start={{ cdx_no_start }}, dry_run={{ cdx_dry_run }})"
+  debug:
+    msg: "Post-deploy configuration skipped - VMs not running"
+  when: cdx_no_start | bool or cdx_dry_run | bool
 
 - name: "DEPLOY COMPLETE"
   debug:

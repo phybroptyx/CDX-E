@@ -24,3 +24,10 @@ proxmox_hosts:
 clone_timeout: 300
 post_clone_delay: 8
 post_stop_delay: 3
+
+# Configure phase timing
+guest_agent_initial_delay: 30
+guest_agent_poll_interval: 10
+guest_agent_poll_retries: 30
+bootstrap_ssh_timeout: 15
+configure_ssh_timeout: 30
