@@ -1,0 +1,73 @@
+---
+# =============================================================================
+# Clone a single VM (included per-VM from deploy.yml Phase 3a)
+# Variable 'vm' is passed from the parent loop
+# =============================================================================
+
+- name: "Resolve template for {{ vm.name }}"
+  set_fact:
+    _template: "{{ template_registry[vm.template] }}"
+
+# ---- Idempotency Check ----
+
+- name: "Check if VM {{ vm.vmid }} already exists"
+  set_fact:
+    _vm_exists: "{{ (vm.vmid | int) in existing_vmids }}"
+
+- name: "Check VM name match for {{ vm.vmid }}"
+  set_fact:
+    _vm_name_matches: "{{ existing_vm_names[vm.vmid | string] | default(existing_vm_names[vm.vmid | int] | default('')) == vm.name }}"
+  when: _vm_exists | bool
+
+- name: "Skip {{ vm.name }} - already exists"
+  debug:
+    msg: "VM {{ vm.vmid }} ({{ vm.name }}) already exists - skipping clone"
+  when: _vm_exists | bool and (_vm_name_matches | default(false)) | bool
+
+- name: "Fail {{ vm.name }} - VMID conflict"
+  fail:
+    msg: >-
+      VM ID {{ vm.vmid }} exists with name '{{ existing_vm_names[vm.vmid | string] | default(existing_vm_names[vm.vmid | int] | default('UNKNOWN')) }}'
+      but expected '{{ vm.name }}'. Resolve ID conflict manually.
+  when: _vm_exists | bool and not (_vm_name_matches | default(false)) | bool
+
+# ---- Clone Template ----
+
+- name: "Clone template {{ _template.id }} -> {{ vm.name }} ({{ vm.vmid }})"
+  community.general.proxmox_kvm:
+    api_host: "{{ proxmox_api_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    node: "{{ template_node }}"
+    vmid: "{{ _template.id }}"
+    clone: "{{ _template.id }}"
+    newid: "{{ vm.vmid }}"
+    name: "{{ vm.name }}"
+    target: "{{ vm.proxmox.node }}"
+    pool: "{{ vm.proxmox.pool }}"
+    full: "{{ 'true' if (vm.clone.type | default('linked')) == 'full' else 'false' }}"
+    timeout: "{{ clone_timeout }}"
+  when:
+    - not (_vm_exists | bool)
+    - not cdx_dry_run | bool
+  register: _clone_result
+
+- name: "Wait for clone {{ vm.name }} ({{ vm.vmid }}) to settle"
+  community.general.proxmox_kvm:
+    api_host: "{{ proxmox_api_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    node: "{{ vm.proxmox.node }}"
+    vmid: "{{ vm.vmid }}"
+    state: current
+  register: _clone_check
+  until: _clone_check is succeeded
+  retries: 6
+  delay: 5
+  when:
+    - _clone_result is defined
+    - _clone_result is changed

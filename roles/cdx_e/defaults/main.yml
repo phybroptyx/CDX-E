@@ -6,7 +6,7 @@
 # Proxmox API connection
 proxmox_api_host: "cdx-pve-01"
 proxmox_api_port: 8006
-proxmox_api_user: "root@pam"
+proxmox_api_user: "ansible@pam"
 proxmox_api_token_id: "ansible"
 proxmox_api_token_secret: ""  # Set via ansible-vault or --extra-vars
 proxmox_validate_certs: false

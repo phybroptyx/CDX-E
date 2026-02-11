@@ -27,19 +27,16 @@
       but expected '{{ vm.name }}' - skipping for safety
   when: _vm_exists | bool and not (_vm_name_matches | default(false)) | bool
 
-# ---- Step 1: Stop VM ----
+# ---- Step 1: Hard-Stop VM ----
 
 - name: "Stop {{ vm.name }} ({{ vm.vmid }})"
-  community.general.proxmox_kvm:
-    api_host: "{{ proxmox_api_host }}"
-    api_user: "{{ proxmox_api_user }}"
-    api_token_id: "{{ proxmox_api_token_id }}"
-    api_token_secret: "{{ proxmox_api_token_secret }}"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ vm.proxmox.node }}/qemu/{{ vm.vmid }}/status/stop"
+    method: POST
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
     validate_certs: "{{ proxmox_validate_certs }}"
-    node: "{{ vm.proxmox.node }}"
-    vmid: "{{ vm.vmid }}"
-    state: stopped
-    force: true
+    status_code: [200, 500]
   when:
     - _vm_exists | bool
     - (_vm_name_matches | default(false)) | bool

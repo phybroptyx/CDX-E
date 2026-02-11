@@ -1,0 +1,148 @@
+---
+# =============================================================================
+# Configure a single VM (included per-VM from deploy.yml Phase 3c)
+# Variable 'vm' is passed from the parent loop
+#
+# All configuration uses direct Proxmox API calls (uri PUT) instead of the
+# proxmox_kvm module, which silently fails to apply net/ipconfig params
+# when using update: true.
+#
+# Configuration tasks are idempotent (PUT) and always run.
+# Only the Start task is gated on _vm_pre_existing to avoid auto-starting
+# VMs that existed before this deploy run.
+# =============================================================================
+
+- name: "Resolve template for {{ vm.name }}"
+  set_fact:
+    _template: "{{ template_registry[vm.template] }}"
+
+- name: "Check if VM {{ vm.vmid }} was pre-existing"
+  set_fact:
+    _vm_pre_existing: "{{ (vm.vmid | int) in _pre_clone_vmids }}"
+
+# ---- Configure Resources ----
+
+- name: "Build VM description for {{ vm.name }}"
+  set_fact:
+    _vm_description: |-
+      # {{ vm.name }}
+      ## {{ _template.os }}
+      ## {{ vm.role | default('Unknown Role') }}
+      ## {{ vm.organization | default('Unknown') }}, {{ vm.site | default('Unknown') }}
+      ### {{ (vm.cloud_init.ip ~ '/' ~ (vm.cloud_init.cidr | default(24))) if (vm.cloud_init is defined and vm.cloud_init.ip is defined) else 'DHCP' }}
+
+- name: "Configure resources for {{ vm.name }}"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ vm.proxmox.node }}/qemu/{{ vm.vmid }}/config"
+    method: PUT
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    body_format: form-urlencoded
+    body:
+      name: "{{ vm.name }}"
+      memory: "{{ vm.resources.memory_mb }}"
+      cores: "{{ vm.resources.cores }}"
+      sockets: "{{ vm.resources.sockets }}"
+      description: "{{ _vm_description }}"
+      tags: "{{ vm.proxmox.tags | join(';') }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: 200
+  when:
+    - not cdx_dry_run | bool
+
+# ---- Add NICs ----
+
+- name: "Add NIC net{{ nic.nic_id }} to {{ vm.name }}"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ vm.proxmox.node }}/qemu/{{ vm.vmid }}/config"
+    method: PUT
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    body_format: form-urlencoded
+    body: "{{ _nic_body }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: 200
+  vars:
+    _mac_part: "{{ (nic.model ~ '=' ~ nic.mac) if nic.mac is defined else nic.model }}"
+    _fw_part: "firewall={{ '1' if nic.firewall | default(false) else '0' }}"
+    _tag_part: "{{ ',tag=' ~ nic.tag if nic.tag is defined else '' }}"
+    _nic_str: "{{ _mac_part }},bridge={{ nic.bridge }},{{ _fw_part }}{{ _tag_part }}"
+    _nic_body: "{{ {'net' ~ nic.nic_id: _nic_str} }}"
+  loop: "{{ vm.network.additional_nics | default([]) }}"
+  loop_control:
+    loop_var: nic
+    label: "{{ vm.name }} net{{ nic.nic_id }}"
+  when:
+    - not cdx_dry_run | bool
+
+# ---- Cloud-Init ----
+
+- name: "Configure cloud-init for {{ vm.name }}"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ vm.proxmox.node }}/qemu/{{ vm.vmid }}/config"
+    method: PUT
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    body_format: form-urlencoded
+    body: "{{ _ci_body }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: 200
+  vars:
+    _ci_ip:
+      ipconfig1: "ip={{ vm.cloud_init.ip }}/{{ vm.cloud_init.cidr | default(24) }},gw={{ vm.cloud_init.gateway }}"
+      nameserver: "{{ vm.cloud_init.nameserver }}"
+    _ci_user: >-
+      {{
+        {}
+        | combine({'ciuser': cloud_init_defaults.username}
+            if (cloud_init_defaults.username | default('')) | length > 0 else {})
+        | combine({'cipassword': cloud_init_defaults.password}
+            if (cloud_init_defaults.password | default('')) | length > 0 else {})
+        | combine({'sshkeys': cloud_init_defaults.ssh_public_key | trim | urlencode | regex_replace('/', '%2F')}
+            if (cloud_init_defaults.ssh_public_key | default('')) | length > 0 else {})
+      }}
+    _ci_body: "{{ _ci_ip | combine(_ci_user) }}"
+  when:
+    - not cdx_dry_run | bool
+    - vm.cloud_init is defined
+    - vm.cloud_init.ip is defined
+
+- name: "Regenerate cloud-init image for {{ vm.name }}"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ vm.proxmox.node }}/qemu/{{ vm.vmid }}/cloudinit"
+    method: PUT
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+  when:
+    - not cdx_dry_run | bool
+    - vm.cloud_init is defined
+    - vm.cloud_init.ip is defined
+  ignore_errors: true
+
+# ---- Start VM ----
+# Only start VMs that were newly cloned in this run.
+# Pre-existing VMs are left in their current state.
+
+- name: "Start {{ vm.name }}"
+  community.general.proxmox_kvm:
+    api_host: "{{ proxmox_api_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    node: "{{ vm.proxmox.node }}"
+    vmid: "{{ vm.vmid }}"
+    state: started
+  when:
+    - not (_vm_pre_existing | bool)
+    - not cdx_dry_run | bool
+    - vm.clone.start_after_clone | default(false) | bool
+    - not cdx_no_start | bool
+
+- name: "{{ vm.name }} left stopped (no_start={{ cdx_no_start }})"
+  debug:
+    msg: "VM {{ vm.vmid }} created but not started"
+  when:
+    - not (_vm_pre_existing | bool)
+    - cdx_no_start | bool or not (vm.clone.start_after_clone | default(false) | bool)

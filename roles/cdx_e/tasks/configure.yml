@@ -39,26 +39,13 @@
 
 # ---- Build configure_vms list (filtered + annotated) ----
 
-- name: "CONFIGURE - Build VM list with OS type annotations"
-  set_fact:
-    configure_vms: >-
-      {{ all_vms
-         | selectattr('vmid', 'defined')
-         | list
-         | map('combine', {'os_type': 'UNSET'})
-         | list }}
-
 - name: "CONFIGURE - Annotate VMs with OS type"
   set_fact:
-    configure_vms: >-
-      {{ configure_vms | map('combine',
-           {'os_type': os_type_map[item.template]})
-         | list }}
-  loop: "{{ all_vms }}"
+    configure_vms: "{{ (configure_vms | default([])) + [item | combine({'os_type': os_type_map[item.template]})] }}"
+  loop: "{{ all_vms | selectattr('vmid', 'defined') | list }}"
   loop_control:
     loop_var: item
-    label: "{{ item.vmid }}"
-  run_once: true
+    label: "{{ item.vmid }} - {{ item.template }} -> {{ os_type_map[item.template] }}"
 
 - name: "CONFIGURE - Apply VM filter"
   set_fact:

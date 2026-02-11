@@ -121,7 +121,7 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
+        - "mpnet"
 
   # ===========================================================================
   # SERVERS - HPE ProLiant Gen9 (VM IDs 5002-5005)
@@ -167,8 +167,7 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "server"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
   # VM 3: TL-EX-01 - Microsoft Exchange Server
@@ -210,8 +209,7 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "server"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
   # VM 4: TL-FS-01 - File Server
@@ -253,8 +251,7 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "server"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
   # VM 5: TL-AS-01 - Application Server (DHCP)
@@ -296,17 +293,16 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "server"
+        - "mpnet"
 
   # ===========================================================================
   # WORKSTATIONS - HP EliteDesk (VM IDs 5006-5018)
-  # Mix: 8x Windows 10, 5x Ubuntu 21.10
+  # Mix: 8x Windows 7, 5x Ubuntu 21.10
   # All DHCP - no cloud_init IP configuration
   # ===========================================================================
 
   # ---------------------------------------------------------------------------
-  # VM 6: TL-WKS-MXL7340R1N - Windows 10 Workstation
+  # VM 6: TL-WKS-MXL7340R1N - Windows 7 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5006
     name: "TL-WKS-MXL7340R1N"
@@ -314,7 +310,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_10"
+    template: "windows_7"
 
     clone:
       type: "linked"
@@ -339,11 +335,10 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "workstation"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 7: TL-WKS-MXL7340T3K - Windows 10 Workstation
+  # VM 7: TL-WKS-MXL7340T3K - Windows 7 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5007
     name: "TL-WKS-MXL7340T3K"
@@ -351,7 +346,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_10"
+    template: "windows_7"
 
     clone:
       type: "linked"
@@ -376,11 +371,10 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "workstation"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 8: TL-WKS-MXL7340V5L - Windows 10 Workstation
+  # VM 8: TL-WKS-MXL7340V5L - Windows 7 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5008
     name: "TL-WKS-MXL7340V5L"
@@ -388,7 +382,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_10"
+    template: "windows_7"
 
     clone:
       type: "linked"
@@ -413,11 +407,10 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "workstation"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 9: TL-WKS-MXL7341A7D - Windows 10 Workstation
+  # VM 9: TL-WKS-MXL7341A7D - Windows 7 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5009
     name: "TL-WKS-MXL7341A7D"
@@ -425,7 +418,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_10"
+    template: "windows_7"
 
     clone:
       type: "linked"
@@ -450,11 +443,10 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "workstation"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 10: TL-WKS-MXL7341D9H - Windows 10 Workstation
+  # VM 10: TL-WKS-MXL7341D9H - Windows 7 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5010
     name: "TL-WKS-MXL7341D9H"
@@ -462,7 +454,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_10"
+    template: "windows_7"
 
     clone:
       type: "linked"
@@ -487,11 +479,10 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "workstation"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 11: TL-WKS-MXL7341G2J - Windows 10 Workstation
+  # VM 11: TL-WKS-MXL7341G2J - Windows 7 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5011
     name: "TL-WKS-MXL7341G2J"
@@ -499,7 +490,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_10"
+    template: "windows_7"
 
     clone:
       type: "linked"
@@ -524,11 +515,10 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "workstation"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 12: TL-WKS-MXL7341K4N - Windows 10 Workstation
+  # VM 12: TL-WKS-MXL7341K4N - Windows 7 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5012
     name: "TL-WKS-MXL7341K4N"
@@ -536,7 +526,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_10"
+    template: "windows_7"
 
     clone:
       type: "linked"
@@ -561,11 +551,10 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "workstation"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 13: TL-WKS-MXL7341N6Q - Windows 10 Workstation
+  # VM 13: TL-WKS-MXL7341N6Q - Windows 7 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5013
     name: "TL-WKS-MXL7341N6Q"
@@ -573,7 +562,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_10"
+    template: "windows_7"
 
     clone:
       type: "linked"
@@ -598,8 +587,7 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "workstation"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
   # VM 14: TL-WKS-MXL7342B8W - Ubuntu 21.10 Workstation
@@ -635,8 +623,7 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "workstation"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
   # VM 15: TL-WKS-MXL7342F1Y - Ubuntu 21.10 Workstation
@@ -672,8 +659,7 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "workstation"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
   # VM 16: TL-WKS-MXL7342J3C - Ubuntu 21.10 Workstation
@@ -709,8 +695,7 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "workstation"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
   # VM 17: TL-WKS-MXL7342M5F - Ubuntu 21.10 Workstation
@@ -746,8 +731,7 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "workstation"
+        - "mpnet"
 
   # ---------------------------------------------------------------------------
   # VM 18: TL-WKS-MXL7342Q7H - Ubuntu 21.10 Workstation
@@ -783,5 +767,4 @@ virtual_machines:
       node: "cdx-pve-03"
       pool: "EX_OBSIDIAN_DAGGER"
       tags:
-        - "obsidian_dagger"
-        - "workstation"
+        - "mpnet"

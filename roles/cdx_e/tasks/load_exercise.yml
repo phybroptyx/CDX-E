@@ -25,6 +25,7 @@
     all_vms: "{{ exercise_config.virtual_machines }}"
     vm_filter_list: "{{ cdx_vm_filter.split(',') | map('trim') | list if cdx_vm_filter != 'all' else [] }}"
     network_topology: "{{ exercise_config.network_topology | default({}) }}"
+    cloud_init_defaults: "{{ exercise_config.cloud_init_defaults | default({}) }}"
 
 - name: Query existing VMs from Proxmox cluster
   uri:
