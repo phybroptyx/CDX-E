@@ -4,14 +4,22 @@
 # =============================================================================
 # Distributes the controller SSH public key to each VM.
 # Method varies by OS type:
-#   vyos    - SSH with default creds, VyOS CLI to add public key
-#   linux   - SSH with default creds, append to authorized_keys
+#   vyos    - sshpass + SSH, VyOS CLI to add public key
+#   linux   - sshpass + SSH, append to authorized_keys
 #   windows - Proxmox guest-exec API to enable WinRM
 #
+# VyOS non-interactive SSH:
+#   VyOS CLI commands (configure, commit, save) are NOT available in a
+#   plain /bin/vbash shell. Use /bin/vbash -l -s (login shell + stdin)
+#   so VyOS's own profile scripts load the CLI environment automatically.
+#   This avoids hardcoding paths like /opt/vyatta/etc/functions/script-command
+#   which may not exist on all VyOS versions (e.g. VyOS 2025).
+#   Heredoc via sshpass feeds stdin through the SSH tunnel to remote vbash.
+#
 # Expected variables:
-#   vm                   - VM dict (with os_type, mgmt_ip)
+#   vm                    - VM dict (with os_type, mgmt_ip)
 #   controller_public_key - Public key content
-#   vm_credentials       - Credential dict from secrets/credentials.yml
+#   vm_credentials        - Credential dict from secrets/credentials.yml
 # =============================================================================
 
 - name: "BOOTSTRAP {{ vm.name }} - Skip (no management IP)"
@@ -24,14 +32,19 @@
 # =============================================================================
 
 - name: "BOOTSTRAP {{ vm.name }} - Distribute SSH key (VyOS)"
-  command: >
-    sshpass -p '{{ vm_credentials.vyos.password }}'
-    ssh -o StrictHostKeyChecking=no -o ConnectTimeout={{ bootstrap_ssh_timeout }}
-    {{ vm_credentials.vyos.username }}@{{ vm.mgmt_ip }}
-    "configure ;
-     set system login user {{ vm_credentials.vyos.username }} authentication public-keys controller type {{ controller_public_key.split()[0] }} ;
-     set system login user {{ vm_credentials.vyos.username }} authentication public-keys controller key {{ controller_public_key.split()[1] }} ;
-     commit ; save ; exit"
+  shell: |
+    sshpass -p '{{ vm_credentials.vyos.password }}' \
+    ssh -o StrictHostKeyChecking=no -o ConnectTimeout={{ bootstrap_ssh_timeout }} \
+    {{ vm_credentials.vyos.username }}@{{ vm.mgmt_ip }} /bin/vbash -l -s <<'VYOS_EOF'
+    configure
+    set system login user {{ vm_credentials.vyos.username }} authentication public-keys controller type {{ controller_public_key.split()[0] }}
+    set system login user {{ vm_credentials.vyos.username }} authentication public-keys controller key {{ controller_public_key.split()[1] }}
+    commit
+    save
+    exit
+    VYOS_EOF
+  args:
+    executable: /bin/bash
   when:
     - vm.mgmt_ip != 'UNDISCOVERED'
     - vm.os_type == 'vyos'

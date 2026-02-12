@@ -19,7 +19,7 @@ ssh:
 
 cloud_init_defaults:
   username: "cdxadmin"
-  password: "P@ssw0rd"
+  password: "IyTt+,uDhtR@.303"
   ssh_public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDSryHEGJrvRhhvzZtNkPY4amvSEZuG+296CoPdxiOQ88FWsmJYD29UB4i90MUd8v4GMVDCFrgmqQAD0zIR/uJPSzGvo0w1MNmIsV2ZH8UmmgLGVNmhRTtjsZxLNjk5nMBoGSoT9lcXzCVRXHGraU3fMEZX+kq1INbC3R5cmOMffAgJX6QiHmpmg92urUHs+frIL55tNJLE2sTBitOfe6/qG2XaBLt0XlvNYdco62i2w5RGbvSiWUzIh5EVzFX7SJ1eOKYfVoJDMTHI1PmJshbKht4EoEJJlsAfHvLChfHi70c+jEnygqEkmBLyS9IYQxEz3Kb3wvBhcVhUAPmHAS12Wu+wNUticpJS2HooyK7hWrwKFNJRKryPXGkq69T59MI5nWucy3XUR5lbAWzxT9mSGqc7ECQZmtkpC/dehKHyyB/sdY+KJnazF0uqJQ5TKbjOKZ/md0iLp1xKt2y0dBN4UouMju2S/tzkFYtErBYTry/qKxxbAHWNE0UH6UhBZ+8= vyos@CDX-GATEWAY"
 
 # =============================================================================
@@ -297,12 +297,12 @@ virtual_machines:
 
   # ===========================================================================
   # WORKSTATIONS - HP EliteDesk (VM IDs 5006-5018)
-  # Mix: 8x Windows 7, 5x Ubuntu 21.10
+  # Mix: 8x Windows 11, 5x Ubuntu 21.10
   # All DHCP - no cloud_init IP configuration
   # ===========================================================================
 
   # ---------------------------------------------------------------------------
-  # VM 6: TL-WKS-MXL7340R1N - Windows 7 Workstation
+  # VM 6: TL-WKS-MXL7340R1N - Windows 11 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5006
     name: "TL-WKS-MXL7340R1N"
@@ -310,7 +310,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_7"
+    template: "windows_11"
 
     clone:
       type: "linked"
@@ -338,7 +338,7 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 7: TL-WKS-MXL7340T3K - Windows 7 Workstation
+  # VM 7: TL-WKS-MXL7340T3K - Windows 11 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5007
     name: "TL-WKS-MXL7340T3K"
@@ -346,7 +346,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_7"
+    template: "windows_11"
 
     clone:
       type: "linked"
@@ -374,7 +374,7 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 8: TL-WKS-MXL7340V5L - Windows 7 Workstation
+  # VM 8: TL-WKS-MXL7340V5L - Windows 11 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5008
     name: "TL-WKS-MXL7340V5L"
@@ -382,7 +382,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_7"
+    template: "windows_11"
 
     clone:
       type: "linked"
@@ -410,7 +410,7 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 9: TL-WKS-MXL7341A7D - Windows 7 Workstation
+  # VM 9: TL-WKS-MXL7341A7D - Windows 11 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5009
     name: "TL-WKS-MXL7341A7D"
@@ -418,7 +418,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_7"
+    template: "windows_11"
 
     clone:
       type: "linked"
@@ -446,7 +446,7 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 10: TL-WKS-MXL7341D9H - Windows 7 Workstation
+  # VM 10: TL-WKS-MXL7341D9H - Windows 11 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5010
     name: "TL-WKS-MXL7341D9H"
@@ -454,7 +454,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_7"
+    template: "windows_11"
 
     clone:
       type: "linked"
@@ -482,7 +482,7 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 11: TL-WKS-MXL7341G2J - Windows 7 Workstation
+  # VM 11: TL-WKS-MXL7341G2J - Windows 11 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5011
     name: "TL-WKS-MXL7341G2J"
@@ -490,7 +490,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_7"
+    template: "windows_11"
 
     clone:
       type: "linked"
@@ -518,7 +518,7 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 12: TL-WKS-MXL7341K4N - Windows 7 Workstation
+  # VM 12: TL-WKS-MXL7341K4N - Windows 11 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5012
     name: "TL-WKS-MXL7341K4N"
@@ -526,7 +526,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_7"
+    template: "windows_11"
 
     clone:
       type: "linked"
@@ -554,7 +554,7 @@ virtual_machines:
         - "mpnet"
 
   # ---------------------------------------------------------------------------
-  # VM 13: TL-WKS-MXL7341N6Q - Windows 7 Workstation
+  # VM 13: TL-WKS-MXL7341N6Q - Windows 11 Workstation
   # ---------------------------------------------------------------------------
   - vmid: 5013
     name: "TL-WKS-MXL7341N6Q"
@@ -562,7 +562,7 @@ virtual_machines:
     site: "Talokan"
     organization: "Talokan"
 
-    template: "windows_7"
+    template: "windows_11"
 
     clone:
       type: "linked"

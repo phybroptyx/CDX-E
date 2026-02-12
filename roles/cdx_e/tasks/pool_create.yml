@@ -15,7 +15,7 @@
       poolid: "{{ exercise_pool }}"
       comment: "{{ exercise_pool_comment }}"
     validate_certs: "{{ proxmox_validate_certs }}"
-    status_code: [200, 400]  # 400 if pool already exists
+    status_code: [200, 400, 500]  # 400/500 if pool already exists
   register: pool_result
   when: not cdx_dry_run | bool
 
@@ -23,5 +23,5 @@
   debug:
     msg: >-
       {% if pool_result is skipped %}DRY RUN - Would create pool '{{ exercise_pool }}'
-      {% elif pool_result.status == 400 %}Pool '{{ exercise_pool }}' already exists - continuing
+      {% elif pool_result.status in [400, 500] %}Pool '{{ exercise_pool }}' already exists - continuing
       {% else %}Pool '{{ exercise_pool }}' created ({{ exercise_pool_comment }}){% endif %}

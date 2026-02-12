@@ -8,7 +8,8 @@
 # Logic:
 #   1. Parse network_topology → build per-node site/bridge assignments
 #   2. Template /etc/network/interfaces on each affected Proxmox node
-#   3. Reload networking via ifreload -a
+#   3. Pre-create OVS bridges (ovs-vsctl --may-exist add-br)
+#   4. Reload networking via ifreload -a
 #
 # Prerequisites:
 #   - SSH access to Proxmox hosts (inventory: proxmox_cluster)
@@ -101,7 +102,33 @@
     - _affected_nodes | length > 0
     - not cdx_dry_run | bool
 
-# ---- Step 4: Reload networking ---------------------------------------------
+# ---- Step 4: Pre-create OVS bridges -----------------------------------------
+# ifreload -a calls ovs-vsctl list-ports before creating new OVS bridges,
+# which fails if the bridge doesn't exist yet. Pre-creating with --may-exist
+# ensures OVS knows about them before ifupdown2 tries to reconcile.
+- name: "NETWORK SETUP - Pre-create OVS bridges on {{ item }}"
+  shell: |
+    {% for site in _sites_per_node[item] | default([]) %}
+    {% for bridge in site.bridges | default([]) %}
+    ovs-vsctl --may-exist add-br {{ bridge.name }}
+    {% endfor %}
+    {% endfor %}
+    {% for bridge in _common_per_node[item] | default([]) %}
+    ovs-vsctl --may-exist add-br {{ bridge.name }}
+    {% endfor %}
+  delegate_to: "{{ item }}"
+  loop: "{{ _affected_nodes | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - not cdx_dry_run | bool
+    - _affected_nodes is defined
+    - _affected_nodes | length > 0
+    - _template_results.results | default([])
+      | selectattr('item', 'equalto', item)
+      | selectattr('changed') | list | length > 0
+
+# ---- Step 5: Reload networking ---------------------------------------------
 - name: "NETWORK SETUP - Reload networking on {{ item.item }}"
   command: ifreload -a
   delegate_to: "{{ item.item }}"
