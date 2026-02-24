@@ -1,0 +1,54 @@
+---
+# =============================================================================
+# CDX-E Playbook: Endpoint Agent Deployment
+# =============================================================================
+# Purpose: Deploy SIEM endpoint agents to all VMs tagged with monitor: true
+#          in vms.yaml. Controlled by White Cell via the monitor: flag.
+#
+# Roles:
+#   - deploy_endpoint_agents  — installs and configures agent on monitored VMs
+#
+# Usage:
+#   ansible-playbook playbooks/endpoint_agent_deployment.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@Secrets/credentials.yml" --ask-vault-pass
+#
+#   # Override agent platform:
+#   ansible-playbook playbooks/endpoint_agent_deployment.yml \
+#     -e "exercise=OBSIDIAN_DAGGER endpoint_agent_platform=elastic" \
+#     -e "@Secrets/credentials.yml" --ask-vault-pass
+#
+# Tags: monitoring, agents
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration on the Ansible controller
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Main play: deploy endpoint agents to monitored VMs
+# ----------------------------------------------------------------------------
+- name: Endpoint Agent Deployment
+  hosts: all
+  gather_facts: true
+  tags: [monitoring, agents]
+
+  vars_files:
+    - "{{ playbook_dir }}/Secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from controller
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+  roles:
+    - deploy_endpoint_agents

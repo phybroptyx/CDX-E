@@ -1,0 +1,115 @@
+# =============================================================================
+# Proxmox VE Network Configuration
+# Managed by Ansible — CDX-E Framework
+# Host    : {{ node_name }}
+# Exercise: {{ exercise_name | default('NONE (base config only)') }}
+# Generated: {{ '%Y-%m-%dT%H:%M:%SZ' | strftime }}
+# =============================================================================
+#
+# WARNING: This file is managed by Ansible. Manual changes will be overwritten
+# on the next exercise deploy or network revert.
+#
+# =============================================================================
+
+auto lo
+iface lo inet loopback
+
+{% for iface in base_network.physical_interfaces %}
+iface {{ iface.name }} inet manual
+{% endfor %}
+
+auto {{ base_network.soc_trunk.interface }}
+iface {{ base_network.soc_trunk.interface }} inet manual
+	ovs_type OVSPort
+	ovs_bridge {{ base_network.soc_trunk.bridge }}
+	ovs_options trunks={{ base_network.soc_trunk.trunks }}
+#SOC Trunk
+
+auto {{ base_network.management.bridge }}
+iface {{ base_network.management.bridge }} inet manual
+	bridge-ports {{ base_network.management.port }}
+	bridge-stp off
+	bridge-fd 0
+	bridge-vlan-aware yes
+	bridge-vids 2-4094
+#Management Bridge
+
+auto {{ base_network.management.bridge }}.{{ base_network.management.vlan }}
+iface {{ base_network.management.bridge }}.{{ base_network.management.vlan }} inet static
+	address {{ base_network.management.address }}
+	gateway {{ base_network.management.gateway }}
+
+auto {{ base_network.cluster.bridge }}
+iface {{ base_network.cluster.bridge }} inet manual
+	address {{ base_network.cluster.address }}
+	bridge-ports {{ base_network.cluster.port }}
+	bridge-stp off
+	bridge-fd 0
+	bridge-vlan-aware yes
+	bridge-vids {{ base_network.cluster.vlan }}
+#Cluster Bridge
+
+auto {{ base_network.storage.bridge }}
+iface {{ base_network.storage.bridge }} inet static
+	address {{ base_network.storage.address }}
+	bridge-ports {{ base_network.storage.port }}
+	bridge-stp off
+	bridge-fd 0
+	bridge-vlan-aware yes
+	bridge-vids {{ base_network.storage.vlan }}
+#Storage Bridge
+
+auto vmbr303
+iface vmbr303 inet manual
+    ovs_type OVSBridge
+    ovs_ports {{ base_network.soc_trunk.interface }}
+{% for site in node_sites | default([]) %}
+{% for bridge in site.bridges | default([]) %}
+{% if bridge.cdxi_patch is defined %}
+    post-up ovs-vsctl --may-exist add-port vmbr303 patch-cdxi-to-{{ bridge.cdxi_patch.site_code }} -- set interface patch-cdxi-to-{{ bridge.cdxi_patch.site_code }} type=patch options:peer=patch-{{ bridge.cdxi_patch.site_code }}-to-cdxi
+{% endif %}
+{% endfor %}
+{% endfor %}
+#CDX-I Bridge
+{% if node_sites | default([]) | length > 0 or node_common_bridges | default([]) | length > 0 %}
+
+############################################
+#                                          #
+# EXERCISE NETWORKING CONFIGURATIONS BELOW #
+#                                          #
+############################################
+{% for site in node_sites | default([]) %}
+
+############################################
+#                                          #
+# SITE: {{ "%-37s" | format(site.label | upper) }}#
+#                                          #
+############################################
+{% for bridge in site.bridges %}
+
+auto {{ bridge.name }}
+iface {{ bridge.name }} inet manual
+    ovs_type OVSBridge
+    ovs_ports none
+    post-up ovs-vsctl set Bridge ${IFACE} rstp_enable=false
+    post-up ovs-vsctl set Bridge ${IFACE} stp_enable=false
+{% if bridge.cdxi_patch is defined %}
+    post-up ovs-vsctl --may-exist add-port {{ bridge.name }} patch-{{ bridge.cdxi_patch.site_code }}-to-cdxi -- set interface patch-{{ bridge.cdxi_patch.site_code }}-to-cdxi type=patch options:peer=patch-cdxi-to-{{ bridge.cdxi_patch.site_code }}
+    post-up ovs-vsctl set port patch-cdxi-to-{{ bridge.cdxi_patch.site_code }} tag={{ bridge.cdxi_patch.vlan_tag }}
+{% endif %}
+# {{ bridge.description }}
+{% endfor %}
+{% endfor %}
+{% for bridge in node_common_bridges | default([]) %}
+
+auto {{ bridge.name }}
+iface {{ bridge.name }} inet manual
+    ovs_type OVSBridge
+    ovs_ports none
+    post-up ovs-vsctl set Bridge ${IFACE} rstp_enable=false
+    post-up ovs-vsctl set Bridge ${IFACE} stp_enable=false
+# {{ bridge.description }}
+{% endfor %}
+{% endif %}
+
+source /etc/network/interfaces.d/*

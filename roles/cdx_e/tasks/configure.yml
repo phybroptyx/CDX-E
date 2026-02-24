@@ -1,0 +1,129 @@
+---
+# =============================================================================
+# Action: Configure (Post-Deploy Guest Configuration)
+# =============================================================================
+# Phase 1: SSH key generation
+# Phase 2: Management IP discovery via QEMU guest agent
+# Phase 3: Bootstrap (SSH key distribution, WinRM enablement)
+# Phase 4: Configuration push (VyOS configs; Linux/Windows stubs)
+#
+# Can run standalone:
+#   ansible-playbook site.yml -e "action=configure exercise_yaml=..." -e "@secrets/credentials.yml"
+#
+# Or chained from deploy.yml as Phase 4 (automatic).
+# =============================================================================
+
+# ---- Setup ----
+
+- name: "CONFIGURE - Derive exercise directory"
+  set_fact:
+    exercise_dir: "{{ cdx_exercise_yaml | dirname }}"
+
+- name: "CONFIGURE - Set SSH key paths"
+  set_fact:
+    exercise_ssh_key_dir: "{{ exercise_dir }}/secrets/ssh_keys"
+    exercise_ssh_key_path: "{{ exercise_dir }}/secrets/ssh_keys/id_cdx_{{ exercise_name_lower }}"
+
+# ---- Validate OS Type Map ----
+
+- name: "CONFIGURE - Validate all VM templates exist in template_registry"
+  assert:
+    that:
+      - item.template in template_registry
+    fail_msg: >-
+      Template '{{ item.template }}' (VM {{ item.vmid }} - {{ item.name }})
+      has no entry in template_registry. Add it to inventory/group_vars/all.yml.
+  loop: "{{ all_vms }}"
+  loop_control:
+    label: "{{ item.vmid }} - {{ item.template }}"
+
+# ---- Build configure_vms list (filtered + annotated) ----
+
+- name: "CONFIGURE - Annotate VMs with OS type"
+  set_fact:
+    configure_vms: "{{ (configure_vms | default([])) + [item | combine({'os_type': template_registry[item.template].os_type})] }}"
+  loop: "{{ all_vms | selectattr('vmid', 'defined') | list }}"
+  loop_control:
+    loop_var: item
+    label: "{{ item.vmid }} - {{ item.template }} -> {{ template_registry[item.template].os_type }}"
+
+- name: "CONFIGURE - Apply VM filter"
+  set_fact:
+    configure_vms: >-
+      {{ configure_vms | selectattr('vmid', 'in',
+           all_vms | selectattr('vmid', 'defined')
+           | rejectattr('vmid', 'undefined')
+           | list | map(attribute='vmid') | list)
+         | list }}
+  when: cdx_vm_filter == 'all'
+
+- name: "CONFIGURE - Apply VM filter (specific VMs)"
+  set_fact:
+    configure_vms: >-
+      {{ configure_vms | select('mapping')
+         | selectattr('vmid', 'defined')
+         | list
+         | json_query('[?contains(`' ~ vm_filter_list | join('`,`') ~ '`, to_string(vmid)) || contains(`' ~ vm_filter_list | join('`,`') ~ '`, name)]') }}
+  when: cdx_vm_filter != 'all'
+
+- name: "CONFIGURE - VM Classification Summary"
+  debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════════════
+        CONFIGURE - {{ exercise_name }}
+        Total VMs:  {{ configure_vms | length }}
+        VyOS:       {{ configure_vms | selectattr('os_type', 'equalto', 'vyos') | list | length }}
+        Windows:    {{ configure_vms | selectattr('os_type', 'equalto', 'windows') | list | length }}
+        Linux:      {{ configure_vms | selectattr('os_type', 'equalto', 'linux') | list | length }}
+      ═══════════════════════════════════════════════════════════════════════
+
+# ---- Phase 1: SSH Key Generation ----
+
+- name: "Phase 1 - SSH Key Generation"
+  include_tasks: configure_keygen.yml
+  when: _cdx_configure_keygen | default(true) | bool
+
+# ---- Phase 2: Management IP Discovery ----
+
+- name: "Phase 2 - Management IP Discovery"
+  include_tasks: configure_discover.yml
+  when: not cdx_dry_run | bool
+
+- name: "Phase 2 - Skip discovery (dry run)"
+  debug:
+    msg: "Dry run - skipping IP discovery"
+  when: cdx_dry_run | bool
+
+# ---- Phase 3: Bootstrap (Key Distribution) ----
+
+- name: "Phase 3 - Bootstrap VMs"
+  include_tasks: configure_bootstrap_vm.yml
+  loop: "{{ configure_vms }}"
+  loop_control:
+    loop_var: vm
+    label: "{{ vm.vmid }} - {{ vm.name }}"
+  when: not cdx_dry_run | bool
+
+# ---- Phase 4: Configuration Push ----
+
+- name: "Phase 4 - Push Configuration"
+  include_tasks: configure_push_vm.yml
+  loop: "{{ configure_vms }}"
+  loop_control:
+    loop_var: vm
+    label: "{{ vm.vmid }} - {{ vm.name }}"
+  when: not cdx_dry_run | bool
+
+# ---- Summary ----
+
+- name: "CONFIGURE COMPLETE"
+  debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════════════
+        CONFIGURATION COMPLETE - {{ exercise_name }}
+        SSH Key:    {{ exercise_ssh_key_path }}
+        VMs:        {{ configure_vms | length }}
+        VyOS:       {{ configure_vms | selectattr('os_type', 'equalto', 'vyos') | list | length }}
+        Windows:    {{ configure_vms | selectattr('os_type', 'equalto', 'windows') | list | length }}
+        Linux:      {{ configure_vms | selectattr('os_type', 'equalto', 'linux') | list | length }}
+      ═══════════════════════════════════════════════════════════════════════

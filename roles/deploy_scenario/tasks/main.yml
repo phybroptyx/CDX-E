@@ -1,0 +1,150 @@
+---
+# =============================================================================
+# Role: deploy_scenario
+# =============================================================================
+# Deploys scenario VMs to Proxmox via Terraform (bpg/proxmox provider).
+# Team VMs (red_team, blue_team groups) are excluded — handled by their
+# own roles (deploy_red_team, deploy_blue_team).
+#
+# Expects facts set by read_exercise_config:
+#   virtual_machines  — list of VM objects from vms.yaml
+#   scenario          — parsed scenario.yml
+#   exercise_dir      — path to EXERCISES/<name>/
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight
+# ----------------------------------------------------------------------------
+- name: Assert required facts are present
+  ansible.builtin.assert:
+    that:
+      - virtual_machines is defined
+      - scenario is defined
+      - exercise_dir is defined
+    fail_msg: >-
+      Required facts not found. Ensure exercise_initiation.yml runs
+      before vm_management.yml.
+
+- name: Check Terraform is available
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} version"
+  register: _tf_version
+  failed_when: _tf_version.rc != 0
+  changed_when: false
+
+# ----------------------------------------------------------------------------
+# Filter VMs — exclude team groups
+# ----------------------------------------------------------------------------
+- name: Build scenario VM list (exclude team groups)
+  ansible.builtin.set_fact:
+    _tf_vms: >-
+      {{ virtual_machines
+         | rejectattr('ansible_group', 'in', team_groups)
+         | list }}
+
+- name: Assert at least one scenario VM is defined
+  ansible.builtin.assert:
+    that: _tf_vms | length > 0
+    fail_msg: >-
+      No scenario VMs found after filtering out team groups {{ team_groups }}.
+      Verify ansible_group values in vms.yaml.
+
+- name: Assert all scenario VMs have Proxmox template IDs
+  ansible.builtin.assert:
+    that:
+      - template_registry[item.template] is defined
+      - template_registry[item.template].id is not none
+    fail_msg: >-
+      VM '{{ item.name }}' uses template '{{ item.template }}' which has no
+      Proxmox VMID in template_registry. Build the template with Packer first,
+      then set its id in inventory/group_vars/all.yml.
+  loop: "{{ _tf_vms }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.template }})"
+
+# ----------------------------------------------------------------------------
+# Resource pool — Proxmox API (idempotent, before Terraform)
+# ----------------------------------------------------------------------------
+- name: Create exercise resource pool
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/pools"
+    method: POST
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    body_format: form-urlencoded
+    body:
+      poolid: "EX_{{ scenario.exercise.name }}"
+      comment: "Operation {{ scenario.exercise.name | replace('_', ' ') | title }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 400, 500]   # 400/500 = pool already exists, continue
+
+# ----------------------------------------------------------------------------
+# Generate Terraform configuration
+# ----------------------------------------------------------------------------
+- name: Ensure Terraform directory exists
+  ansible.builtin.file:
+    path: "{{ exercise_dir }}/terraform"
+    state: directory
+    mode: '0755'
+
+- name: Template providers.tf
+  ansible.builtin.template:
+    src: providers.tf.j2
+    dest: "{{ exercise_dir }}/terraform/providers.tf"
+    mode: '0644'
+
+- name: Template main.tf
+  ansible.builtin.template:
+    src: main.tf.j2
+    dest: "{{ exercise_dir }}/terraform/main.tf"
+    mode: '0644'
+
+- name: Template outputs.tf
+  ansible.builtin.template:
+    src: outputs.tf.j2
+    dest: "{{ exercise_dir }}/terraform/outputs.tf"
+    mode: '0644'
+
+# ----------------------------------------------------------------------------
+# Terraform init
+# ----------------------------------------------------------------------------
+- name: Terraform init
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} init -input=false -upgrade"
+    chdir: "{{ exercise_dir }}/terraform"
+  register: _tf_init
+  changed_when: >-
+    'Downloading' in _tf_init.stdout or
+    'Installing' in _tf_init.stdout
+
+- name: Show Terraform init output
+  ansible.builtin.debug:
+    msg: "{{ _tf_init.stdout_lines }}"
+
+# ----------------------------------------------------------------------------
+# Terraform apply
+# ----------------------------------------------------------------------------
+- name: Terraform apply
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} apply -auto-approve -input=false"
+    chdir: "{{ exercise_dir }}/terraform"
+  register: _tf_apply
+  changed_when: >-
+    'Apply complete!' in _tf_apply.stdout and
+    '0 added, 0 changed, 0 destroyed' not in _tf_apply.stdout
+
+- name: Show Terraform apply output
+  ansible.builtin.debug:
+    msg: "{{ _tf_apply.stdout_lines }}"
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+- name: Scenario VM deployment summary
+  ansible.builtin.debug:
+    msg: |
+      Scenario VM deployment complete.
+      Exercise  : {{ scenario.exercise.name }}
+      VMs       : {{ _tf_vms | length }}
+      VM list   : {{ _tf_vms | map(attribute='name') | join(', ') }}
+      State     : {{ exercise_dir }}/terraform/terraform.tfstate

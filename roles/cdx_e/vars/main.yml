@@ -1,0 +1,11 @@
+---
+# =============================================================================
+# CDX-E Role Variables
+# =============================================================================
+# template_registry and os_type_map have moved to:
+#   inventory/group_vars/all.yml
+#
+# Access pattern change:
+#   Before:  template_registry[key].id / os_type_map[key]
+#   After:   template_registry[key].id / template_registry[key].os_type
+# =============================================================================

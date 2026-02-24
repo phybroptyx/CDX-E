@@ -1,0 +1,67 @@
+---
+# =============================================================================
+# Role: destroy_blue_team
+# =============================================================================
+# Destroys Blue Team / SOC VMs via Terraform.
+#
+# Expects facts set by read_exercise_config:
+#   scenario     — parsed scenario.yml
+#   exercise_dir — path to EXERCISES/<name>/
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight
+# ----------------------------------------------------------------------------
+- name: Assert required facts are present
+  ansible.builtin.assert:
+    that:
+      - scenario is defined
+      - exercise_dir is defined
+    fail_msg: "Required facts not found. Ensure exercise_initiation.yml runs first."
+
+- name: Check Terraform is available
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} version"
+  register: _tf_version
+  failed_when: _tf_version.rc != 0
+  changed_when: false
+
+- name: Check Blue Team Terraform state exists
+  ansible.builtin.stat:
+    path: "{{ exercise_dir }}/terraform_blue_team/terraform.tfstate"
+  register: _tf_state_stat
+
+- name: Warn if no Blue Team Terraform state found
+  ansible.builtin.debug:
+    msg: >-
+      No Terraform state found at {{ exercise_dir }}/terraform_blue_team/terraform.tfstate.
+      Skipping terraform destroy — Blue Team VMs may need manual removal.
+  when: not _tf_state_stat.stat.exists
+
+# ----------------------------------------------------------------------------
+# Terraform destroy
+# ----------------------------------------------------------------------------
+- name: Terraform destroy
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} destroy -auto-approve -input=false"
+    chdir: "{{ exercise_dir }}/terraform_blue_team"
+  register: _tf_destroy
+  changed_when: >-
+    'Destroy complete!' in _tf_destroy.stdout and
+    '0 destroyed' not in _tf_destroy.stdout
+  when: _tf_state_stat.stat.exists
+
+- name: Show Terraform destroy output
+  ansible.builtin.debug:
+    msg: "{{ _tf_destroy.stdout_lines }}"
+  when: _tf_state_stat.stat.exists
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+- name: Blue Team VM teardown summary
+  ansible.builtin.debug:
+    msg: |
+      Blue Team VM teardown complete.
+      Exercise: {{ scenario.exercise.name }}
+      State   : {{ exercise_dir }}/terraform_blue_team/

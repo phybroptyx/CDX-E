@@ -1,0 +1,59 @@
+configure
+
+########################################
+# System Identity / Base Services
+########################################
+
+set system host-name 'SCT-RTR-1'
+set system domain-name 'sanctum-sanctorum.midgard.mrvl'
+set system time-zone 'America/New_York'
+
+set service ntp server '46.244.164.88'
+set service ssh port '22'
+
+########################################
+# Interfaces
+# eth0: Management (pre-configured, do NOT modify here)
+########################################
+
+# eth1: Internal LAN trunk (VLANs 210, 211)
+set interfaces ethernet eth1 description 'LAN Trunk - VLANs 210, 211'
+
+set interfaces ethernet eth1 vif 1210 address '206.131.210.1/24'
+set interfaces ethernet eth1 vif 1210 description 'VLAN 210 - NOC / Core Services'
+
+set interfaces ethernet eth1 vif 1211 address '206.131.211.1/24'
+set interfaces ethernet eth1 vif 1211 description 'VLAN 211 - Development'
+
+# eth2: Cross-connect to SCT-RTR-2 (10.0.0.0/30)
+set interfaces ethernet eth2 description 'Cross-connect to SCT-RTR-2'
+set interfaces ethernet eth2 address '10.0.0.1/30'
+
+# eth3: Uplink to Core network / Firewall (206.131.209.0/28)
+set interfaces ethernet eth3 description 'Uplink to SCT-FW'
+set interfaces ethernet eth3 address '206.131.209.2/28'
+
+########################################
+# Static Routing
+########################################
+
+# Default route via SCT Firewall
+set protocols static route 0.0.0.0/0 next-hop '206.131.209.1'
+
+# VLANs 212, 213 via cross-connect to SCT-RTR-2 (avoids hairpin through FW)
+set protocols static route 206.131.212.0/24 next-hop '10.0.0.2'
+set protocols static route 206.131.213.0/24 next-hop '10.0.0.2'
+
+########################################
+# NAT
+# (None – purely routed, no translation)
+########################################
+# (Intentionally no "set nat ..." statements)
+
+########################################
+# Commit & Save
+########################################
+
+commit
+save
+exit

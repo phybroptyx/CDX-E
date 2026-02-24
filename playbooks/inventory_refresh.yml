@@ -1,0 +1,38 @@
+---
+# =============================================================================
+# CDX-E Playbook: Inventory Refresh
+# =============================================================================
+# Purpose: Bridge Terraform VM deployment to Ansible inventory.
+#          Reads Terraform outputs (VM IPs) and cross-references with
+#          vms.yaml (Ansible group membership) to write a dynamic inventory
+#          file and refresh the in-memory inventory.
+#
+# Runs on localhost — no VMs need to be powered on for this to succeed.
+# Must run AFTER vm_management (Terraform outputs must exist).
+# Must run BEFORE vm_power_management (provides IPs for connectivity waits).
+#
+# Roles:
+#   - inventory_refresh
+#
+# Usage:
+#   ansible-playbook playbooks/inventory_refresh.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@secrets/credentials.yml"
+# =============================================================================
+
+- name: Inventory Refresh
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [inventory, terraform]
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  pre_tasks:
+    - name: "[preflight] Skip if terraform phase is disabled"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.terraform | default(true) | bool)
+
+  roles:
+    - inventory_refresh

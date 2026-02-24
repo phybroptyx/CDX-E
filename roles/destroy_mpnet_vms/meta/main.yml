@@ -1,0 +1,6 @@
+---
+galaxy_info:
+  author: CDX-E
+  description: "destroy_mpnet_vms"
+  min_ansible_version: "2.14"
+dependencies: []

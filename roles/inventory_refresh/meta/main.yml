@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: CDX
+  description: "Reads Terraform outputs and vms.yaml to write a dynamic Ansible inventory"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

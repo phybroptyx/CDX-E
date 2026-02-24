@@ -1,0 +1,188 @@
+---
+# =============================================================================
+# CDX-E Scenario Configuration
+# =============================================================================
+# This is the authoritative scenario template for all CDX-E exercises.
+# Copy EXERCISES/TEMPLATE/ to EXERCISES/<EXERCISE_NAME>/ and fill in all
+# fields marked with "REQUIRED". Fields marked "OPTIONAL" can be removed
+# if not applicable.
+#
+# This file is loaded by the read_exercise_config role and exposed as the
+# 'scenario' fact for the entire Ansible run.
+#
+# When new pipeline requirements are added, update this template first,
+# then propagate changes to active exercise scenarios as needed.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Exercise Identity
+# -----------------------------------------------------------------------------
+exercise:
+  name: EXERCISE_NAME          # REQUIRED — uppercase, underscores. Matches folder name.
+  codename: "Operation ..."    # REQUIRED — human-friendly operation title for display
+  description: >-              # REQUIRED — one-line description of the exercise scenario
+    Brief description of the organization, threat scenario, and training objectives.
+  classification: UNCLASSIFIED # REQUIRED — UNCLASSIFIED / CUI / SECRET / TS
+
+  # Which teams are participating in this exercise?
+  # Used by playbooks to conditionally include/exclude team-specific phases.
+  teams:
+    white_cell:  true    # Exercise coordinators / trusted agents — always true
+    red_team:    true    # OPFOR / adversary — set false for blue-only exercises
+    blue_team:   true    # Cyber defense operators
+    purple_team: false   # Integrated red/blue (optional)
+
+  # VM ID allocation block for this exercise.
+  # Documents the VMID namespace this exercise owns. Update when adding VMs.
+  # Global ranges (from README): 1000-1999=Blue, 2000-2999=Templates,
+  #   3000-3999=Red/APT, 4000-4999=CDX-I Grey, 5000-6999=Defended/Target
+  vm_id_ranges:
+    scenario:  { start: 5000, end: 5999, description: "Servers"      }
+    scenario2: { start: 6000, end: 6999, description: "Workstations"  }
+    red_team:  { start: 3000, end: 3099, description: "Red Team / APT" }
+    blue_team: { start: 1000, end: 1099, description: "Blue Team / SOC" }
+
+# -----------------------------------------------------------------------------
+# Active Directory / Domain Settings
+# -----------------------------------------------------------------------------
+# Consumed by configure_active_directory and configure_networking roles.
+domain:
+  name: example.cdx.lab        # REQUIRED — FQDN of the domain
+  netbios: EXAMPLE              # REQUIRED — NetBIOS domain name (≤15 chars)
+  functional_level: Win2019     # REQUIRED — Win2008R2 / Win2012R2 / Win2016 / Win2019
+  admin_password: "{{ vault_domain_admin_password }}"  # REQUIRED — from Ansible Vault
+
+  # AD Sites — at minimum one site must be defined.
+  # Additional sites require site links and subnets.
+  sites:
+    - name: Default-First-Site-Name
+      subnets: []
+    # - name: Branch-Site-1
+    #   subnets:
+    #     - 10.10.1.0/24
+
+  # OPTIONAL — Inter-site replication links
+  # site_links:
+  #   - name: HQ-to-Branch
+  #     sites: [Default-First-Site-Name, Branch-Site-1]
+  #     cost: 100
+  #     replication_interval_mins: 15
+
+# -----------------------------------------------------------------------------
+# Phase Execution Control
+# -----------------------------------------------------------------------------
+# Each flag controls whether the corresponding playbook phase runs.
+# Set to false to skip a phase (meta: end_play fires immediately).
+# Disable phases that aren't applicable to this exercise type.
+# =============================================================================
+phases:
+
+  # Phase 1 — Build missing Proxmox VM templates via Packer.
+  # Set false when all templates already exist in Proxmox.
+  packer: true
+
+  # Phase 2 — Deploy / destroy VMs via Terraform (bpg/proxmox).
+  # Covers scenario, red_team, and blue_team VM sets independently.
+  terraform: true
+
+  # Phase 3 — Configure Proxmox SDN: OVS bridges, CDX-I patch ports, VLANs.
+  # Set false if network topology is already applied to Proxmox nodes.
+  networking: true
+
+  # Phase 4 — Promote DCs, build domain, create OU structure.
+  domain: true
+
+  # Phase 5 — Configure member servers (file, print, IIS, etc.).
+  servers: true
+
+  # Phase 6 — Domain application services (enable individually as needed).
+  services:
+    dhcp:     false   # Configure Windows DHCP Server role
+    sql:      false   # Deploy SQL Server (required by Exchange and SCCM)
+    exchange: false   # Deploy Microsoft Exchange
+    sccm:     false   # Deploy Microsoft Configuration Manager (requires SQL)
+    iis:      false   # Configure IIS web services
+
+  # Phase 7 — Configure workstations / endpoints.
+  workstations: true
+
+  # Phase 8 — Deploy intentionally vulnerable configurations (training objectives).
+  # Controls whether the deploy_vulnerabilities role runs.
+  vulnerabilities: false
+
+  # Phase 9 — Deploy and configure Red Team / adversary infrastructure.
+  # Requires red_team: true in exercise.teams.
+  red_team: false
+
+  # Phase 10 — Deploy and configure Blue Team SOC infrastructure.
+  # Requires blue_team: true in exercise.teams.
+  blue_team: false
+
+  # Phase 11 — Deploy SIEM endpoint agents to monitored VMs.
+  # VMs with monitor: true in vms.yaml will receive the configured agent.
+  endpoint_agents: false
+
+# -----------------------------------------------------------------------------
+# Network Configuration
+# -----------------------------------------------------------------------------
+# Used by configure_networking to set VLANs and DNS references.
+# Detailed per-site bridge topology lives in vms.yaml → network_topology.
+network:
+  management_vlan: 100        # REQUIRED — Proxmox management VLAN for out-of-band access
+  exercise_vlans: []          # OPTIONAL — additional VLANs to configure beyond topology
+
+  # DNS servers available to the exercise network (before domain is up,
+  # and for non-domain VMs). Update once DCs are deployed.
+  dns_servers:
+    - 192.168.1.1             # CDX-I DNS upstream
+    # - 10.0.0.10             # First DC (add after Phase 4)
+
+# -----------------------------------------------------------------------------
+# Proxmox Defaults
+# -----------------------------------------------------------------------------
+# Default node and storage for VM deployment.
+# Individual VMs in vms.yaml can override these under proxmox: { node:, storage: }.
+proxmox:
+  node: cdx-pve-01            # REQUIRED — default target Proxmox node
+  storage: QNAP               # REQUIRED — default storage pool for VM disks
+
+# -----------------------------------------------------------------------------
+# Red Team Configuration
+# -----------------------------------------------------------------------------
+# Controls which APT adversary profile is used for this exercise.
+# The APT profile is loaded from APTs/<apt>/ by read_apt_config.
+# Set phases.red_team: true to enable Red Team deployment.
+red_team:
+  apt: GENERIC_RED               # OPTIONAL — APT library key; override with -e "apt=APT29"
+  # objectives:                  # OPTIONAL — exercise-specific objectives for this APT
+  #   - name: "Initial Access"
+  #     description: "Spearphishing via malicious attachment"
+  #   - name: "Persistence"
+  #     description: "Scheduled task after initial access"
+
+# -----------------------------------------------------------------------------
+# Blue Team Configuration
+# -----------------------------------------------------------------------------
+# Controls which SOC layout is used for this exercise.
+# The layout is loaded from SOC_LAYOUTS/<layout>/ by read_soc_layout.
+# Set phases.blue_team: true to enable Blue Team deployment.
+blue_team:
+  layout: malcolm_basic          # OPTIONAL — SOC layout key; override with -e "layout=malcolm_basic"
+  endpoint_agent_platform: wazuh # OPTIONAL — wazuh / elastic / splunk_uf
+
+# -----------------------------------------------------------------------------
+# Injects / White Cell Events (OPTIONAL — future use)
+# -----------------------------------------------------------------------------
+# Scripted events injected during the exercise by White Cell.
+# Uncomment and populate as inject automation is implemented.
+# injects:
+#   - id: INJ-001
+#     name: "Malicious Email Delivery"
+#     trigger: manual            # manual / timer / condition
+#     delay_minutes: 30
+#     description: "White Cell delivers phishing email to user tstark"
+#   - id: INJ-002
+#     name: "C2 Beacon Activation"
+#     trigger: condition
+#     condition: "INJ-001 acknowledged"
+#     description: "Red team activates pre-staged implant on endpoint"

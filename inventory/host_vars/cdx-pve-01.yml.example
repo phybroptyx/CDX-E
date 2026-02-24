@@ -1,0 +1,48 @@
+---
+# =============================================================================
+# cdx-pve-01 — Proxmox VE Host Network Configuration (EXAMPLE / TEMPLATE)
+# =============================================================================
+# Copy to cdx-pve-01.yml and fill in the actual addresses for your node.
+# Encrypt with: ansible-vault encrypt inventory/host_vars/cdx-pve-01.yml
+#
+# base_network is consumed by configure_networking and revert_networking to
+# render /etc/network/interfaces on this Proxmox host.
+# Exercise-specific OVS bridges are defined separately in vms.yaml →
+# network_topology and are NOT stored here.
+# =============================================================================
+
+base_network:
+  # Physical network interfaces on this host.
+  # These are enslaved to bridges — they do not carry an IP themselves.
+  physical_interfaces:
+    - name: "<PHYSICAL_IFACE_1>"     # e.g. eno1 — management uplink
+    - name: "<PHYSICAL_IFACE_2>"     # e.g. eno2 — cluster/corosync
+    - name: "<PHYSICAL_IFACE_3>"     # e.g. eno4 — storage
+
+  # SOC Trunk — OVS port that trunks all exercise VLANs to the CDX-I bridge.
+  soc_trunk:
+    interface: "<SOC_TRUNK_IFACE>"   # e.g. eno3
+    bridge: "vmbr303"
+    trunks: "2-4094"
+
+  # Management network — Proxmox web UI + API access.
+  management:
+    bridge: "vmbr0"
+    port: "<MGMT_IFACE>"            # Physical interface bonded to this bridge
+    vlan: <MGMT_VLAN>               # e.g. 130
+    address: "<MGMT_IP>/<PREFIX>"   # e.g. 172.30.3.49/24
+    gateway: "<MGMT_GW>"            # e.g. 172.30.3.1
+
+  # Cluster network — Corosync heartbeat and live migration.
+  cluster:
+    bridge: "vmbr1"
+    port: "<CLUSTER_IFACE>"         # e.g. eno2
+    address: "<CLUSTER_IP>/<PREFIX>"  # e.g. 172.30.140.49/24
+    vlan: <CLUSTER_VLAN>            # e.g. 140
+
+  # Storage network — Ceph / NFS / iSCSI.
+  storage:
+    bridge: "vmbr2"
+    port: "<STORAGE_IFACE_OR_none>" # "none" if storage uses a separate fabric
+    address: "<STORAGE_IP>/<PREFIX>"  # e.g. 172.30.141.49/24
+    vlan: <STORAGE_VLAN>            # e.g. 141

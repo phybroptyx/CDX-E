@@ -1,0 +1,2055 @@
+# =============================================================================
+# OPERATION HARDENED CHAMPION - Multi-VM Deployment Specification
+# =============================================================================
+# CDX-E Framework VM Specification
+# Generated: 2026-02-05
+# Purpose: Corporate IT/OT Network with SCADA Infrastructure
+# Organization: Sanctum Sanctorum (sanctum-sanctorum.midgard.mrvl)
+# Domain Prefix: SCT
+# =============================================================================
+
+exercise:
+  name: "HARDENED_CHAMPION"
+  description: "Corporate IT/OT Convergence Training Environment"
+  classification: "corporate"
+
+ssh:
+  user: "root"
+  auth: "key"
+
+cloud_init_defaults:
+  username: "cdxadmin"
+  password: "P@ssw0rd"
+  ssh_public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDSryHEGJrvRhhvzZtNkPY4amvSEZuG+296CoPdxiOQ88FWsmJYD29UB4i90MUd8v4GMVDCFrgmqQAD0zIR/uJPSzGvo0w1MNmIsV2ZH8UmmgLGVNmhRTtjsZxLNjk5nMBoGSoT9lcXzCVRXHGraU3fMEZX+kq1INbC3R5cmOMffAgJX6QiHmpmg92urUHs+frIL55tNJLE2sTBitOfe6/qG2XaBLt0XlvNYdco62i2w5RGbvSiWUzIh5EVzFX7SJ1eOKYfVoJDMTHI1PmJshbKht4EoEJJlsAfHvLChfHi70c+jEnygqEkmBLyS9IYQxEz3Kb3wvBhcVhUAPmHAS12Wu+wNUticpJS2HooyK7hWrwKFNJRKryPXGkq69T59MI5nWucy3XUR5lbAWzxT9mSGqc7ECQZmtkpC/dehKHyyB/sdY+KJnazF0uqJQ5TKbjOKZ/md0iLp1xKt2y0dBN4UouMju2S/tzkFYtErBYTry/qKxxbAHWNE0UH6UhBZ+8= vyos@CDX-GATEWAY"
+
+# =============================================================================
+# Virtual Machine Specifications
+# =============================================================================
+# Template is now referenced by NAME (resolved via templates.yaml)
+# OS name is auto-populated from template registry
+# eth0/net0 is reserved for management (no configuration required)
+# =============================================================================
+#
+# Bridge Reference:
+#   sct_transit  - SDP Router <-> SCT Firewall transit (192.168.203.0/30)
+#   sct_ex       - SDP Router external to EQIX-5 (206.131.208.0/20)
+#   sct_core     - SCT Firewall internal / Router uplinks (206.131.209.0/28)
+#   sct_soc      - SOC Network (10.30.3.0/24)
+#   sct_lan_a    - RTR-1 LAN trunk: VLAN 210, 211 (206.131.210-211.0/24)
+#   sct_lan_b    - RTR-2 LAN trunk: VLAN 212, 213 (206.131.212-213.0/24)
+#   sct_xconn   - RTR-1 <-> RTR-2 cross-connect (10.0.0.0/30)
+#
+# =============================================================================
+virtual_machines:
+
+  # ===========================================================================
+  # NETWORK INFRASTRUCTURE (VM IDs 5201-5204)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # VM 1: SDP-SCT-1 - Service Delivery Point Router
+  # ---------------------------------------------------------------------------
+  - vmid: 5201
+    name: "SDP-SCT-1"
+    role: "Service Delivery Point"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "vyos"  # Resolved from templates.yaml
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 2048
+      cores: 1
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_transit"
+          firewall: true
+        - nic_id: 2
+          model: "virtio"
+          bridge: "sct_ex"
+          firewall: true
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 2: SCT-FW - Firewall (OPNsense - using VyOS template until built)
+  # ---------------------------------------------------------------------------
+  - vmid: 5202
+    name: "SCT-FW"
+    role: "Firewall"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "vyos"  # OPNsense template not yet built; using VyOS placeholder
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 2048
+      cores: 1
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_core"
+          firewall: true
+        - nic_id: 2
+          model: "virtio"
+          bridge: "sct_transit"
+          firewall: true
+        - nic_id: 3
+          model: "virtio"
+          bridge: "sct_soc"
+          firewall: true
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 3: SCT-RTR-1 - Internal Router 1 (VLANs 210, 211)
+  # ---------------------------------------------------------------------------
+  - vmid: 5203
+    name: "SCT-RTR-1"
+    role: "Internal Router"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "vyos"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 2048
+      cores: 1
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          firewall: true
+        - nic_id: 2
+          model: "virtio"
+          bridge: "sct_xconn"
+          firewall: true
+        - nic_id: 3
+          model: "virtio"
+          bridge: "sct_core"
+          firewall: true
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 4: SCT-RTR-2 - Internal Router 2 (VLANs 212, 213)
+  # ---------------------------------------------------------------------------
+  - vmid: 5204
+    name: "SCT-RTR-2"
+    role: "Internal Router"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "vyos"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 2048
+      cores: 1
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          firewall: true
+        - nic_id: 2
+          model: "virtio"
+          bridge: "sct_xconn"
+          firewall: true
+        - nic_id: 3
+          model: "virtio"
+          bridge: "sct_core"
+          firewall: true
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ===========================================================================
+  # VLAN 210 - SERVERS (VM IDs 5205-5208)
+  # Gateway: 206.131.210.1 (SCT-RTR-1 eth1.1210)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # VM 5: SCT-DC-01 - Primary Domain Controller
+  # ---------------------------------------------------------------------------
+  - vmid: 5205
+    name: "SCT-DC-01"
+    role: "Primary Domain Controller"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "server_2016"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1210
+          firewall: true
+          mac: "14:18:77:3A:B4:21"
+
+    cloud_init:
+      ip: "206.131.210.70"
+      cidr: 24
+      gateway: "206.131.210.1"
+      nameserver: "127.0.0.1"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 6: SCT-EX-01 - Microsoft Exchange Server
+  # ---------------------------------------------------------------------------
+  - vmid: 5206
+    name: "SCT-EX-01"
+    role: "Exchange Server"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "server_2012r2"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1210
+          firewall: true
+          mac: "14:18:77:3A:C7:83"
+
+    cloud_init:
+      ip: "206.131.210.40"
+      cidr: 24
+      gateway: "206.131.210.1"
+      nameserver: "206.131.210.70"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 7: SCT-FS-01 - File Server
+  # ---------------------------------------------------------------------------
+  - vmid: 5207
+    name: "SCT-FS-01"
+    role: "File Server"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "server_2016"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1210
+          firewall: true
+          mac: "14:18:77:3A:D9:15"
+
+    cloud_init:
+      ip: "206.131.210.28"
+      cidr: 24
+      gateway: "206.131.210.1"
+      nameserver: "206.131.210.70"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 8: SCT-AS-01 - Application Server (DHCP)
+  # ---------------------------------------------------------------------------
+  - vmid: 5208
+    name: "SCT-AS-01"
+    role: "Application Server (DHCP)"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "server_2016"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1210
+          firewall: true
+          mac: "14:18:77:3A:E2:47"
+
+    cloud_init:
+      ip: "206.131.210.35"
+      cidr: 24
+      gateway: "206.131.210.1"
+      nameserver: "206.131.210.70"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ===========================================================================
+  # VLAN 211 - SERVERS (VM IDs 5209-5210)
+  # Gateway: 206.131.211.1 (SCT-RTR-1 eth1.1211)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # VM 9: SCT-DC-02 - Domain Controller
+  # ---------------------------------------------------------------------------
+  - vmid: 5209
+    name: "SCT-DC-02"
+    role: "Domain Controller"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "server_2016"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1211
+          firewall: true
+          mac: "14:18:77:3A:F5:69"
+
+    cloud_init:
+      ip: "206.131.211.71"
+      cidr: 24
+      gateway: "206.131.211.1"
+      nameserver: "206.131.210.70"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 10: SCT-AS-02 - Application Server
+  # ---------------------------------------------------------------------------
+  - vmid: 5210
+    name: "SCT-AS-02"
+    role: "Application Server"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "server_2012r2"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1211
+          firewall: true
+          mac: "14:18:77:3A:A8:7B"
+
+    cloud_init:
+      ip: "206.131.211.44"
+      cidr: 24
+      gateway: "206.131.211.1"
+      nameserver: "206.131.210.70"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ===========================================================================
+  # VLAN 212 - SERVERS (VM IDs 5211-5212)
+  # Gateway: 206.131.212.1 (SCT-RTR-2 eth1.1212)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # VM 11: SCT-FS-02 - File Server
+  # ---------------------------------------------------------------------------
+  - vmid: 5211
+    name: "SCT-FS-02"
+    role: "File Server"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "server_2016"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1212
+          firewall: true
+          mac: "14:18:77:3A:B1:9D"
+
+    cloud_init:
+      ip: "206.131.212.28"
+      cidr: 24
+      gateway: "206.131.212.1"
+      nameserver: "206.131.210.70"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 12: SCT-MPS-01 - Multi-Purpose Server
+  # ---------------------------------------------------------------------------
+  - vmid: 5212
+    name: "SCT-MPS-01"
+    role: "Multi-Purpose Server"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "server_2016"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1212
+          firewall: true
+          mac: "14:18:77:3A:C3:AF"
+
+    cloud_init:
+      ip: "206.131.212.32"
+      cidr: 24
+      gateway: "206.131.212.1"
+      nameserver: "206.131.210.70"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ===========================================================================
+  # VLAN 213 - SERVERS (VM IDs 5213-5216)
+  # Gateway: 206.131.213.1 (SCT-RTR-2 eth1.1213)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # VM 13: SCT-DC-03 - Domain Controller
+  # ---------------------------------------------------------------------------
+  - vmid: 5213
+    name: "SCT-DC-03"
+    role: "Domain Controller"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "server_2012r2"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "14:18:77:3A:D6:C1"
+
+    cloud_init:
+      ip: "206.131.213.65"
+      cidr: 24
+      gateway: "206.131.213.1"
+      nameserver: "206.131.210.70"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 14: SCT-FHM-01 - Facilities Host Management
+  # ---------------------------------------------------------------------------
+  - vmid: 5214
+    name: "SCT-FHM-01"
+    role: "Facilities Host Management"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "centos_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "14:18:77:3A:E9:D3"
+
+    cloud_init:
+      ip: "206.131.213.162"
+      cidr: 24
+      gateway: "206.131.213.1"
+      nameserver: "206.131.210.70"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 15: SCT-LHM-01 - SCADA HMI
+  # ---------------------------------------------------------------------------
+  - vmid: 5215
+    name: "SCT-LHM-01"
+    role: "SCADA HMI"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "centos_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "14:18:77:3A:F2:E5"
+
+    cloud_init:
+      ip: "206.131.213.187"
+      cidr: 24
+      gateway: "206.131.213.1"
+      nameserver: "206.131.210.70"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 16: SCT-HST-01 - SCADA Historian
+  # ---------------------------------------------------------------------------
+  - vmid: 5216
+    name: "SCT-HST-01"
+    role: "SCADA Historian"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "centos_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "14:18:77:3A:A4:F7"
+
+    cloud_init:
+      ip: "206.131.213.109"
+      cidr: 24
+      gateway: "206.131.213.1"
+      nameserver: "206.131.210.70"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ===========================================================================
+  # VLAN 210 - WORKSTATIONS (VM IDs 5217-5223)
+  # NOC Workstations - Mix of Windows 10, Windows 11, Ubuntu 21.10
+  # Bridge: sct_lan_a, Tag: 1210
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # VM 17: SCT-NOC-4VKR8N2 - NOC Workstation 1
+  # ---------------------------------------------------------------------------
+  - vmid: 5217
+    name: "SCT-NOC-4VKR8N2"
+    role: "NOC Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_10"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1210
+          firewall: true
+          mac: "D4:85:64:5C:A1:02"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 18: SCT-NOC-7JLT4M6 - NOC Workstation 2
+  # ---------------------------------------------------------------------------
+  - vmid: 5218
+    name: "SCT-NOC-7JLT4M6"
+    role: "NOC Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_10"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1210
+          firewall: true
+          mac: "D4:85:64:5C:B3:14"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 19: SCT-NOC-9HWP5B3 - NOC Workstation 3
+  # ---------------------------------------------------------------------------
+  - vmid: 5219
+    name: "SCT-NOC-9HWP5B3"
+    role: "NOC Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1210
+          firewall: true
+          mac: "D4:85:64:5C:C5:26"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 20: SCT-NOC-1FXN7K8 - NOC Workstation 4
+  # ---------------------------------------------------------------------------
+  - vmid: 5220
+    name: "SCT-NOC-1FXN7K8"
+    role: "NOC Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1210
+          firewall: true
+          mac: "D4:85:64:5C:D7:38"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 21: SCT-NOC-5DTG2R4 - NOC Workstation 5
+  # ---------------------------------------------------------------------------
+  - vmid: 5221
+    name: "SCT-NOC-5DTG2R4"
+    role: "NOC Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_10"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1210
+          firewall: true
+          mac: "D4:85:64:5C:E9:4A"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 22: SCT-NOC-8CML6J9 - NOC Workstation 6
+  # ---------------------------------------------------------------------------
+  - vmid: 5222
+    name: "SCT-NOC-8CML6J9"
+    role: "NOC Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "ubuntu_2110"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1210
+          firewall: true
+          mac: "D4:85:64:5C:F1:5C"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 23: SCT-NOC-2BNK3P7 - NOC Workstation 7
+  # ---------------------------------------------------------------------------
+  - vmid: 5223
+    name: "SCT-NOC-2BNK3P7"
+    role: "NOC Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "ubuntu_2110"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1210
+          firewall: true
+          mac: "D4:85:64:5C:A2:6E"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ===========================================================================
+  # VLAN 211 - WORKSTATIONS (VM IDs 5224-5235)
+  # DEV Workstations - Mix of Windows 7, Windows 11, Ubuntu 21.10, CentOS 7
+  # Bridge: sct_lan_a, Tag: 1211
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # VM 24: SCT-DEV-6AWH8T1 - Development Workstation 1
+  # ---------------------------------------------------------------------------
+  - vmid: 5224
+    name: "SCT-DEV-6AWH8T1"
+    role: "Development Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1211
+          firewall: true
+          mac: "D4:85:64:5C:B4:70"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 25: SCT-DEV-3GRJ5N6 - Development Workstation 2
+  # ---------------------------------------------------------------------------
+  - vmid: 5225
+    name: "SCT-DEV-3GRJ5N6"
+    role: "Development Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1211
+          firewall: true
+          mac: "D4:85:64:5C:C6:82"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 26: SCT-DEV-7KXB2L8 - Development Workstation 3
+  # ---------------------------------------------------------------------------
+  - vmid: 5226
+    name: "SCT-DEV-7KXB2L8"
+    role: "Development Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1211
+          firewall: true
+          mac: "D4:85:64:5C:D8:94"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 27: SCT-DEV-4PMT9D5 - Development Workstation 4
+  # ---------------------------------------------------------------------------
+  - vmid: 5227
+    name: "SCT-DEV-4PMT9D5"
+    role: "Development Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "ubuntu_2110"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1211
+          firewall: true
+          mac: "D4:85:64:5C:E1:A6"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 28: SCT-DEV-1NWK6H7 - Development Workstation 5
+  # ---------------------------------------------------------------------------
+  - vmid: 5228
+    name: "SCT-DEV-1NWK6H7"
+    role: "Development Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1211
+          firewall: true
+          mac: "D4:85:64:5C:F3:B8"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 29: SCT-DEV-8FJR4C2 - Development Workstation 6
+  # ---------------------------------------------------------------------------
+  - vmid: 5229
+    name: "SCT-DEV-8FJR4C2"
+    role: "Development Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1211
+          firewall: true
+          mac: "D4:85:64:5C:A5:CA"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 30: SCT-DEV-5HLM7B9 - Development Workstation 7
+  # ---------------------------------------------------------------------------
+  - vmid: 5230
+    name: "SCT-DEV-5HLM7B9"
+    role: "Development Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "centos_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1211
+          firewall: true
+          mac: "D4:85:64:5C:B7:DC"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 31: SCT-DEV-2DTN3K5 - Development Workstation 8
+  # ---------------------------------------------------------------------------
+  - vmid: 5231
+    name: "SCT-DEV-2DTN3K5"
+    role: "Development Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1211
+          firewall: true
+          mac: "D4:85:64:5C:C9:EE"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 32: SCT-DEV-9GWP8J1 - Development Workstation 9
+  # ---------------------------------------------------------------------------
+  - vmid: 5232
+    name: "SCT-DEV-9GWP8J1"
+    role: "Development Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "ubuntu_2110"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1211
+          firewall: true
+          mac: "D4:85:64:5C:D2:01"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 33: SCT-DEV-6CXL4R3 - Development Workstation 10
+  # ---------------------------------------------------------------------------
+  - vmid: 5233
+    name: "SCT-DEV-6CXL4R3"
+    role: "Development Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1211
+          firewall: true
+          mac: "D4:85:64:5C:E4:13"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 34: SCT-DEV-3BKH2T8 - Development Workstation 11
+  # ---------------------------------------------------------------------------
+  - vmid: 5234
+    name: "SCT-DEV-3BKH2T8"
+    role: "Development Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "ubuntu_2110"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1211
+          firewall: true
+          mac: "D4:85:64:5C:F6:25"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 35: SCT-DEV-7NMJ5P4 - Development Workstation 12
+  # ---------------------------------------------------------------------------
+  - vmid: 5235
+    name: "SCT-DEV-7NMJ5P4"
+    role: "Development Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "centos_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_a"
+          tag: 1211
+          firewall: true
+          mac: "D4:85:64:5C:A8:37"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ===========================================================================
+  # VLAN 212 - WORKSTATIONS (VM IDs 5236-5241)
+  # ENG Workstations - All Windows 11
+  # Bridge: sct_lan_b, Tag: 1212
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # VM 36: SCT-ENG-1AWR9D6 - Engineering Workstation 1
+  # ---------------------------------------------------------------------------
+  - vmid: 5236
+    name: "SCT-ENG-1AWR9D6"
+    role: "Engineering Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1212
+          firewall: true
+          mac: "D4:85:64:5C:B1:49"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 37: SCT-ENG-4FTK8L7 - Engineering Workstation 2
+  # ---------------------------------------------------------------------------
+  - vmid: 5237
+    name: "SCT-ENG-4FTK8L7"
+    role: "Engineering Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1212
+          firewall: true
+          mac: "D4:85:64:5C:C3:5B"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 38: SCT-ENG-8HXN7B2 - Engineering Workstation 3
+  # ---------------------------------------------------------------------------
+  - vmid: 5238
+    name: "SCT-ENG-8HXN7B2"
+    role: "Engineering Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1212
+          firewall: true
+          mac: "D4:85:64:5C:D5:6D"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 39: SCT-ENG-5JWM3C9 - Engineering Workstation 4
+  # ---------------------------------------------------------------------------
+  - vmid: 5239
+    name: "SCT-ENG-5JWM3C9"
+    role: "Engineering Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1212
+          firewall: true
+          mac: "D4:85:64:5C:E7:7F"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 40: SCT-ENG-2GLP6K4 - Engineering Workstation 5
+  # ---------------------------------------------------------------------------
+  - vmid: 5240
+    name: "SCT-ENG-2GLP6K4"
+    role: "Engineering Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1212
+          firewall: true
+          mac: "D4:85:64:5C:F9:81"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 41: SCT-ENG-9DRH5T1 - Engineering Workstation 6
+  # ---------------------------------------------------------------------------
+  - vmid: 5241
+    name: "SCT-ENG-9DRH5T1"
+    role: "Engineering Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1212
+          firewall: true
+          mac: "D4:85:64:5C:A3:93"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ===========================================================================
+  # VLAN 213 - WORKSTATIONS (VM IDs 5242-5252)
+  # OPS Workstations (Windows 7) + CTRL Workstations (CentOS 7)
+  # Bridge: sct_lan_b, Tag: 1213
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # VM 42: SCT-OPS-6CKW2M3 - Operations Workstation 1
+  # ---------------------------------------------------------------------------
+  - vmid: 5242
+    name: "SCT-OPS-6CKW2M3"
+    role: "Operations Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "D4:85:64:5C:B5:A5"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 43: SCT-OPS-7TLR9P8 - Operations Workstation 2
+  # ---------------------------------------------------------------------------
+  - vmid: 5243
+    name: "SCT-OPS-7TLR9P8"
+    role: "Operations Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "D4:85:64:5C:C7:B7"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 44: SCT-OPS-1HJG4D5 - Operations Workstation 3
+  # ---------------------------------------------------------------------------
+  - vmid: 5244
+    name: "SCT-OPS-1HJG4D5"
+    role: "Operations Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "D4:85:64:5C:D9:C9"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 45: SCT-OPS-3FMN7K2 - Operations Workstation 4
+  # ---------------------------------------------------------------------------
+  - vmid: 5245
+    name: "SCT-OPS-3FMN7K2"
+    role: "Operations Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "D4:85:64:5C:E2:DB"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 46: SCT-OPS-8BWP6T9 - Operations Workstation 5
+  # ---------------------------------------------------------------------------
+  - vmid: 5246
+    name: "SCT-OPS-8BWP6T9"
+    role: "Operations Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "D4:85:64:5C:F4:ED"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 47: SCT-OPS-5GXR3L4 - Operations Workstation 6
+  # ---------------------------------------------------------------------------
+  - vmid: 5247
+    name: "SCT-OPS-5GXR3L4"
+    role: "Operations Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "windows_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "D4:85:64:5C:A6:FF"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 48: SCT-CTRL-2AKH8J1 - SCADA Control Workstation 1
+  # ---------------------------------------------------------------------------
+  - vmid: 5248
+    name: "SCT-CTRL-2AKH8J1"
+    role: "SCADA Control Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "centos_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "D4:85:64:5C:B8:11"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 49: SCT-CTRL-4DNT5C6 - SCADA Control Workstation 2
+  # ---------------------------------------------------------------------------
+  - vmid: 5249
+    name: "SCT-CTRL-4DNT5C6"
+    role: "SCADA Control Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "centos_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "D4:85:64:5C:CA:23"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 50: SCT-CTRL-9LWB7M3 - SCADA Control Workstation 3
+  # ---------------------------------------------------------------------------
+  - vmid: 5250
+    name: "SCT-CTRL-9LWB7M3"
+    role: "SCADA Control Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "centos_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "D4:85:64:5C:D3:35"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 51: SCT-CTRL-6JPK2R8 - SCADA Control Workstation 4
+  # ---------------------------------------------------------------------------
+  - vmid: 5251
+    name: "SCT-CTRL-6JPK2R8"
+    role: "SCADA Control Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "centos_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "D4:85:64:5C:E5:47"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"
+
+  # ---------------------------------------------------------------------------
+  # VM 52: SCT-CTRL-1RVN4H7 - SCADA Control Workstation 5
+  # ---------------------------------------------------------------------------
+  - vmid: 5252
+    name: "SCT-CTRL-1RVN4H7"
+    role: "SCADA Control Workstation"
+    site: "New York"
+    organization: "Sanctum Sanctorum"
+
+    template: "centos_7"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "sct_lan_b"
+          tag: 1213
+          firewall: true
+          mac: "D4:85:64:5C:F7:59"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_HARDENED_CHAMPION"
+      tags:
+        - "hardened_champion"

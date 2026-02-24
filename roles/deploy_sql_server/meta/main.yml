@@ -1,0 +1,7 @@
+﻿---
+galaxy_info:
+  author: CDX
+  description: "Installs and configures Microsoft SQL Server"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

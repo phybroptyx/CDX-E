@@ -1,0 +1,121 @@
+{
+  "_meta": {
+    "description": "CDX-E GPO Template — defines Group Policy Objects for the exercise domain.",
+    "usage": "Copy to EXERCISES/<EXERCISE_NAME>/gpo.json and configure for the exercise.",
+    "consumed_by": "deploy_group_policy_objects role / ad_deploy.ps1",
+    "version": "1.0",
+    "notes": [
+      "Baseline policies should be kept for all exercises — they enforce training-safe defaults.",
+      "id and backupPath are null for programmatically-created GPOs.",
+      "Set backupPath to a SYSVOL/NETLOGON path if importing a pre-built GPO backup.",
+      "Settings use Registry.pol-style key/value pairs (Computer and User sections).",
+      "imageBasePath: replace __DOMAIN__ with the exercise FQDN in consuming scripts."
+    ]
+  },
+
+  "gpos": [
+
+    {
+      "name": "Baseline Workstation Policy",
+      "id": null,
+      "backupPath": null,
+      "description": "Baseline security hardening for all domain workstations",
+      "links": [
+        "OU=Workstations,OU=Operations,OU=HQ,OU=Sites"
+      ],
+      "settings": {
+        "computer": [
+          {
+            "_comment": "Require CTRL+ALT+DEL at logon",
+            "key": "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+            "valueName": "DisableCAD",
+            "value": 0,
+            "type": "DWord"
+          },
+          {
+            "_comment": "Screen saver timeout — 15 minutes",
+            "key": "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Control Panel\\Desktop",
+            "valueName": "ScreenSaveTimeOut",
+            "value": "900",
+            "type": "String"
+          }
+        ]
+      }
+    },
+
+    {
+      "name": "Baseline Server Policy",
+      "id": null,
+      "backupPath": null,
+      "description": "Baseline security hardening for all domain servers",
+      "links": [
+        "OU=Servers,OU=IT-Core,OU=HQ,OU=Sites"
+      ],
+      "settings": {
+        "computer": [
+          {
+            "_comment": "Audit logon events",
+            "key": "HKLM\\SYSTEM\\CurrentControlSet\\Services\\EventLog\\Security",
+            "valueName": "MaxSize",
+            "value": 262144,
+            "type": "DWord"
+          }
+        ]
+      }
+    },
+
+    {
+      "name": "Domain Branding - Logon Screen",
+      "id": null,
+      "backupPath": null,
+      "description": "Corporate logon and lock screen branding for all domain systems",
+      "links": [
+        "OU=Sites"
+      ],
+      "settings": {
+        "computer": [
+          {
+            "_comment": "Set lock screen image — update path for exercise",
+            "key": "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Personalization",
+            "valueName": "LockScreenImage",
+            "value": "\\\\__DOMAIN__\\NETLOGON\\Images\\login-banner.jpg",
+            "type": "String"
+          },
+          {
+            "key": "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Personalization",
+            "valueName": "NoChangingLockScreen",
+            "value": 1,
+            "type": "DWord"
+          }
+        ]
+      }
+    },
+
+    {
+      "name": "Domain Branding - Workstation Wallpaper",
+      "id": null,
+      "backupPath": null,
+      "description": "Corporate desktop wallpaper for all domain workstations",
+      "links": [
+        "OU=Workstations,OU=Operations,OU=HQ,OU=Sites"
+      ],
+      "settings": {
+        "user": [
+          {
+            "_comment": "Set wallpaper — update path and filename for exercise",
+            "key": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+            "valueName": "Wallpaper",
+            "value": "\\\\__DOMAIN__\\NETLOGON\\Images\\desktop-wallpaper.jpg",
+            "type": "String"
+          },
+          {
+            "key": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+            "valueName": "WallpaperStyle",
+            "value": "4",
+            "type": "String"
+          }
+        ]
+      }
+    }
+  ]
+}

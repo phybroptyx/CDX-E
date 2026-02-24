@@ -1,0 +1,67 @@
+---
+# =============================================================================
+# Role: read_exercise_config
+# =============================================================================
+# Loads the exercise scenario.yml and vms.yaml, validates their content,
+# and sets cacheable facts available to all subsequent plays in the run.
+# =============================================================================
+
+- name: "[preflight] Assert exercise variable is defined"
+  ansible.builtin.assert:
+    that:
+      - exercise is defined
+      - exercise | length > 0
+    fail_msg: >
+      'exercise' variable must be defined.
+      Usage: ansible-playbook site.yml -e "exercise=OBSIDIAN_DAGGER"
+
+- name: Set exercise directory path
+  ansible.builtin.set_fact:
+    exercise_dir: "{{ playbook_dir }}/EXERCISES/{{ exercise }}"
+
+- name: "[preflight] Assert exercise directory exists"
+  ansible.builtin.stat:
+    path: "{{ exercise_dir }}"
+  register: _exercise_dir_stat
+
+- name: "[preflight] Fail if exercise directory not found"
+  ansible.builtin.assert:
+    that:
+      - _exercise_dir_stat.stat.exists
+      - _exercise_dir_stat.stat.isdir
+    fail_msg: "Exercise directory not found: {{ exercise_dir }}"
+
+- name: Load scenario configuration
+  ansible.builtin.include_vars:
+    file: "{{ exercise_dir }}/scenario.yml"
+    name: scenario
+
+- name: Load VM specification
+  ansible.builtin.include_vars:
+    file: "{{ exercise_dir }}/vms.yaml"
+    name: exercise_vm_spec
+
+- name: "[preflight] Assert scenario has required keys"
+  ansible.builtin.assert:
+    that:
+      - scenario.phases is defined
+      - exercise_vm_spec.virtual_machines is defined
+    fail_msg: "scenario.yml missing 'phases' or vms.yaml missing 'virtual_machines'"
+
+- name: Set cacheable scenario facts
+  ansible.builtin.set_fact:
+    exercise_dir: "{{ exercise_dir }}"
+    scenario: "{{ scenario }}"
+    virtual_machines: "{{ exercise_vm_spec.virtual_machines }}"
+    network_topology: "{{ exercise_vm_spec.network_topology | default({}) }}"
+  cacheable: true
+
+- name: Display scenario summary
+  ansible.builtin.debug:
+    msg:
+      - "Exercise     : {{ exercise }}"
+      - "Description  : {{ scenario.exercise.description | default('N/A') }}"
+      - "VM count     : {{ exercise_vm_spec.virtual_machines | length }}"
+      - "Phases active: {{ scenario.phases | dict2items
+                           | selectattr('value', 'truthy')
+                           | map(attribute='key') | list | join(', ') }}"

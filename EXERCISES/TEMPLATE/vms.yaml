@@ -1,0 +1,291 @@
+---
+# =============================================================================
+# CDX-E VM Specification Template
+# =============================================================================
+# Defines all virtual machines for a CDX exercise.
+# Loaded by read_exercise_config and exposed as the 'virtual_machines' fact.
+#
+# Template resolution: all 'template' values must match a key in
+# inventory/group_vars/all.yml → template_registry.
+#
+# ansible_group controls which Terraform state and configuration roles
+# target this VM:
+#   domain_controllers — AD DC promotion + DNS
+#   servers            — Member servers (file, print, IIS, app, etc.)
+#   workstations       — Windows desktop endpoints
+#   red_team           — Red Team / OPFOR infrastructure (terraform_red_team/)
+#   apt                — APT / advanced adversary (terraform_red_team/)
+#   blue_team          — Blue Team operator workstations (terraform_blue_team/)
+#   soc                — SOC infrastructure: SIEM, EDR, log aggregators (terraform_blue_team/)
+#   routers            — VyOS network devices (excluded from Terraform — managed by configure_networking)
+#
+# net0 is always the Proxmox management interface and is provisioned
+# automatically. Do not define it here.
+# =============================================================================
+
+exercise:
+  name: "EXERCISE_NAME"          # REQUIRED — must match scenario.yml exercise.name
+  description: "Exercise description"
+
+# SSH defaults for Ansible to reach deployed VMs.
+ssh:
+  user: root
+  auth: key
+
+# Cloud-init defaults applied to all VMs unless overridden per-VM.
+cloud_init_defaults:
+  username: cdxadmin
+  password: "{{ vault_cloud_init_password }}"
+  ssh_public_key: "{{ vault_ssh_public_key }}"
+
+# =============================================================================
+# Network Topology
+# =============================================================================
+# Defines OVS bridges per Proxmox node that this exercise requires.
+# Consumed by configure_networking to template /etc/network/interfaces
+# on each affected Proxmox host.
+#
+# Bridge naming convention:
+#   <prefix>_<site>_in  — Internal LAN (isolated, no uplink)
+#   <prefix>_<site>_bd  — Boundary / DMZ (between internal and external)
+#   <prefix>_<site>_ex  — External (CDX-I uplink via OVS patch port)
+#
+# The cdxi_patch block on an _ex bridge creates an OVS patch port pair
+# connecting to vmbr303 (CDX-I) with the specified VLAN tag.
+# Remove cdxi_patch from bridges that do not connect to CDX-I.
+# =============================================================================
+network_topology:
+  sites:
+    # Single-site example — duplicate this block for multi-site exercises.
+    - name: "hq"
+      label: "Headquarters"
+      node: "cdx-pve-01"            # Proxmox node that hosts this site's bridges
+      bridges:
+        - name: "ex_hq_in"
+          description: "HQ Internal LAN"
+        - name: "ex_hq_bd"
+          description: "HQ Boundary / DMZ"
+        - name: "ex_hq_ex"
+          description: "HQ External (CDX-I uplink)"
+          cdxi_patch:
+            site_code: "hq"
+            vlan_tag: 500           # CDX-I VLAN assigned to this exercise site
+
+    # Multi-site example (uncomment and duplicate as needed):
+    # - name: "branch"
+    #   label: "Branch Office"
+    #   node: "cdx-pve-02"
+    #   bridges:
+    #     - name: "ex_br_in"
+    #       description: "Branch Internal LAN"
+    #     - name: "ex_br_ex"
+    #       description: "Branch External (CDX-I uplink)"
+    #       cdxi_patch:
+    #         site_code: "br"
+    #         vlan_tag: 501
+
+# =============================================================================
+# Virtual Machine Specifications
+# =============================================================================
+# Each VM entry represents one Proxmox VM cloned from a template.
+# Required fields: vmid, name, template, ansible_group, resources
+# Optional fields: proxmox, cloud_init, network, clone_type, monitor
+#
+# monitor: true/false — controls whether deploy_endpoint_agents installs a
+#   SIEM agent on this VM. White Cell sets this per exercise to define Blue
+#   Team visibility scope. Defaults to false if omitted.
+# =============================================================================
+virtual_machines:
+
+  # ---------------------------------------------------------------------------
+  # VyOS Routers — managed by configure_networking, NOT Terraform
+  # ---------------------------------------------------------------------------
+  # - vmid: 5000
+  #   name: "EX-HQ-RTR-01"
+  #   template: "vyos"
+  #   ansible_group: "routers"
+  #   resources:
+  #     memory_mb: 2048
+  #     cores: 2
+  #     sockets: 1
+  #   proxmox:
+  #     node: "cdx-pve-01"       # OPTIONAL — overrides scenario.proxmox.node
+  #     storage: "QNAP"          # OPTIONAL — overrides scenario.proxmox.storage
+  #   network:
+  #     additional_nics:
+  #       - nic_id: 1            # net1 — WAN (CDX-I uplink)
+  #         model: "virtio"
+  #         bridge: "ex_hq_ex"
+  #         firewall: true
+  #       - nic_id: 2            # net2 — LAN
+  #         model: "virtio"
+  #         bridge: "ex_hq_in"
+  #         firewall: true
+
+  # ---------------------------------------------------------------------------
+  # Domain Controllers
+  # ---------------------------------------------------------------------------
+  - vmid: 5001
+    name: "EX-DC-01"
+    template: "server_2022"        # Key from template_registry in group_vars/all.yml
+    ansible_group: "domain_controllers"
+    monitor: true                  # OPTIONAL — true = deploy SIEM agent (White Cell controlled)
+    resources:
+      memory_mb: 8192
+      cores: 4
+      sockets: 1
+    cloud_init:                    # OPTIONAL — static IP. Omit for DHCP.
+      ip: "10.0.0.10"
+      cidr: 24
+      gateway: "10.0.0.1"
+      nameserver: "10.0.0.10"
+
+  # - vmid: 5002
+  #   name: "EX-DC-02"
+  #   template: "server_2022"
+  #   ansible_group: "domain_controllers"
+  #   resources:
+  #     memory_mb: 8192
+  #     cores: 4
+  #     sockets: 1
+  #   cloud_init:
+  #     ip: "10.0.0.11"
+  #     cidr: 24
+  #     gateway: "10.0.0.1"
+  #     nameserver: "10.0.0.10"
+
+  # ---------------------------------------------------------------------------
+  # Member Servers
+  # ---------------------------------------------------------------------------
+  # - vmid: 5010
+  #   name: "EX-FS-01"
+  #   template: "server_2022"
+  #   ansible_group: "servers"
+  #   resources:
+  #     memory_mb: 8192
+  #     cores: 2
+  #     sockets: 1
+  #   cloud_init:
+  #     ip: "10.0.0.20"
+  #     cidr: 24
+  #     gateway: "10.0.0.1"
+  #     nameserver: "10.0.0.10"
+
+  # SQL Server (required if services.sql: true in scenario.yml)
+  # - vmid: 5011
+  #   name: "EX-SQL-01"
+  #   template: "server_2022"
+  #   ansible_group: "servers"
+  #   resources:
+  #     memory_mb: 16384
+  #     cores: 4
+  #     sockets: 1
+
+  # Exchange Server (requires SQL)
+  # - vmid: 5012
+  #   name: "EX-EX-01"
+  #   template: "server_2019"
+  #   ansible_group: "servers"
+  #   resources:
+  #     memory_mb: 32768
+  #     cores: 8
+  #     sockets: 1
+
+  # ConfigMgr Site Server (requires SQL)
+  # - vmid: 5013
+  #   name: "EX-CM-01"
+  #   template: "server_2022"
+  #   ansible_group: "servers"
+  #   resources:
+  #     memory_mb: 16384
+  #     cores: 4
+  #     sockets: 1
+
+  # ---------------------------------------------------------------------------
+  # Workstations / Endpoints
+  # ---------------------------------------------------------------------------
+  # - vmid: 6001
+  #   name: "EX-WKS-01"
+  #   template: "windows_10"
+  #   ansible_group: "workstations"
+  #   resources:
+  #     memory_mb: 4096
+  #     cores: 2
+  #     sockets: 1
+
+  # - vmid: 6002
+  #   name: "EX-WKS-02"
+  #   template: "windows_11"
+  #   ansible_group: "workstations"
+  #   resources:
+  #     memory_mb: 4096
+  #     cores: 2
+  #     sockets: 1
+
+  # Legacy workstation example
+  # - vmid: 6003
+  #   name: "EX-WKS-LEGACY-01"
+  #   template: "windows_7"
+  #   ansible_group: "workstations"
+  #   resources:
+  #     memory_mb: 2048
+  #     cores: 1
+  #     sockets: 1
+
+  # ---------------------------------------------------------------------------
+  # Red Team / APT Infrastructure (terraform_red_team state)
+  # Only included when scenario.phases.red_team: true
+  # ---------------------------------------------------------------------------
+  # C2 Server
+  # - vmid: 3001
+  #   name: "RT-C2-01"
+  #   template: "kali_purple"
+  #   ansible_group: "red_team"
+  #   resources:
+  #     memory_mb: 8192
+  #     cores: 4
+  #     sockets: 1
+  #   cloud_init:
+  #     ip: "10.0.3.10"
+  #     cidr: 24
+  #     gateway: "10.0.3.1"
+  #     nameserver: "10.0.0.10"
+
+  # Pre-staged implant / pivot host (appears to be a normal endpoint)
+  # - vmid: 3002
+  #   name: "RT-PIVOT-01"
+  #   template: "windows_10"
+  #   ansible_group: "apt"
+  #   resources:
+  #     memory_mb: 4096
+  #     cores: 2
+  #     sockets: 1
+
+  # ---------------------------------------------------------------------------
+  # Blue Team / SOC Infrastructure (terraform_blue_team state)
+  # Only included when scenario.phases.blue_team: true
+  # ---------------------------------------------------------------------------
+  # SIEM Server
+  # - vmid: 1001
+  #   name: "SOC-SIEM-01"
+  #   template: "ubuntu_server"
+  #   ansible_group: "soc"
+  #   resources:
+  #     memory_mb: 32768
+  #     cores: 8
+  #     sockets: 1
+  #   cloud_init:
+  #     ip: "10.0.1.10"
+  #     cidr: 24
+  #     gateway: "10.0.1.1"
+  #     nameserver: "10.0.0.10"
+
+  # Analyst workstation
+  # - vmid: 1002
+  #   name: "SOC-WKS-01"
+  #   template: "kali_purple"
+  #   ansible_group: "blue_team"
+  #   resources:
+  #     memory_mb: 16384
+  #     cores: 4
+  #     sockets: 1

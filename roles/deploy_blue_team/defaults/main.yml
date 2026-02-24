@@ -1,0 +1,2 @@
+---
+# All defaults for deploy_blue_team live in inventory/group_vars/all.yml.

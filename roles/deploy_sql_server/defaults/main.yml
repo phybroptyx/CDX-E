@@ -1,0 +1,78 @@
+---
+# =============================================================================
+# Role: deploy_sql_server — Default Variables
+# =============================================================================
+
+# ── Setup media ──────────────────────────────────────────────────────────────
+# Absolute path to SQL Server setup.exe on the target host.
+# SQL Server media is too large to transfer via Ansible; it must be
+# pre-staged before running this role. Acceptable paths:
+#   - Local path : 'C:\SQLServerSetup\setup.exe'
+#   - UNC share  : '\\fileserver\share\SQLServer2022\setup.exe'
+#   - DVD/ISO mount : 'D:\setup.exe'
+sql_setup_path: 'C:\SQLServerSetup\setup.exe'
+
+# ── Instance ─────────────────────────────────────────────────────────────────
+# SQL Server instance name.
+#   MSSQLSERVER = default (unnamed) instance — connect as: servername
+#   Any other value = named instance — connect as: servername\instancename
+sql_instance_name: 'MSSQLSERVER'
+
+# Installation root directory for the SQL Server instance.
+# Leave empty to use the SQL Server default (C:\Program Files\...).
+sql_instance_dir: ''
+
+# ── Features ─────────────────────────────────────────────────────────────────
+# Comma-separated feature list passed to setup.exe /FEATURES.
+# SQLENGINE   = Database Engine (required; always include)
+# REPLICATION = SQL Server Replication
+# FULLTEXT    = Full-Text and Semantic Search
+# RS          = Reporting Services (SQL 2019 and earlier)
+# AS          = Analysis Services
+# IS          = Integration Services
+# Note: SSMS is a separate installer and is not handled here.
+sql_features: 'SQLENGINE'
+
+# ── Authentication ───────────────────────────────────────────────────────────
+# Authentication mode for the SQL Server instance.
+#   Windows — Windows Authentication only (most secure; default for AD domains)
+#   Mixed   — Windows + SQL Authentication (required for Exchange/SCCM)
+sql_auth_mode: 'Mixed'
+
+# SA account password — required when sql_auth_mode: Mixed.
+# Load from Ansible Vault: vault_sql_sa_password in Secrets/credentials.yml
+sql_sa_password: "{{ vault_sql_sa_password | default('') }}"
+
+# ── Service accounts ─────────────────────────────────────────────────────────
+# Virtual service accounts (NT Service\...) need no password.
+# Domain accounts require sql_svc_password / sql_agent_password to be set
+# (load from vault).
+sql_svc_account:    'NT Service\MSSQLSERVER'
+sql_svc_password:   ''
+
+sql_agent_account:  'NT Service\SQLSERVERAGENT'
+sql_agent_password: ''
+
+# ── Sysadmin accounts ────────────────────────────────────────────────────────
+# Windows principals that receive the sysadmin server role.
+# BUILTIN\Administrators ensures the local admin account has full access
+# during setup and post-deploy configuration.
+sql_sysadmin_accounts:
+  - 'BUILTIN\Administrators'
+
+# ── Port ─────────────────────────────────────────────────────────────────────
+# TCP port SQL Server listens on. 1433 is the well-known default.
+sql_port: 1433
+
+# ── Data directories ─────────────────────────────────────────────────────────
+# Override SQL Server default data/log/tempdb/backup paths.
+# Leave empty to accept SQL Server defaults under the instance directory.
+sql_data_dir:   ''
+sql_log_dir:    ''
+sql_tempdb_dir: ''
+sql_backup_dir: ''
+
+# ── Staging ───────────────────────────────────────────────────────────────────
+# Temporary directory on the target host for the ConfigurationFile.ini.
+# Removed at the end of the role.
+sql_temp_path: 'C:\Windows\Temp\cdx_sql'

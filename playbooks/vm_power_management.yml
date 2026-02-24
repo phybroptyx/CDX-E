@@ -1,0 +1,44 @@
+---
+# =============================================================================
+# CDX-E Playbook: VM Power Management
+# =============================================================================
+# Purpose: Power on all scenario VMs via the Proxmox API and wait for
+#          management connectivity (WinRM port 5985 for Windows,
+#          SSH port 22 for Linux/VyOS) before handing off to
+#          configuration phases.
+#
+# Must run AFTER inventory_refresh (IPs must be in inventory).
+# Must run BEFORE network_management and all configuration phases.
+#
+# Roles:
+#   - vm_power_management
+#
+# Usage:
+#   ansible-playbook playbooks/vm_power_management.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@secrets/credentials.yml"
+# =============================================================================
+
+- name: VM Power Management
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [power, vms]
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  pre_tasks:
+    - name: "[preflight] Skip if terraform phase is disabled"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.terraform | default(true) | bool)
+
+    - name: "[preflight] Assert exercise_hosts inventory is populated"
+      ansible.builtin.assert:
+        that: groups['exercise_hosts'] | default([]) | length > 0
+        fail_msg: >
+          exercise_hosts group is empty.
+          Ensure inventory_refresh has run and inventory/exercise_hosts.yml exists.
+
+  roles:
+    - vm_power_management

@@ -1,0 +1,132 @@
+# =============================================================================
+# OPERATION CHILLED ROCKET - Multi-VM Deployment Specification
+# =============================================================================
+# CDX-E Framework VM Specification
+# Purpose: Multi-site Corporate Network Infrastructure
+# Organization: Stark Industries (stark.ind)
+# Domain Prefix: STK
+# =============================================================================
+
+exercise:
+  name: "CHILLED_ROCKET"
+  description: "Multi-site Corporate Network Training Environment"
+  classification: "primary"
+
+ssh:
+  user: "root"
+  auth: "key"
+
+cloud_init_defaults:
+  username: "cdxadmin"
+  password: "P@ssw0rd"
+  ssh_public_key: ""  # TODO: populate with exercise SSH key
+
+# =============================================================================
+# Network Topology
+# =============================================================================
+# Defines OVS bridges and CDX-I patch ports per Proxmox node.
+#
+# Sites:
+#   HQ        - Headquarters (stk_hq_*)           CDX-I VLAN 505
+#   Malibu    - Malibu branch (stk_ml_*)           CDX-I VLAN 504
+#   Dallas    - Dallas branch (stk_dl_*)           CDX-I VLAN 504
+#   Nagasaki  - Nagasaki branch (stk_ng_*)         CDX-I VLAN 510
+#   Amsterdam - Amsterdam branch (stk_am_*)        CDX-I VLAN 502
+#
+# Bridge types per site:
+#   _in  - Internal network (isolated LAN)
+#   _bd  - Boundary network (between internal and external zones)
+#   _ex  - External/DMZ network (CDX-I uplink via OVS patch port)
+# =============================================================================
+network_topology:
+  sites:
+    # ----- HQ (Headquarters) -----
+    - name: "hq"
+      label: "HQ"
+      node: "cdx-pve-01"
+      bridges:
+        - name: "stk_hq_in"
+          description: "HQ Internal Networks Bridge"
+        - name: "stk_hq_bd"
+          description: "HQ Boundary Network Bridge"
+        - name: "stk_hq_ex"
+          description: "HQ External/DMZ Bridge"
+          cdxi_patch:
+            site_code: "hq"
+            vlan_tag: 505
+
+    # ----- Malibu -----
+    - name: "ml"
+      label: "Malibu"
+      node: "cdx-pve-01"
+      bridges:
+        - name: "stk_ml_in"
+          description: "Malibu Internal Networks Bridge"
+        - name: "stk_ml_bd"
+          description: "Malibu Boundary Network Bridge"
+        - name: "stk_ml_ex"
+          description: "Malibu External/DMZ Bridge"
+          cdxi_patch:
+            site_code: "ml"
+            vlan_tag: 504
+
+    # ----- Dallas -----
+    - name: "dl"
+      label: "Dallas"
+      node: "cdx-pve-01"
+      bridges:
+        - name: "stk_dl_in"
+          description: "Dallas Internal Networks Bridge"
+        - name: "stk_dl_bd"
+          description: "Dallas Boundary Network Bridge"
+        - name: "stk_dl_ex"
+          description: "Dallas External/DMZ Bridge"
+          cdxi_patch:
+            site_code: "dl"
+            vlan_tag: 504
+
+    # ----- Nagasaki -----
+    - name: "ng"
+      label: "Nagasaki"
+      node: "cdx-pve-01"
+      bridges:
+        - name: "stk_ng_in"
+          description: "Nagasaki Internal Networks Bridge"
+        - name: "stk_ng_bd"
+          description: "Nagasaki Boundary Network Bridge"
+        - name: "stk_ng_ex"
+          description: "Nagasaki External/DMZ Bridge"
+          cdxi_patch:
+            site_code: "ng"
+            vlan_tag: 510
+
+    # ----- Amsterdam -----
+    - name: "am"
+      label: "Amsterdam"
+      node: "cdx-pve-01"
+      bridges:
+        - name: "stk_am_in"
+          description: "Amsterdam Internal Networks Bridge"
+        - name: "stk_am_bd"
+          description: "Amsterdam Boundary Network Bridge"
+        - name: "stk_am_ex"
+          description: "Amsterdam External/DMZ Bridge"
+          cdxi_patch:
+            site_code: "am"
+            vlan_tag: 502
+
+# =============================================================================
+# Virtual Machine Specifications
+# =============================================================================
+# TODO: Populate VM definitions for each site.
+# Template references are resolved via roles/cdx_e/vars/main.yml
+# eth0/net0 is reserved for management (no configuration required)
+#
+# Bridge Reference:
+#   stk_hq_in - HQ Internal, stk_hq_bd - HQ Boundary, stk_hq_ex - HQ External
+#   stk_ml_in - Malibu Internal, stk_ml_bd - Malibu Boundary, stk_ml_ex - Malibu External
+#   stk_dl_in - Dallas Internal, stk_dl_bd - Dallas Boundary, stk_dl_ex - Dallas External
+#   stk_ng_in - Nagasaki Internal, stk_ng_bd - Nagasaki Boundary, stk_ng_ex - Nagasaki External
+#   stk_am_in - Amsterdam Internal, stk_am_bd - Amsterdam Boundary, stk_am_ex - Amsterdam External
+# =============================================================================
+virtual_machines: []

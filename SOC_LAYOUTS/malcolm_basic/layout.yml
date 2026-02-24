@@ -1,0 +1,53 @@
+---
+# =============================================================================
+# CDX-E SOC Layout: malcolm_basic
+# =============================================================================
+# Blue Team SOC infrastructure using Malcolm network traffic analysis platform.
+#
+# Stack:
+#   Malcolm server — Arkime + Zeek + Suricata + OpenSearch (Packer-baked template)
+#   Hedgehog sensor — CISA Hedgehog Linux; captures and forwards traffic to Malcolm
+#   OPNsense firewall — Perimeter visibility + traffic mirroring
+#   Kali Purple analyst workstation — Pre-configured for SOC investigations
+#
+# Designed for training exercises where Blue Team performs network-centric
+# detection and investigation using open-source tooling.
+# =============================================================================
+
+soc_layout:
+  name: "malcolm_basic"
+  description: >-
+    Basic SOC layout using CISA Malcolm for network traffic analysis. Includes
+    one Malcolm server, one Hedgehog Linux sensor, an OPNsense perimeter firewall,
+    and one Kali Purple analyst workstation.
+
+# -----------------------------------------------------------------------------
+# Malcolm Network Analysis Platform
+# -----------------------------------------------------------------------------
+malcolm:
+  vm: "SOC-MALCOLM-01"
+  web_port: 443
+  capture_interface: eth1            # Direct capture fallback (normally fed by Hedgehog)
+  sensor_network: "10.0.1.0/24"
+
+# Hedgehog Linux sensor
+sensors:
+  - vm: "SOC-HH-01"
+    capture_interface: eth1          # Interface connected to mirror/span port
+    malcolm_server: "SOC-MALCOLM-01"
+
+# -----------------------------------------------------------------------------
+# Perimeter Firewall
+# -----------------------------------------------------------------------------
+firewall:
+  vm: "SOC-FW-01"
+  management_ip: "10.0.1.1"
+  mirror_interface: em2              # OPNsense interface to mirror traffic to sensor
+  soc_network: "10.0.1.0/24"
+
+# -----------------------------------------------------------------------------
+# Analyst Workstations
+# -----------------------------------------------------------------------------
+analysts:
+  - vm: "SOC-WKS-01"
+    malcolm_url: "https://10.0.1.10"

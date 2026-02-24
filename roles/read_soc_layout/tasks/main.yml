@@ -1,0 +1,114 @@
+---
+# =============================================================================
+# Role: read_soc_layout
+# =============================================================================
+# Loads a SOC layout configuration from the SOC_LAYOUTS/ library and sets
+# cacheable facts for all subsequent plays in the run.
+#
+# Layout selection priority (highest to lowest):
+#   1. Runtime override: -e "layout=malcolm_basic"
+#   2. Scenario default: scenario.blue_team.layout
+#   3. Role default:     default_soc_layout (malcolm_basic)
+#
+# Facts set (all cacheable):
+#   soc_layout_name  — Layout directory name (e.g., "malcolm_basic")
+#   soc_layout_dir   — Absolute path to layout directory
+#   soc_layout       — Parsed layout.yml content
+#   soc_vms          — List of VM objects from layout vms.yaml
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Step 1 — Resolve layout name
+# ----------------------------------------------------------------------------
+- name: Resolve SOC layout name
+  ansible.builtin.set_fact:
+    _resolved_layout: >-
+      {{ layout
+         if (layout is defined and layout | length > 0)
+         else (scenario.blue_team.layout
+               if (scenario is defined and
+                   scenario.blue_team is defined and
+                   scenario.blue_team.layout is defined)
+               else default_soc_layout) }}
+
+- name: Display resolved layout
+  ansible.builtin.debug:
+    msg: "Loading SOC layout: {{ _resolved_layout }}"
+
+# ----------------------------------------------------------------------------
+# Step 2 — Validate layout directory exists
+# ----------------------------------------------------------------------------
+- name: Set SOC layout directory path
+  ansible.builtin.set_fact:
+    _layout_dir: "{{ soc_layouts_base_dir }}/{{ _resolved_layout }}"
+
+- name: Stat SOC layout directory
+  ansible.builtin.stat:
+    path: "{{ _layout_dir }}"
+  register: _layout_dir_stat
+
+- name: Assert SOC layout directory exists
+  ansible.builtin.assert:
+    that:
+      - _layout_dir_stat.stat.exists
+      - _layout_dir_stat.stat.isdir
+    fail_msg: >-
+      SOC layout directory not found: {{ _layout_dir }}
+      Available layouts: run 'ls {{ soc_layouts_base_dir }}'
+      Create a new layout by copying SOC_LAYOUTS/TEMPLATE/ to SOC_LAYOUTS/{{ _resolved_layout }}/
+
+# ----------------------------------------------------------------------------
+# Step 3 — Load SOC layout configuration
+# ----------------------------------------------------------------------------
+- name: Load SOC layout (layout.yml)
+  ansible.builtin.include_vars:
+    file: "{{ _layout_dir }}/layout.yml"
+    name: _layout_yaml
+
+- name: Assert layout.yml has required keys
+  ansible.builtin.assert:
+    that:
+      - _layout_yaml.soc_layout is defined
+      - _layout_yaml.soc_layout.name is defined
+    fail_msg: >-
+      SOC_LAYOUTS/{{ _resolved_layout }}/layout.yml is missing required keys.
+      Expected: soc_layout.name.
+      See SOC_LAYOUTS/TEMPLATE/layout.yml for the schema.
+
+# ----------------------------------------------------------------------------
+# Step 4 — Load SOC VM specification
+# ----------------------------------------------------------------------------
+- name: Load SOC VM specification (vms.yaml)
+  ansible.builtin.include_vars:
+    file: "{{ _layout_dir }}/vms.yaml"
+    name: _layout_vms_yaml
+
+- name: Assert layout vms.yaml has required keys
+  ansible.builtin.assert:
+    that:
+      - _layout_vms_yaml.virtual_machines is defined
+      - _layout_vms_yaml.virtual_machines | length > 0
+    fail_msg: >-
+      SOC_LAYOUTS/{{ _resolved_layout }}/vms.yaml is missing 'virtual_machines' or it is empty.
+
+# ----------------------------------------------------------------------------
+# Step 5 — Set cacheable facts
+# ----------------------------------------------------------------------------
+- name: Set cacheable SOC layout facts
+  ansible.builtin.set_fact:
+    soc_layout_name: "{{ _resolved_layout }}"
+    soc_layout_dir:  "{{ _layout_dir }}"
+    soc_layout:      "{{ _layout_yaml }}"
+    soc_vms:         "{{ _layout_vms_yaml.virtual_machines }}"
+  cacheable: true
+
+# ----------------------------------------------------------------------------
+# Step 6 — Display SOC layout summary
+# ----------------------------------------------------------------------------
+- name: Display SOC layout summary
+  ansible.builtin.debug:
+    msg:
+      - "Layout Name  : {{ _layout_yaml.soc_layout.name }}"
+      - "Description  : {{ _layout_yaml.soc_layout.description | default('N/A') }}"
+      - "VM count     : {{ _layout_vms_yaml.virtual_machines | length }}"
+      - "VM list      : {{ _layout_vms_yaml.virtual_machines | map(attribute='name') | join(', ') }}"

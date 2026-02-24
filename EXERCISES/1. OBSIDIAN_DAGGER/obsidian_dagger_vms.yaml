@@ -1,0 +1,770 @@
+# =============================================================================
+# OPERATION OBSIDIAN DAGGER - Multi-VM Deployment Specification
+# =============================================================================
+# CDX-E Framework VM Specification
+# Generated: 2026-02-07
+# Purpose: Corporate Network Infrastructure
+# Organization: Talokan (talokan.midgard.mrvl)
+# Domain Prefix: TL
+# =============================================================================
+
+exercise:
+  name: "OBSIDIAN_DAGGER"
+  description: "Corporate Network Training Environment"
+  classification: "mission_partner"
+
+ssh:
+  user: "root"
+  auth: "key"
+
+cloud_init_defaults:
+  username: "cdxadmin"
+  password: "IyTt+,uDhtR@.303"
+  ssh_public_key: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDSryHEGJrvRhhvzZtNkPY4amvSEZuG+296CoPdxiOQ88FWsmJYD29UB4i90MUd8v4GMVDCFrgmqQAD0zIR/uJPSzGvo0w1MNmIsV2ZH8UmmgLGVNmhRTtjsZxLNjk5nMBoGSoT9lcXzCVRXHGraU3fMEZX+kq1INbC3R5cmOMffAgJX6QiHmpmg92urUHs+frIL55tNJLE2sTBitOfe6/qG2XaBLt0XlvNYdco62i2w5RGbvSiWUzIh5EVzFX7SJ1eOKYfVoJDMTHI1PmJshbKht4EoEJJlsAfHvLChfHi70c+jEnygqEkmBLyS9IYQxEz3Kb3wvBhcVhUAPmHAS12Wu+wNUticpJS2HooyK7hWrwKFNJRKryPXGkq69T59MI5nWucy3XUR5lbAWzxT9mSGqc7ECQZmtkpC/dehKHyyB/sdY+KJnazF0uqJQ5TKbjOKZ/md0iLp1xKt2y0dBN4UouMju2S/tzkFYtErBYTry/qKxxbAHWNE0UH6UhBZ+8= vyos@CDX-GATEWAY"
+
+# =============================================================================
+# Network Topology
+# =============================================================================
+# Defines OVS bridges and CDX-I patch ports per Proxmox node.
+# Replaces per-host interfaces.<exercise> files and exercise.sh.
+#
+# Bridge types:
+#   - Internal (_in): Isolated site LAN, no CDX-I uplink
+#   - External (_ex): CDX-I uplink via OVS patch port + VLAN tag
+#
+# cdxi_patch fields:
+#   site_code  - Short identifier used in patch port names
+#                (patch-<site_code>-to-cdxi <-> patch-cdxi-to-<site_code>)
+#   vlan_tag   - CDX-I VLAN on the IXP/T2 segment for this site's SDP
+# =============================================================================
+network_topology:
+  common_bridges:
+    - name: "SOC"
+      description: "SOC Network Bridge"
+      nodes:
+        - "cdx-pve-03"
+
+  sites:
+    - name: "tl"
+      label: "Talokan"
+      node: "cdx-pve-03"
+      bridges:
+        - name: "tl_in"
+          description: "Talokan Internal Networks Bridge"
+        - name: "tl_ex"
+          description: "Talokan External/DMZ Bridge"
+          cdxi_patch:
+            site_code: "tl"
+            vlan_tag: 505
+
+# =============================================================================
+# Virtual Machine Specifications
+# =============================================================================
+# Template is now referenced by NAME (resolved via templates.yaml)
+# OS name is auto-populated from template registry
+# eth0/net0 is reserved for management (no configuration required)
+# =============================================================================
+#
+# Bridge Reference:
+#   tl_in   - Internal network, VLAN 140 (38.38.140.0/24)
+#   tl_ex   - External / upstream to EQIX-5 (38.38.136.0/21)
+#   SOC     - SOC Network
+#
+# Hardware Reference:
+#   Servers:      HPE ProLiant Gen9  (OUI: 94:57:A5)
+#   Workstations: HP EliteDesk       (OUI: D4:85:64)
+#
+# =============================================================================
+virtual_machines:
+
+  # ===========================================================================
+  # NETWORK INFRASTRUCTURE (VM ID 5001)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # VM 1: SDP-TL-1 - Service Delivery Point Router
+  # ---------------------------------------------------------------------------
+  - vmid: 5001
+    name: "SDP-TL-1"
+    role: "Service Delivery Point"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "vyos"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 2048
+      cores: 1
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          firewall: true
+        - nic_id: 2
+          model: "virtio"
+          bridge: "tl_ex"
+          firewall: true
+        - nic_id: 3
+          model: "virtio"
+          bridge: "SOC"
+          firewall: true
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ===========================================================================
+  # SERVERS - HPE ProLiant Gen9 (VM IDs 5002-5005)
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # VM 2: TL-DC-01 - Active Directory Domain Controller
+  # ---------------------------------------------------------------------------
+  - vmid: 5002
+    name: "TL-DC-01"
+    role: "Active Directory Domain Controller"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "server_2012r2"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "94:57:A5:4B:A1:20"
+
+    cloud_init:
+      ip: "38.38.140.20"
+      cidr: 24
+      gateway: "38.38.140.1"
+      nameserver: "127.0.0.1"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 3: TL-EX-01 - Microsoft Exchange Server
+  # ---------------------------------------------------------------------------
+  - vmid: 5003
+    name: "TL-EX-01"
+    role: "Microsoft Exchange Server"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "server_2012r2"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "94:57:A5:4B:B2:28"
+
+    cloud_init:
+      ip: "38.38.140.28"
+      cidr: 24
+      gateway: "38.38.140.1"
+      nameserver: "38.38.140.20"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 4: TL-FS-01 - File Server
+  # ---------------------------------------------------------------------------
+  - vmid: 5004
+    name: "TL-FS-01"
+    role: "File Server"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "server_2012r2"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "94:57:A5:4B:C3:38"
+
+    cloud_init:
+      ip: "38.38.140.38"
+      cidr: 24
+      gateway: "38.38.140.1"
+      nameserver: "38.38.140.20"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 5: TL-AS-01 - Application Server (DHCP)
+  # ---------------------------------------------------------------------------
+  - vmid: 5005
+    name: "TL-AS-01"
+    role: "Application Server (DHCP)"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "server_2012r2"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "94:57:A5:4B:D4:11"
+
+    cloud_init:
+      ip: "38.38.140.11"
+      cidr: 24
+      gateway: "38.38.140.1"
+      nameserver: "38.38.140.20"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ===========================================================================
+  # WORKSTATIONS - HP EliteDesk (VM IDs 5006-5018)
+  # Mix: 8x Windows 11, 5x Ubuntu 21.10
+  # All DHCP - no cloud_init IP configuration
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # VM 6: TL-WKS-MXL7340R1N - Windows 11 Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 5006
+    name: "TL-WKS-MXL7340R1N"
+    role: "Workstation"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "D4:85:64:A2:01:06"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 7: TL-WKS-MXL7340T3K - Windows 11 Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 5007
+    name: "TL-WKS-MXL7340T3K"
+    role: "Workstation"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "D4:85:64:A2:17:07"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 8: TL-WKS-MXL7340V5L - Windows 11 Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 5008
+    name: "TL-WKS-MXL7340V5L"
+    role: "Workstation"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "D4:85:64:A2:2B:08"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 9: TL-WKS-MXL7341A7D - Windows 11 Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 5009
+    name: "TL-WKS-MXL7341A7D"
+    role: "Workstation"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "D4:85:64:A2:3F:09"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 10: TL-WKS-MXL7341D9H - Windows 11 Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 5010
+    name: "TL-WKS-MXL7341D9H"
+    role: "Workstation"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "D4:85:64:A2:53:10"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 11: TL-WKS-MXL7341G2J - Windows 11 Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 5011
+    name: "TL-WKS-MXL7341G2J"
+    role: "Workstation"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "D4:85:64:A2:67:11"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 12: TL-WKS-MXL7341K4N - Windows 11 Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 5012
+    name: "TL-WKS-MXL7341K4N"
+    role: "Workstation"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "D4:85:64:A2:7B:12"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 13: TL-WKS-MXL7341N6Q - Windows 11 Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 5013
+    name: "TL-WKS-MXL7341N6Q"
+    role: "Workstation"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "windows_11"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "D4:85:64:A2:8F:13"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 14: TL-WKS-MXL7342B8W - Ubuntu 21.10 Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 5014
+    name: "TL-WKS-MXL7342B8W"
+    role: "Workstation"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "ubuntu_2110"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "D4:85:64:A2:A3:14"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 15: TL-WKS-MXL7342F1Y - Ubuntu 21.10 Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 5015
+    name: "TL-WKS-MXL7342F1Y"
+    role: "Workstation"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "ubuntu_2110"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "D4:85:64:A2:B7:15"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 16: TL-WKS-MXL7342J3C - Ubuntu 21.10 Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 5016
+    name: "TL-WKS-MXL7342J3C"
+    role: "Workstation"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "ubuntu_2110"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "D4:85:64:A2:CB:16"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 17: TL-WKS-MXL7342M5F - Ubuntu 21.10 Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 5017
+    name: "TL-WKS-MXL7342M5F"
+    role: "Workstation"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "ubuntu_2110"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "D4:85:64:A2:DF:17"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"
+
+  # ---------------------------------------------------------------------------
+  # VM 18: TL-WKS-MXL7342Q7H - Ubuntu 21.10 Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 5018
+    name: "TL-WKS-MXL7342Q7H"
+    role: "Workstation"
+    site: "Talokan"
+    organization: "Talokan"
+
+    template: "ubuntu_2110"
+
+    clone:
+      type: "linked"
+      start_after_clone: true
+
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+
+    network:
+      preserve_net0: true
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "tl_in"
+          tag: 140
+          firewall: true
+          mac: "D4:85:64:A2:F3:18"
+
+    proxmox:
+      node: "cdx-pve-03"
+      pool: "EX_OBSIDIAN_DAGGER"
+      tags:
+        - "mpnet"

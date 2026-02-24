@@ -1,0 +1,438 @@
+---
+# =============================================================================
+# Role: deploy_group_policy_objects
+# =============================================================================
+# Creates Group Policy Objects, applies registry-based settings, links GPOs
+# to OUs, applies security filtering, and stages branding images to NETLOGON.
+#
+# Supported gpo.json schema versions:
+#   v1.0 — links embedded in each GPO object as a plain OU-path array.
+#   v2.0 — top-level "links" array with enforced/enabled/linkOrder metadata;
+#           optional "securityGroups" and "imageFiles" sections.
+#   Both versions: "settings.computer" and "settings.user" registry arrays.
+#   "backupPath" import (GPO backup import via Import-GPO) is not yet
+#   implemented; set backupPath to null for programmatic GPOs.
+#
+# Registry value placement is determined automatically from the key hive:
+#   HKLM\* → Computer Configuration policy
+#   HKCU\* → User Configuration policy
+#
+# __DOMAIN__ placeholder in any setting value is replaced at runtime with
+# the domain FQDN from Get-ADDomain.
+#
+# All population tasks use run_once: true — with serial: 1 in the playbook,
+# only DC-01 executes them; AD replication propagates the result.
+#
+# Called from:
+#   playbooks/domain_management.yml → ansible_group: domain_controllers
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Section 1 — Preflight
+# ----------------------------------------------------------------------------
+- name: Assert required facts are defined
+  ansible.builtin.assert:
+    that:
+      - scenario is defined
+      - scenario.domain.name is defined
+      - exercise_dir is defined
+    fail_msg: >-
+      deploy_group_policy_objects requires scenario.domain.name and exercise_dir.
+      Ensure the read_exercise_config pre-play in domain_management.yml has run.
+
+- name: Check gpo.json exists on controller
+  ansible.builtin.stat:
+    path: "{{ exercise_dir }}/gpo.json"
+  register: _gpo_json_stat
+  delegate_to: localhost
+  run_once: true
+
+- name: Fail if gpo.json is missing
+  ansible.builtin.fail:
+    msg: >-
+      gpo.json not found at {{ exercise_dir }}/gpo.json.
+      Create the file from EXERCISES/TEMPLATE/gpo.json before running.
+  when: not _gpo_json_stat.stat.exists
+  run_once: true
+
+# ----------------------------------------------------------------------------
+# Section 2 — Stage files on DC-01
+# ----------------------------------------------------------------------------
+- name: Create GPO staging directory on DC
+  ansible.windows.win_file:
+    path: "{{ gpo_temp_path }}"
+    state: directory
+  run_once: true
+
+- name: Stage gpo.json on DC
+  ansible.windows.win_copy:
+    src: "{{ exercise_dir }}/gpo.json"
+    dest: "{{ gpo_temp_path }}\\gpo.json"
+  run_once: true
+
+- name: Check for Domain Files directory on controller
+  ansible.builtin.stat:
+    path: "{{ exercise_dir }}/Domain Files"
+  register: _domain_files_stat
+  delegate_to: localhost
+  run_once: true
+
+- name: Stage Domain Files images on DC
+  ansible.windows.win_copy:
+    src: "{{ exercise_dir }}/Domain Files/"
+    dest: "{{ gpo_temp_path }}\\images\\"
+  when: _domain_files_stat.stat.exists | default(false)
+  run_once: true
+
+# ----------------------------------------------------------------------------
+# Section 3 — GPO-specific security groups
+# Creates any additional security groups defined in gpo.json "securityGroups".
+# These are separate from users.json groups and support GPO security filtering.
+# ----------------------------------------------------------------------------
+- name: Create GPO security groups
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Import-Module ActiveDirectory
+
+    $gpoJson = (Get-Content '{{ gpo_temp_path }}\gpo.json' -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
+    $gpoData = $gpoJson | ConvertFrom-Json
+    $changes = @()
+
+    if (-not $gpoData.securityGroups) {
+        Write-Output "OK: No GPO security groups defined"
+        exit 0
+    }
+
+    $domainDN = (Get-ADDomain).DistinguishedName
+
+    foreach ($group in $gpoData.securityGroups) {
+        if (-not $group.sAMAccountName) { continue }
+
+        $existing = Get-ADGroup -Filter { SamAccountName -eq $group.sAMAccountName } -ErrorAction SilentlyContinue
+        if (-not $existing) {
+            $ouDN = "$($group.ou),$domainDN"
+            $scope    = if ($group.scope)    { $group.scope }    else { 'Global' }
+            $category = if ($group.category) { $group.category } else { 'Security' }
+            $desc     = if ($group.description) { $group.description } else { '' }
+
+            New-ADGroup -Name $group.name `
+                -SamAccountName $group.sAMAccountName `
+                -Description $desc `
+                -GroupScope $scope `
+                -GroupCategory $category `
+                -Path $ouDN `
+                -ErrorAction Stop
+            $changes += "CHANGED: Created security group '$($group.sAMAccountName)'"
+        }
+    }
+
+    if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
+    else { Write-Output "OK: No GPO security group changes required" }
+  register: _gpo_groups_result
+  run_once: true
+  changed_when: "'CHANGED:' in (_gpo_groups_result.stdout | default(''))"
+
+- name: Display GPO security groups result
+  ansible.builtin.debug:
+    msg: "{{ _gpo_groups_result.stdout_lines }}"
+  run_once: true
+
+# ----------------------------------------------------------------------------
+# Section 4 — Create GPOs and apply registry settings
+# ----------------------------------------------------------------------------
+- name: Create GPOs and apply registry settings
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Import-Module GroupPolicy
+
+    $gpoJson = (Get-Content '{{ gpo_temp_path }}\gpo.json' -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
+    $gpoData = $gpoJson | ConvertFrom-Json
+    $changes = @()
+
+    foreach ($gpo in $gpoData.gpos) {
+        if (-not $gpo.name) { continue }
+
+        # ── Create GPO if absent ──────────────────────────────────────────────
+        $existing = Get-GPO -Name $gpo.name -ErrorAction SilentlyContinue
+        if (-not $existing) {
+            $comment = if ($gpo.description) { $gpo.description } else { '' }
+            $null = New-GPO -Name $gpo.name -Comment $comment -ErrorAction Stop
+            $changes += "CHANGED: Created GPO '$($gpo.name)'"
+        }
+
+        # ── backupPath import is not implemented (must be null) ───────────────
+        if ($gpo.backupPath) {
+            Write-Warning "GPO '$($gpo.name)': backupPath import is not implemented — skipping."
+        }
+
+        # ── Registry settings — Computer and User configurations ──────────────
+        $allSettings = @()
+        if ($gpo.settings -and $gpo.settings.computer) {
+            $allSettings += $gpo.settings.computer
+        }
+        if ($gpo.settings -and $gpo.settings.user) {
+            $allSettings += $gpo.settings.user
+        }
+
+        foreach ($reg in $allSettings) {
+            if (-not $reg.key -or -not $reg.valueName) { continue }
+
+            # Determine registry type (default: String if not specified)
+            $regType = if ($reg.type) { $reg.type } else { 'String' }
+
+            # Convert value to the right type for DWord/QWord
+            $regValue = $reg.value
+            if ($regType -in @('DWord', 'QWord')) {
+                $regValue = [int64]$reg.value
+            }
+
+            try {
+                Set-GPRegistryValue -Name $gpo.name `
+                    -Key $reg.key `
+                    -ValueName $reg.valueName `
+                    -Value $regValue `
+                    -Type $regType `
+                    -ErrorAction Stop | Out-Null
+            } catch {
+                Write-Warning "Set-GPRegistryValue failed on '$($gpo.name)' [$($reg.key)\$($reg.valueName)]: $_"
+            }
+        }
+    }
+
+    if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
+    else { Write-Output "OK: No GPO creation changes required" }
+  register: _gpo_create_result
+  run_once: true
+  changed_when: "'CHANGED:' in (_gpo_create_result.stdout | default(''))"
+
+- name: Display GPO creation result
+  ansible.builtin.debug:
+    msg: "{{ _gpo_create_result.stdout_lines }}"
+  run_once: true
+
+# ----------------------------------------------------------------------------
+# Section 5 — Link GPOs to OUs
+# Handles both schema versions:
+#   v1.0 — links array embedded in each GPO object (plain OU path strings)
+#   v2.0 — top-level "links" array with enforced/enabled/linkOrder metadata
+# ----------------------------------------------------------------------------
+- name: Link GPOs to OUs
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Import-Module ActiveDirectory
+    Import-Module GroupPolicy
+
+    $gpoJson = (Get-Content '{{ gpo_temp_path }}\gpo.json' -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
+    $gpoData = $gpoJson | ConvertFrom-Json
+    $domainDN = (Get-ADDomain).DistinguishedName
+    $changes  = @()
+
+    # ── Normalise link list from either schema version ────────────────────────
+    if ($gpoData.links) {
+        # v2.0: top-level links array
+        $allLinks = $gpoData.links
+    } else {
+        # v1.0: links embedded in each GPO as plain OU path strings
+        $allLinks = [System.Collections.Generic.List[PSObject]]::new()
+        foreach ($gpo in $gpoData.gpos) {
+            if (-not $gpo.name -or -not $gpo.links) { continue }
+            foreach ($ouPath in $gpo.links) {
+                $allLinks.Add([PSCustomObject]@{
+                    gpoName   = $gpo.name
+                    targetOu  = $ouPath
+                    enforced  = $false
+                    enabled   = $true
+                    linkOrder = 1
+                })
+            }
+        }
+    }
+
+    # ── Apply links ───────────────────────────────────────────────────────────
+    foreach ($link in $allLinks) {
+        $gpoName  = $link.gpoName
+        $ouDN     = "$($link.targetOu),$domainDN"
+        $enforced = if ($link.enforced) { 'Yes' } else { 'No' }
+        $enabled  = if ($null -eq $link.enabled -or $link.enabled) { 'Yes' } else { 'No' }
+        $order    = if ($link.linkOrder) { [int]$link.linkOrder } else { 1 }
+
+        # Verify the target OU exists before linking
+        $ouExists = Get-ADOrganizationalUnit -Filter { DistinguishedName -eq $ouDN } -ErrorAction SilentlyContinue
+        if (-not $ouExists) {
+            Write-Warning "Target OU '$ouDN' not found — skipping link for GPO '$gpoName'"
+            continue
+        }
+
+        # Check if this GPO is already linked to the target OU
+        $existingLinks = (Get-GPInheritance -Target $ouDN -ErrorAction SilentlyContinue).GpoLinks
+        $alreadyLinked = $existingLinks | Where-Object { $_.DisplayName -eq $gpoName }
+
+        if (-not $alreadyLinked) {
+            New-GPLink -Name $gpoName -Target $ouDN `
+                -Enforced $enforced `
+                -LinkEnabled $enabled `
+                -Order $order `
+                -ErrorAction Stop | Out-Null
+            $changes += "CHANGED: Linked '$gpoName' → '$($link.targetOu)'"
+        } else {
+            # Update enforcement/enabled state on existing link
+            Set-GPLink -Name $gpoName -Target $ouDN `
+                -Enforced $enforced `
+                -LinkEnabled $enabled `
+                -ErrorAction Stop | Out-Null
+        }
+    }
+
+    if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
+    else { Write-Output "OK: No GPO link changes required" }
+  register: _gpo_links_result
+  run_once: true
+  changed_when: "'CHANGED:' in (_gpo_links_result.stdout | default(''))"
+
+- name: Display GPO links result
+  ansible.builtin.debug:
+    msg: "{{ _gpo_links_result.stdout_lines }}"
+  run_once: true
+
+# ----------------------------------------------------------------------------
+# Section 6 — Security filtering
+# Applies per-GPO security filtering: removes Authenticated Users and adds
+# a specific computer or group so the GPO applies only to that target.
+# Only GPOs with a "securityFiltering" object are processed.
+# ----------------------------------------------------------------------------
+- name: Apply GPO security filtering
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Import-Module GroupPolicy
+
+    $gpoJson = (Get-Content '{{ gpo_temp_path }}\gpo.json' -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
+    $gpoData = $gpoJson | ConvertFrom-Json
+    $changes = @()
+
+    foreach ($gpo in $gpoData.gpos) {
+        if (-not $gpo.name -or -not $gpo.securityFiltering) { continue }
+
+        $sf         = $gpo.securityFiltering
+        $targetName = $sf.target
+        $targetType = if ($sf.type) { $sf.type } else { 'Group' }
+
+        # Capitalise first letter to match enum (Computer, Group, User)
+        $targetType = $targetType.Substring(0,1).ToUpper() + $targetType.Substring(1).ToLower()
+
+        # Add the specified target with GpoApply permission
+        try {
+            Set-GPPermissions -Name $gpo.name `
+                -TargetName $targetName `
+                -TargetType $targetType `
+                -PermissionLevel GpoApply `
+                -ErrorAction Stop | Out-Null
+            $changes += "CHANGED: Granted GpoApply to '$targetName' ($targetType) on '$($gpo.name)'"
+        } catch {
+            Write-Warning "Set-GPPermissions (add $targetName) failed on '$($gpo.name)': $_"
+        }
+
+        # Optionally remove Authenticated Users (scopes GPO to target only)
+        if ($sf.removeAuthenticatedUsers) {
+            try {
+                Set-GPPermissions -Name $gpo.name `
+                    -TargetName 'Authenticated Users' `
+                    -TargetType Group `
+                    -PermissionLevel None `
+                    -ErrorAction Stop | Out-Null
+                $changes += "CHANGED: Removed 'Authenticated Users' from '$($gpo.name)'"
+            } catch {
+                Write-Warning "Set-GPPermissions (remove Authenticated Users) failed on '$($gpo.name)': $_"
+            }
+        }
+    }
+
+    if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
+    else { Write-Output "OK: No security filtering changes required" }
+  register: _gpo_filter_result
+  run_once: true
+  changed_when: "'CHANGED:' in (_gpo_filter_result.stdout | default(''))"
+
+- name: Display security filtering result
+  ansible.builtin.debug:
+    msg: "{{ _gpo_filter_result.stdout_lines }}"
+  run_once: true
+
+# ----------------------------------------------------------------------------
+# Section 7 — Stage branding images to NETLOGON\Images
+# Only runs when a Domain Files directory was found on the controller and
+# gpo.json contains an "imageFiles" section listing required filenames.
+# ----------------------------------------------------------------------------
+- name: Stage branding images to NETLOGON
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Import-Module GroupPolicy
+
+    $gpoJson = (Get-Content '{{ gpo_temp_path }}\gpo.json' -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
+    $gpoData = $gpoJson | ConvertFrom-Json
+    $changes = @()
+
+    if (-not $gpoData.imageFiles -or -not $gpoData.imageFiles.files) {
+        Write-Output "OK: No imageFiles section in gpo.json — skipping image staging"
+        exit 0
+    }
+
+    $domainFQDN  = (Get-ADDomain).DNSRoot
+    $netlogonUNC = "\\$domainFQDN\NETLOGON"
+    $imagesUNC   = "$netlogonUNC\Images"
+    $stagingPath = '{{ gpo_temp_path }}\images'
+
+    # Create Images subdirectory under NETLOGON if it doesn't exist
+    if (-not (Test-Path $imagesUNC)) {
+        New-Item -ItemType Directory -Path $imagesUNC -Force | Out-Null
+        $changes += "CHANGED: Created NETLOGON\Images directory"
+    }
+
+    foreach ($imgDef in $gpoData.imageFiles.files) {
+        $filename = $imgDef.filename
+        $src      = Join-Path $stagingPath $filename
+        $dest     = Join-Path $imagesUNC   $filename
+
+        if (-not (Test-Path $src)) {
+            Write-Warning "Source image not found: $src — skipping"
+            continue
+        }
+
+        if (-not (Test-Path $dest)) {
+            Copy-Item -Path $src -Destination $dest -Force -ErrorAction Stop
+            $changes += "CHANGED: Copied '$filename' to NETLOGON\Images"
+        }
+    }
+
+    if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
+    else { Write-Output "OK: All branding images already present in NETLOGON\Images" }
+  register: _gpo_images_result
+  run_once: true
+  when: _domain_files_stat.stat.exists | default(false)
+  changed_when: "'CHANGED:' in (_gpo_images_result.stdout | default(''))"
+
+- name: Display image staging result
+  ansible.builtin.debug:
+    msg: "{{ _gpo_images_result.stdout_lines | default(['skipped — no Domain Files directory']) }}"
+  run_once: true
+
+# ----------------------------------------------------------------------------
+# Section 8 — Cleanup staging directory
+# ----------------------------------------------------------------------------
+- name: Remove GPO staging directory from DC
+  ansible.windows.win_file:
+    path: "{{ gpo_temp_path }}"
+    state: absent
+  run_once: true
+
+# ----------------------------------------------------------------------------
+# Section 9 — Summary
+# ----------------------------------------------------------------------------
+- name: deploy_group_policy_objects summary
+  ansible.builtin.debug:
+    msg: >-
+      deploy_group_policy_objects complete for {{ inventory_hostname }}.
+      groups={{ _gpo_groups_result.changed | default(false) }} |
+      gpos={{ _gpo_create_result.changed | default(false) }} |
+      links={{ _gpo_links_result.changed | default(false) }} |
+      filtering={{ _gpo_filter_result.changed | default(false) }} |
+      images={{ _gpo_images_result.changed | default(false) }}

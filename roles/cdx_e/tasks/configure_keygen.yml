@@ -1,0 +1,44 @@
+---
+# =============================================================================
+# Configure Phase 1: SSH Key Generation
+# =============================================================================
+# Generates an ed25519 keypair for controller -> VM authentication.
+# Idempotent: skips generation if key already exists (unless force regen).
+#
+# Expected variables:
+#   exercise_ssh_key_dir   - Directory path for SSH keys
+#   exercise_ssh_key_path  - Private key path
+#   _cdx_configure_force_keygen - Force regenerate (from deploy chain)
+# =============================================================================
+
+- name: "KEYGEN - Ensure SSH key directory exists"
+  file:
+    path: "{{ exercise_ssh_key_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: "KEYGEN - Remove existing keypair (force regenerate)"
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ exercise_ssh_key_path }}"
+    - "{{ exercise_ssh_key_path }}.pub"
+  when: _cdx_configure_force_keygen | default(false) | bool
+
+- name: "KEYGEN - Generate ed25519 keypair"
+  command: >
+    ssh-keygen -t ed25519
+    -f {{ exercise_ssh_key_path }}
+    -N ""
+    -C "cdx-{{ exercise_name_lower }}@controller"
+  args:
+    creates: "{{ exercise_ssh_key_path }}"
+
+- name: "KEYGEN - Load public key"
+  set_fact:
+    controller_public_key: "{{ lookup('file', exercise_ssh_key_path ~ '.pub') }}"
+
+- name: "KEYGEN - Key ready"
+  debug:
+    msg: "SSH key: {{ exercise_ssh_key_path }} ({{ controller_public_key[:40] }}...)"

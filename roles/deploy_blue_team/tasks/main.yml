@@ -1,0 +1,149 @@
+---
+# =============================================================================
+# Role: deploy_blue_team
+# =============================================================================
+# Deploys Blue Team / SOC VMs to Proxmox via Terraform (bpg/proxmox provider).
+# VM list comes from soc_vms (set by read_soc_layout) — NOT from exercise vms.yaml.
+# Uses a separate Terraform state from the scenario and red_team deployments.
+#
+# Expects facts set by read_exercise_config and read_soc_layout:
+#   soc_vms          — list of VM objects from SOC_LAYOUTS/<layout>/vms.yaml
+#   soc_layout_name  — SOC layout name (e.g., "malcolm_basic")
+#   scenario         — parsed scenario.yml
+#   exercise_dir     — path to EXERCISES/<name>/
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight
+# ----------------------------------------------------------------------------
+- name: Assert required facts are present
+  ansible.builtin.assert:
+    that:
+      - soc_vms is defined
+      - soc_layout_name is defined
+      - scenario is defined
+      - exercise_dir is defined
+    fail_msg: >-
+      Required facts not found. Ensure read_exercise_config and read_soc_layout
+      run before deploy_blue_team. Check blue_team_deployment.yml pre-plays.
+
+- name: Check Terraform is available
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} version"
+  register: _tf_version
+  failed_when: _tf_version.rc != 0
+  changed_when: false
+
+# ----------------------------------------------------------------------------
+# Build VM list from SOC layout
+# ----------------------------------------------------------------------------
+- name: Build Blue Team VM list from SOC layout
+  ansible.builtin.set_fact:
+    _tf_vms: "{{ soc_vms }}"
+
+- name: Assert at least one Blue Team VM is defined in SOC layout
+  ansible.builtin.assert:
+    that: _tf_vms | length > 0
+    fail_msg: >-
+      No VMs found in SOC layout '{{ soc_layout_name }}'.
+      Check SOC_LAYOUTS/{{ soc_layout_name }}/vms.yaml — virtual_machines must not be empty.
+
+- name: Assert all Blue Team VMs have Proxmox template IDs
+  ansible.builtin.assert:
+    that:
+      - template_registry[item.template] is defined
+      - template_registry[item.template].id is not none
+    fail_msg: >-
+      VM '{{ item.name }}' uses template '{{ item.template }}' which has no
+      Proxmox VMID in template_registry. Build the template first.
+  loop: "{{ _tf_vms }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.template }})"
+
+# ----------------------------------------------------------------------------
+# Resource pool — ensure it exists (may already be created by deploy_scenario)
+# ----------------------------------------------------------------------------
+- name: Ensure exercise resource pool exists
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/pools"
+    method: POST
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    body_format: form-urlencoded
+    body:
+      poolid: "EX_{{ scenario.exercise.name }}"
+      comment: "Operation {{ scenario.exercise.name | replace('_', ' ') | title }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 400, 500]   # 400/500 = pool already exists, continue
+
+# ----------------------------------------------------------------------------
+# Generate Terraform configuration
+# ----------------------------------------------------------------------------
+- name: Ensure Blue Team Terraform directory exists
+  ansible.builtin.file:
+    path: "{{ exercise_dir }}/terraform_blue_team"
+    state: directory
+    mode: '0755'
+
+- name: Template providers.tf
+  ansible.builtin.template:
+    src: providers.tf.j2
+    dest: "{{ exercise_dir }}/terraform_blue_team/providers.tf"
+    mode: '0644'
+
+- name: Template main.tf
+  ansible.builtin.template:
+    src: main.tf.j2
+    dest: "{{ exercise_dir }}/terraform_blue_team/main.tf"
+    mode: '0644'
+
+- name: Template outputs.tf
+  ansible.builtin.template:
+    src: outputs.tf.j2
+    dest: "{{ exercise_dir }}/terraform_blue_team/outputs.tf"
+    mode: '0644'
+
+# ----------------------------------------------------------------------------
+# Terraform init
+# ----------------------------------------------------------------------------
+- name: Terraform init
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} init -input=false -upgrade"
+    chdir: "{{ exercise_dir }}/terraform_blue_team"
+  register: _tf_init
+  changed_when: >-
+    'Downloading' in _tf_init.stdout or
+    'Installing' in _tf_init.stdout
+
+- name: Show Terraform init output
+  ansible.builtin.debug:
+    msg: "{{ _tf_init.stdout_lines }}"
+
+# ----------------------------------------------------------------------------
+# Terraform apply
+# ----------------------------------------------------------------------------
+- name: Terraform apply
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} apply -auto-approve -input=false"
+    chdir: "{{ exercise_dir }}/terraform_blue_team"
+  register: _tf_apply
+  changed_when: >-
+    'Apply complete!' in _tf_apply.stdout and
+    '0 added, 0 changed, 0 destroyed' not in _tf_apply.stdout
+
+- name: Show Terraform apply output
+  ansible.builtin.debug:
+    msg: "{{ _tf_apply.stdout_lines }}"
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+- name: Blue Team VM deployment summary
+  ansible.builtin.debug:
+    msg: |
+      Blue Team VM deployment complete.
+      Exercise  : {{ scenario.exercise.name }}
+      Layout    : {{ soc_layout_name }}
+      VMs       : {{ _tf_vms | length }}
+      VM list   : {{ _tf_vms | map(attribute='name') | join(', ') }}
+      State     : {{ exercise_dir }}/terraform_blue_team/terraform.tfstate

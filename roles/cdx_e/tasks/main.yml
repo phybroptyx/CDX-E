@@ -1,0 +1,10 @@
+---
+# =============================================================================
+# CDX-E Role Entry Point
+# =============================================================================
+
+- name: Load exercise specification
+  include_tasks: load_exercise.yml
+
+- name: "Execute action: {{ cdx_action }}"
+  include_tasks: "{{ cdx_action }}.yml"

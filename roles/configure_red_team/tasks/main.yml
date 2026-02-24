@@ -1,0 +1,92 @@
+---
+# =============================================================================
+# Role: configure_red_team
+# =============================================================================
+# Configures Red Team / APT infrastructure on deployed VMs.
+# Runs AFTER deploy_red_team (Terraform) and vm_power_management (power-on).
+#
+# Expects facts (set by read_apt_config pre-play + hostvars import):
+#   apt_config  — parsed apt.yml content (apt identity, c2_platforms, etc.)
+#   apt_name    — APT profile name
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight
+# ----------------------------------------------------------------------------
+- name: Assert APT configuration facts are present
+  ansible.builtin.assert:
+    that:
+      - apt_config is defined
+      - apt_name is defined
+    fail_msg: >-
+      apt_config and apt_name facts are not defined.
+      Ensure read_apt_config runs in a pre-play before configure_red_team.
+  run_once: true
+
+- name: Display APT configuration summary
+  ansible.builtin.debug:
+    msg:
+      - "APT Profile : {{ apt_name }}"
+      - "C2 platforms: {{ apt_config.c2_platforms | map(attribute='name') | join(', ') }}"
+  run_once: true
+
+# ----------------------------------------------------------------------------
+# C2 Platform Configuration
+# ----------------------------------------------------------------------------
+# Iterate over defined C2 platforms. For each platform, tasks run only on
+# the designated C2 VM (identified by apt_config.c2_platforms[].vm).
+# ----------------------------------------------------------------------------
+- name: Configure C2 platforms
+  ansible.builtin.include_tasks: configure_c2.yml
+  loop: "{{ apt_config.c2_platforms }}"
+  loop_control:
+    loop_var: c2_platform
+    label: "{{ c2_platform.name }} on {{ c2_platform.vm }}"
+  when: inventory_hostname == c2_platform.vm
+
+# ----------------------------------------------------------------------------
+# Operator Workstation Configuration
+# ----------------------------------------------------------------------------
+# Runs on all VMs listed in apt_config.operator_vms.
+# Installs additional operator tooling and configures C2 client connections.
+# ----------------------------------------------------------------------------
+- name: Configure operator workstation tools
+  block:
+
+    - name: Install additional operator packages
+      ansible.builtin.apt:
+        name: "{{ redteam_operator_packages }}"
+        state: present
+        update_cache: true
+      when: ansible_os_family == "Debian"
+
+    - name: Create Red Team toolkit directory
+      ansible.builtin.file:
+        path: "{{ redteam_toolkit_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Stage APT toolkit files (if defined)
+      ansible.builtin.copy:
+        src: "{{ apt_config.toolkit.src_dir }}/"
+        dest: "{{ apt_config.toolkit.dest_dir | default(redteam_toolkit_dir) }}/"
+        owner: root
+        group: root
+        mode: '0750'
+      when:
+        - apt_config.toolkit is defined
+        - apt_config.toolkit.src_dir is defined
+
+  when: inventory_hostname in (apt_config.operator_vms | default([]))
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+- name: Red Team configuration summary
+  ansible.builtin.debug:
+    msg: |
+      Red Team configuration complete on {{ inventory_hostname }}.
+      APT profile : {{ apt_name }}
+  run_once: true

@@ -1,0 +1,62 @@
+---
+# =============================================================================
+# Action: Status
+# Queries current state of all exercise VMs from the Proxmox cluster
+# =============================================================================
+
+- name: "Query VM status from cluster"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/cluster/resources?type=vm"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+  register: _cluster_vms
+
+- name: "Build status table"
+  set_fact:
+    _vm_status_list: >-
+      {{
+        all_vms
+        | selectattr('vmid', 'in', _cluster_vms.json.data | map(attribute='vmid') | list)
+        | list
+      }}
+    _cluster_vm_lookup: >-
+      {{
+        dict(
+          _cluster_vms.json.data
+          | map(attribute='vmid')
+          | map('string')
+          | zip(_cluster_vms.json.data)
+        )
+      }}
+
+- name: "VM Status - {{ exercise_name }}"
+  debug:
+    msg: >-
+      {{ vm.vmid }} | {{ vm.name | truncate(25, true, '..') }}
+      | {{ _cluster_vm_lookup[vm.vmid | string].status | default('NOT FOUND') | upper }}
+      | {{ _cluster_vm_lookup[vm.vmid | string].node | default('-') }}
+      | CPU: {{ _cluster_vm_lookup[vm.vmid | string].maxcpu | default('-') }}
+      | MEM: {{ ((_cluster_vm_lookup[vm.vmid | string].maxmem | default(0)) / 1048576) | int }}MB
+  loop: "{{ all_vms }}"
+  loop_control:
+    loop_var: vm
+    label: "{{ vm.vmid }}"
+  when: >-
+    cdx_vm_filter == 'all' or
+    (vm.vmid | string) in vm_filter_list or
+    vm.name in vm_filter_list
+
+- name: "STATUS SUMMARY"
+  vars:
+    _running: "{{ all_vms | map(attribute='vmid') | map('string') | select('in', _cluster_vm_lookup.keys() | list) | map('extract', _cluster_vm_lookup) | selectattr('status', 'equalto', 'running') | list | length }}"
+    _stopped: "{{ all_vms | map(attribute='vmid') | map('string') | select('in', _cluster_vm_lookup.keys() | list) | map('extract', _cluster_vm_lookup) | selectattr('status', 'equalto', 'stopped') | list | length }}"
+    _total: "{{ all_vms | length }}"
+    _missing: "{{ (all_vms | length) - (all_vms | map(attribute='vmid') | map('string') | select('in', _cluster_vm_lookup.keys() | list) | list | length) }}"
+  debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════════════
+        STATUS - {{ exercise_name }}
+        Total: {{ _total }} | Running: {{ _running }} | Stopped: {{ _stopped }} | Missing: {{ _missing }}
+      ═══════════════════════════════════════════════════════════════════════

@@ -1,0 +1,10 @@
+---
+# All feature set definitions live in inventory/group_vars/all.yml
+# → windows_feature_sets  (keyed by ansible_group)
+
+# Include RSAT management tools when installing features.
+# Set false on servers where GUI management tools are not desired.
+windowsfeature_include_mgmt_tools: true
+
+# Install sub-features of each requested feature.
+windowsfeature_include_sub_features: true

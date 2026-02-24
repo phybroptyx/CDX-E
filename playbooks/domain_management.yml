@@ -1,0 +1,79 @@
+---
+# =============================================================================
+# CDX-E Playbook: Domain Management
+# =============================================================================
+# Purpose: Configure the first domain controller, deploy the Active Directory
+#          domain (DC promotion, Sites and Services, AD population), and
+#          promote additional domain controllers as required by the scenario.
+#          serial: 1 ensures DCs are promoted one at a time to prevent
+#          replication conflicts.
+#
+# Roles:
+#   - configure_vm           — hostname, timezone, WinRM, PS policy
+#   - install_windowsfeature — AD-Domain-Services, DNS, GPMC, RSAT-AD-*
+#   - configure_active_directory — promotion + AD structure population
+#   - deploy_group_policy_objects
+#
+# Usage:
+#   ansible-playbook playbooks/domain_management.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@Secrets/credentials.yml" --ask-vault-pass
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration on the Ansible controller
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Main play: domain controller configuration
+# ----------------------------------------------------------------------------
+- name: Domain Management
+  hosts: domain_controllers
+  gather_facts: false
+  tags: [domain, active_directory]
+  serial: 1  # One DC at a time — prevents replication conflicts during promotion
+
+  vars_files:
+    - "{{ playbook_dir }}/Secrets/credentials.yml"
+
+  pre_tasks:
+    # Import exercise facts from controller (read_exercise_config ran on localhost)
+    - name: Import exercise facts from controller
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — domain phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.domain | default(true) | bool)
+
+    - name: "[preflight] Assert domain_controllers group is populated"
+      ansible.builtin.assert:
+        that: groups['domain_controllers'] | default([]) | length > 0
+        fail_msg: >-
+          domain_controllers group is empty. Check inventory_refresh output
+          and ensure vms.yaml has VMs with ansible_group: domain_controllers.
+
+    - name: "[preflight] Assert domain configuration is defined"
+      ansible.builtin.assert:
+        that:
+          - scenario.domain.name is defined
+          - scenario.domain.netbios is defined
+          - scenario.domain.admin_password is defined
+        fail_msg: >-
+          scenario.domain.{name,netbios,admin_password} must all be defined
+          in scenario.yml for domain_management.yml to run.
+
+  roles:
+    - configure_vm
+    - install_windowsfeature
+    - configure_active_directory
+    - deploy_group_policy_objects

@@ -1,0 +1,76 @@
+---
+# =============================================================================
+# CDX-E Playbook: Microsoft Exchange Server Management
+# =============================================================================
+# Purpose: Install and manage Microsoft Exchange Server (2010, 2013, 2016)
+#          on designated hosts.
+#
+# Exchange does NOT require SQL Server — all mailbox storage uses the
+# Extensible Storage Engine (ESE).  Exchange AD preparation
+# (PrepareSchema → PrepareAD → PrepareAllDomains) runs automatically
+# via deploy_microsoft_exchange on the first Exchange host.
+#
+# Prerequisites:
+#   - Active Directory domain must be deployed (domain_management.yml).
+#   - Exchange setup media pre-staged on target hosts (see exchange_setup_path).
+#   - For Exchange 2013/2016: UCMA 4.0 installer present in exchange media
+#     (UCMARedist\UcmaRuntimeSetup.exe) or at exchange_ucma_path.
+#   - The Ansible user must be a member of Schema Admins + Enterprise Admins
+#     for the AD preparation steps.
+#
+# Roles:
+#   - configure_vm           — hostname, timezone, WinRM, PS policy
+#   - install_windowsfeature — IIS prerequisites from windows_feature_sets['exchange_servers']
+#   - deploy_microsoft_exchange — AD prep, unattended install, send connector
+#
+# Usage:
+#   ansible-playbook playbooks/exchange_management.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "exchange_version=2016" \
+#     -e "@Secrets/credentials.yml" --ask-vault-pass
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration on the Ansible controller
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Main play: Exchange Server deployment
+# ----------------------------------------------------------------------------
+- name: Microsoft Exchange Server Management
+  hosts: exchange_servers
+  gather_facts: false
+  tags: [exchange, services]
+
+  vars_files:
+    - "{{ playbook_dir }}/Secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from controller
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — Exchange service phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.services.exchange | default(false) | bool)
+
+    - name: "[preflight] Assert exchange_servers group is populated"
+      ansible.builtin.assert:
+        that: groups['exchange_servers'] | default([]) | length > 0
+        fail_msg: >-
+          exchange_servers group is empty. Ensure inventory_refresh has run
+          and vms.yaml has at least one VM with ansible_group: exchange_servers.
+
+  roles:
+    - configure_vm
+    - install_windowsfeature
+    - deploy_microsoft_exchange

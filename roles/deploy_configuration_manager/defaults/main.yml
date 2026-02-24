@@ -1,0 +1,98 @@
+---
+# =============================================================================
+# Role: deploy_configuration_manager — Default Variables
+# =============================================================================
+# SCCM / Microsoft Endpoint Configuration Manager requires:
+#   - SQL Server (full edition, not Express) — deploy_sql_server must run first
+#   - Windows Assessment and Deployment Kit (ADK) — must be pre-staged
+#   - Active Directory domain (domain_management.yml complete)
+#   - Schema Admin + Enterprise Admin rights for AD schema extension
+
+# ── Setup media ──────────────────────────────────────────────────────────────
+# Absolute path to SCCM setup.exe on the target host.
+# SCCM media (~2–4 GB) must be pre-staged before running this role.
+# extadsch.exe is derived automatically from: <media_root>\SMSSETUP\BIN\X64\
+sccm_setup_path: 'C:\SCCMSetup\setup.exe'
+
+# ── Site identity ─────────────────────────────────────────────────────────────
+# Three-character site code — must be unique across the hierarchy.
+# Use uppercase letters/digits. Common training codes: CDX, LAB, TST.
+sccm_site_code: 'CDX'
+
+# Human-readable site name shown in the console
+sccm_site_name: 'CDX Primary Site'
+
+# Installation directory for the ConfigMgr site server
+sccm_install_dir: 'C:\Program Files\Microsoft Configuration Manager'
+
+# Product ID: EVAL for evaluation / training, or a volume licence key
+sccm_product_id: 'EVAL'
+
+# ── SQL Server connection ─────────────────────────────────────────────────────
+# Hostname (or IP) of the SQL Server hosting the SCCM site database.
+# For a co-located SQL + SCCM server, use 'localhost' or the server hostname.
+# For a remote SQL server, use its NetBIOS name or FQDN.
+sccm_sql_server: 'localhost'
+
+# SQL Server instance name.
+# Leave empty for the default instance (MSSQLSERVER).
+# Must match the sql_instance_name used by deploy_sql_server.
+sccm_sql_instance: ''
+
+# SCCM site database name. Microsoft convention: CM_<SiteCode>.
+sccm_sql_database: "CM_{{ sccm_site_code }}"
+
+# SQL Server Service Broker port (default: 4022).
+# Must be open between the SCCM server and SQL server if on separate hosts.
+sccm_sql_ssb_port: 4022
+
+# Optional: explicit SQL data / log file paths.
+# Leave empty to use SQL Server defaults.
+sccm_sql_data_path: ''
+sccm_sql_log_path:  ''
+
+# ── Site roles ────────────────────────────────────────────────────────────────
+# Management Point FQDN — defaults to this host's FQDN in the domain
+sccm_management_point: ''    # blank → resolved at task runtime
+
+# Distribution Point FQDN — defaults to this host's FQDN in the domain
+sccm_distribution_point: ''  # blank → resolved at task runtime
+
+# Protocol for Management Point and Distribution Point
+sccm_mp_protocol: 'HTTP'     # HTTP or HTTPS
+sccm_dp_protocol: 'HTTP'     # HTTP or HTTPS
+
+# Whether SCCM setup should install IIS on the Distribution Point server.
+# Set false if IIS is already installed via install_windowsfeature role.
+sccm_dp_install_iis: false
+
+# ── Prerequisites ─────────────────────────────────────────────────────────────
+# Path to a locally staged SCCM prerequisites directory.
+# Run: setup.exe /DOWNLOAD <path> on an internet-connected machine first.
+# For offline deployments (CDX training range) this MUST be pre-staged.
+# Leave empty only if the SCCM server has direct internet access.
+sccm_prereqs_path: 'C:\SCCMPrereqs'
+
+# ── Windows ADK ───────────────────────────────────────────────────────────────
+# Windows Assessment and Deployment Kit — REQUIRED by SCCM setup.
+# Must match the SCCM version being installed (see Microsoft compatibility matrix).
+# Leave empty to skip ADK installation (assumes ADK is already installed).
+sccm_adk_setup_path: ''       # e.g., 'C:\ADKSetup\adksetup.exe'
+
+# Windows PE add-on for ADK — required for OS Deployment boot images.
+# Leave empty to skip (install manually if OSD is needed).
+sccm_adk_pe_setup_path: ''    # e.g., 'C:\ADKPESetup\adkwinpesetup.exe'
+
+# ADK feature set for silent install (space-separated OptionId values).
+# Covers the features SCCM requires; add OptionId.ICDCore for image capture.
+sccm_adk_features: >-
+  OptionId.DeploymentTools
+  OptionId.UserStateMigrationTool
+
+# ADK WinPE feature
+sccm_adk_pe_features: 'OptionId.WindowsPreinstallationEnvironment'
+
+# ── Staging ───────────────────────────────────────────────────────────────────
+# Temporary directory on the target host for SccmSetup.ini.
+# Removed at the end of the role.
+sccm_temp_path: 'C:\Windows\Temp\cdx_sccm'

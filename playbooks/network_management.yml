@@ -1,0 +1,57 @@
+---
+# =============================================================================
+# CDX-E Playbook: Scenario Network Management
+# =============================================================================
+# Purpose: Deploy or revert scenario-related SDN configuration within the
+#          Proxmox environment, then configure VyOS routers.
+#
+# Roles:
+#   - configure_networking  (action=deploy)
+#   - revert_networking     (action=destroy)
+#
+# Both roles run on localhost and delegate Proxmox node operations to
+# cluster members in inventory/hosts.yml → proxmox_cluster.
+# VyOS config is pushed via SSH delegation to vyos_hosts.
+#
+# Usage:
+#   # Apply network config
+#   ansible-playbook playbooks/network_management.yml \
+#     -e "exercise=OBSIDIAN_DAGGER action=deploy" \
+#     -e "@secrets/credentials.yml"
+#
+#   # Revert network config (full teardown)
+#   ansible-playbook playbooks/network_management.yml \
+#     -e "exercise=OBSIDIAN_DAGGER action=destroy" \
+#     -e "@secrets/credentials.yml"
+# =============================================================================
+
+- name: Load exercise configuration
+  hosts: localhost
+  gather_facts: false
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  roles:
+    - role: read_exercise_config
+
+- name: Scenario Network Management
+  hosts: localhost
+  gather_facts: false
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  vars:
+    net_action: "{{ action | default('deploy') }}"
+
+  pre_tasks:
+    - name: "[preflight] Skip — networking phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.networking | default(true) | bool)
+
+  roles:
+    - role: configure_networking
+      when: net_action == 'deploy'
+    - role: revert_networking
+      when: net_action == 'destroy'

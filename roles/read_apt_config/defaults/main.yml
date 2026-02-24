@@ -1,0 +1,10 @@
+---
+# =============================================================================
+# Role: read_apt_config — Default Variables
+# =============================================================================
+
+# Base path for APT library directories (relative to playbook_dir)
+apts_base_dir: "{{ playbook_dir }}/APTs"
+
+# Default APT to load if neither 'apt' variable nor scenario.red_team.apt is set
+default_apt: "GENERIC_RED"

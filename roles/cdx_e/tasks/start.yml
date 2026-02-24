@@ -1,0 +1,38 @@
+---
+# =============================================================================
+# Action: Start VMs
+# Starts exercise VMs (filtered or all)
+# =============================================================================
+
+- name: "Start VMs"
+  community.general.proxmox_kvm:
+    api_host: "{{ proxmox_api_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    node: "{{ vm.proxmox.node }}"
+    vmid: "{{ vm.vmid }}"
+    state: started
+  loop: "{{ all_vms }}"
+  loop_control:
+    loop_var: vm
+    label: "{{ vm.vmid }} - {{ vm.name }}"
+  when:
+    - (vm.vmid | int) in existing_vmids
+    - existing_vm_names[vm.vmid | string] | default(existing_vm_names[vm.vmid | int] | default('')) == vm.name
+    - not cdx_dry_run | bool
+    - >-
+      cdx_vm_filter == 'all' or
+      (vm.vmid | string) in vm_filter_list or
+      vm.name in vm_filter_list
+  ignore_errors: true
+  register: _start_results
+
+- name: "START COMPLETE"
+  debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════════════
+        START COMPLETE - {{ exercise_name }}
+        VMs processed: {{ _start_results.results | selectattr('changed', 'defined') | list | length }}
+      ═══════════════════════════════════════════════════════════════════════

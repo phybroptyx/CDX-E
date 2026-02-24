@@ -1,0 +1,67 @@
+---
+# =============================================================================
+# APT VM Specification Template
+# =============================================================================
+# Defines all virtual machines for this APT profile.
+# Loaded by read_apt_config and exposed as the 'apt_vms' fact.
+#
+# These VMs are deployed via deploy_red_team into a separate Terraform state
+# (terraform_red_team/) independent of the scenario VM state.
+#
+# VMID Ranges (from scenario.yml vm_id_ranges.red_team):
+#   Default range: 3000-3099 per exercise
+#   Use 3001-3009 for C2 infrastructure
+#   Use 3010-3019 for operator workstations
+#   Use 3020-3029 for VPS/redirector nodes
+#
+# Template keys must match entries in inventory/group_vars/all.yml → template_registry.
+# ansible_group must be 'red_team' or 'apt' — both go into terraform_red_team/ state.
+# =============================================================================
+
+virtual_machines:
+
+  # ---------------------------------------------------------------------------
+  # C2 Server
+  # ---------------------------------------------------------------------------
+  - vmid: 3001
+    name: "RT-C2-01"
+    template: "adaptix_c2"           # Pre-built Packer template with Adaptix C2 installed
+    ansible_group: "red_team"
+    resources:
+      memory_mb: 8192
+      cores: 4
+      sockets: 1
+    cloud_init:
+      ip: "10.0.3.10"               # Update to match exercise Red Team network
+      cidr: 24
+      gateway: "10.0.3.1"
+      nameserver: "10.0.0.10"        # Exercise domain DNS
+
+  # ---------------------------------------------------------------------------
+  # Operator Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 3010
+    name: "RT-OPS-01"
+    template: "kali"                 # Kali Linux operator workstation
+    ansible_group: "red_team"
+    resources:
+      memory_mb: 8192
+      cores: 4
+      sockets: 1
+    cloud_init:
+      ip: "10.0.3.20"
+      cidr: 24
+      gateway: "10.0.3.1"
+      nameserver: "10.0.0.10"
+
+  # ---------------------------------------------------------------------------
+  # VPS / Redirector Node (OPTIONAL — uncomment if needed)
+  # ---------------------------------------------------------------------------
+  # - vmid: 3020
+  #   name: "RT-VPS-01"
+  #   template: "debian_12"
+  #   ansible_group: "red_team"
+  #   resources:
+  #     memory_mb: 2048
+  #     cores: 2
+  #     sockets: 1

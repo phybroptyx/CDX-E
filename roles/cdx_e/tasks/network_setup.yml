@@ -1,0 +1,148 @@
+---
+# =============================================================================
+# Phase: Network Setup
+# Deploys exercise OVS bridge configuration to Proxmox hosts via SSH+template
+#
+# Replaces: per-host interfaces.<exercise> files + exercise.sh
+#
+# Logic:
+#   1. Parse network_topology → build per-node site/bridge assignments
+#   2. Template /etc/network/interfaces on each affected Proxmox node
+#   3. Pre-create OVS bridges (ovs-vsctl --may-exist add-br)
+#   4. Reload networking via ifreload -a
+#
+# Prerequisites:
+#   - SSH access to Proxmox hosts (inventory: proxmox_cluster)
+#   - host_vars/<node>.yml defines base_network for each node
+#   - Exercise YAML defines network_topology with sites and bridges
+# =============================================================================
+
+# ---- Guard: skip if no topology defined ------------------------------------
+- name: "NETWORK SETUP - Skip (no network topology defined)"
+  debug:
+    msg: >-
+      No network_topology defined in exercise config — skipping network setup.
+      Exercise bridges must already exist on the target nodes.
+  when: network_topology.sites is not defined or network_topology.sites | length == 0
+
+# ---- Step 1: Build per-node assignments ------------------------------------
+- name: "NETWORK SETUP - Build per-node site assignments"
+  set_fact:
+    _sites_per_node: >-
+      {%- set result = {} -%}
+      {%- for site in network_topology.sites | default([]) -%}
+        {%- set node = site.node -%}
+        {%- if node not in result -%}
+          {%- set _ = result.update({node: []}) -%}
+        {%- endif -%}
+        {%- set _ = result[node].append(site) -%}
+      {%- endfor -%}
+      {{ result }}
+  when: network_topology.sites is defined and network_topology.sites | length > 0
+
+- name: "NETWORK SETUP - Build per-node common bridge assignments"
+  set_fact:
+    _common_per_node: >-
+      {%- set result = {} -%}
+      {%- for bridge in network_topology.common_bridges | default([]) -%}
+        {%- for node in bridge.nodes | default([]) -%}
+          {%- if node not in result -%}
+            {%- set _ = result.update({node: []}) -%}
+          {%- endif -%}
+          {%- set _ = result[node].append(bridge) -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ result }}
+  when: network_topology.sites is defined and network_topology.sites | length > 0
+
+- name: "NETWORK SETUP - Determine affected nodes"
+  set_fact:
+    _affected_nodes: >-
+      {{ (_sites_per_node | default({})).keys() | list
+         | union((_common_per_node | default({})).keys() | list)
+         | unique | sort }}
+  when: network_topology.sites is defined and network_topology.sites | length > 0
+
+# ---- Step 2: Display plan --------------------------------------------------
+- name: "NETWORK SETUP - Display deployment plan"
+  debug:
+    msg: |
+      Deploying network configuration for exercise: {{ exercise_name }}
+      Affected nodes ({{ _affected_nodes | length }}): {{ _affected_nodes | join(', ') }}
+      {% for node in _affected_nodes %}
+      {{ node }}:
+        Sites: {{ (_sites_per_node[node] | default([]) | map(attribute='label') | list) | join(', ') or '(none)' }}
+        Common bridges: {{ (_common_per_node[node] | default([]) | map(attribute='name') | list) | join(', ') or '(none)' }}
+      {% endfor %}
+  when:
+    - _affected_nodes is defined
+    - _affected_nodes | length > 0
+
+# ---- Step 3: Template and deploy -------------------------------------------
+- name: "NETWORK SETUP - Deploy interfaces configuration on {{ item }}"
+  template:
+    src: interfaces.j2
+    dest: /etc/network/interfaces
+    owner: root
+    group: root
+    mode: '0644'
+    backup: yes
+  delegate_to: "{{ item }}"
+  vars:
+    node_name: "{{ item }}"
+    node_sites: "{{ _sites_per_node[item] | default([]) }}"
+    node_common_bridges: "{{ _common_per_node[item] | default([]) }}"
+    base_network: "{{ hostvars[item].base_network }}"
+  loop: "{{ _affected_nodes | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  register: _template_results
+  when:
+    - _affected_nodes is defined
+    - _affected_nodes | length > 0
+    - not cdx_dry_run | bool
+
+# ---- Step 4: Pre-create OVS bridges -----------------------------------------
+# ifreload -a calls ovs-vsctl list-ports before creating new OVS bridges,
+# which fails if the bridge doesn't exist yet. Pre-creating with --may-exist
+# ensures OVS knows about them before ifupdown2 tries to reconcile.
+- name: "NETWORK SETUP - Pre-create OVS bridges on {{ item }}"
+  shell: |
+    {% for site in _sites_per_node[item] | default([]) %}
+    {% for bridge in site.bridges | default([]) %}
+    ovs-vsctl --may-exist add-br {{ bridge.name }}
+    {% endfor %}
+    {% endfor %}
+    {% for bridge in _common_per_node[item] | default([]) %}
+    ovs-vsctl --may-exist add-br {{ bridge.name }}
+    {% endfor %}
+  delegate_to: "{{ item }}"
+  loop: "{{ _affected_nodes | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - not cdx_dry_run | bool
+    - _affected_nodes is defined
+    - _affected_nodes | length > 0
+    - _template_results.results | default([])
+      | selectattr('item', 'equalto', item)
+      | selectattr('changed') | list | length > 0
+
+# ---- Step 5: Reload networking ---------------------------------------------
+- name: "NETWORK SETUP - Reload networking on {{ item.item }}"
+  command: ifreload -a
+  delegate_to: "{{ item.item }}"
+  loop: "{{ _template_results.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - not cdx_dry_run | bool
+    - item.changed | default(false)
+
+# ---- Summary ---------------------------------------------------------------
+- name: "NETWORK SETUP - Complete"
+  debug:
+    msg: >-
+      Network setup complete.
+      Deployed to {{ _affected_nodes | default([]) | length }} node(s).
+      {% if cdx_dry_run | bool %}(DRY RUN — no changes made){% endif %}

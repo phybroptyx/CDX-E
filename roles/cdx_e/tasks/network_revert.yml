@@ -1,0 +1,113 @@
+---
+# =============================================================================
+# Phase: Network Revert
+# Restores base-only network configuration on Proxmox hosts (removes exercise
+# bridges, OVS patch ports, and VLAN tags).
+#
+# Replaces: exercise.sh revert
+#
+# Guard: Only runs when cdx_vm_filter == 'all' (full teardown).
+#        Partial VM destroys preserve bridges for remaining VMs.
+#
+# Logic:
+#   1. Determine which nodes were configured by this exercise
+#   2. Re-template /etc/network/interfaces with base config only (no sites)
+#   3. Reload networking via ifreload -a
+# =============================================================================
+
+# ---- Guard: skip on partial destroy ----------------------------------------
+- name: "NETWORK REVERT - Skip (partial destroy preserves networking)"
+  debug:
+    msg: "vm_filter is '{{ cdx_vm_filter }}' (not 'all') — skipping network revert to preserve bridges for remaining VMs"
+  when: cdx_vm_filter != 'all'
+
+- name: "NETWORK REVERT - Skip (no network topology defined)"
+  debug:
+    msg: "No network_topology defined in exercise config — skipping network revert"
+  when:
+    - cdx_vm_filter == 'all'
+    - network_topology.sites is not defined or network_topology.sites | length == 0
+
+# ---- Step 1: Determine affected nodes --------------------------------------
+- name: "NETWORK REVERT - Determine affected nodes"
+  set_fact:
+    _revert_nodes: >-
+      {%- set nodes = [] -%}
+      {%- for site in network_topology.sites | default([]) -%}
+        {%- if site.node not in nodes -%}
+          {%- set _ = nodes.append(site.node) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {%- for bridge in network_topology.common_bridges | default([]) -%}
+        {%- for node in bridge.nodes | default([]) -%}
+          {%- if node not in nodes -%}
+            {%- set _ = nodes.append(node) -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ nodes }}
+  when:
+    - cdx_vm_filter == 'all'
+    - network_topology.sites is defined
+    - network_topology.sites | length > 0
+
+# ---- Step 2: Display plan --------------------------------------------------
+- name: "NETWORK REVERT - Display revert plan"
+  debug:
+    msg: >-
+      Reverting to base network configuration on {{ _revert_nodes | length }}
+      node(s): {{ _revert_nodes | join(', ') }}
+  when:
+    - cdx_vm_filter == 'all'
+    - _revert_nodes is defined
+    - _revert_nodes | length > 0
+
+# ---- Step 3: Template base-only config -------------------------------------
+- name: "NETWORK REVERT - Deploy base interfaces configuration on {{ item }}"
+  template:
+    src: interfaces.j2
+    dest: /etc/network/interfaces
+    owner: root
+    group: root
+    mode: '0644'
+    backup: yes
+  delegate_to: "{{ item }}"
+  vars:
+    node_name: "{{ item }}"
+    node_sites: []
+    node_common_bridges: []
+    base_network: "{{ hostvars[item].base_network }}"
+    exercise_name: ""
+  loop: "{{ _revert_nodes | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  register: _revert_results
+  when:
+    - cdx_vm_filter == 'all'
+    - _revert_nodes is defined
+    - _revert_nodes | length > 0
+    - not cdx_dry_run | bool
+
+# ---- Step 4: Reload networking ---------------------------------------------
+- name: "NETWORK REVERT - Reload networking on {{ item.item }}"
+  command: ifreload -a
+  delegate_to: "{{ item.item }}"
+  loop: "{{ _revert_results.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - cdx_vm_filter == 'all'
+    - not cdx_dry_run | bool
+    - item.changed | default(false)
+
+# ---- Summary ---------------------------------------------------------------
+- name: "NETWORK REVERT - Complete"
+  debug:
+    msg: >-
+      {% if cdx_vm_filter == 'all' %}
+      Network revert complete.
+      Restored base config on {{ _revert_nodes | default([]) | length }} node(s).
+      {% if cdx_dry_run | bool %}(DRY RUN — no changes made){% endif %}
+      {% else %}
+      Network revert skipped (partial destroy).
+      {% endif %}

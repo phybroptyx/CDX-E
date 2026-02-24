@@ -1,0 +1,27 @@
+---
+# =============================================================================
+# CDX-E Playbook: Environment Check
+# =============================================================================
+# Purpose: Perform full environmental connectivity checks across all scenario
+#          hosts. Run before exercise start to validate readiness, or after
+#          deployment to confirm expected network paths are functional.
+#
+# Roles:
+#   - check_network_paths
+#
+# Usage:
+#   ansible-playbook playbooks/environment_check.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@secrets/credentials.yml"
+# =============================================================================
+
+- name: Environment Check
+  hosts: all
+  gather_facts: false
+  tags: [check, validation, readiness]
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  roles:
+    - check_network_paths

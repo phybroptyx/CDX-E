@@ -1,0 +1,56 @@
+---
+# =============================================================================
+# Action: Destroy (Full Exercise Teardown)
+# Phase 1: VM destruction
+# Phase 2: SSH key cleanup
+# Phase 3: Resource pool deletion
+# Phase 4: Network revert on all Proxmox hosts
+# =============================================================================
+
+# Phase 1: VM Destruction
+- name: "Phase 1 - Destroy VMs"
+  include_tasks: destroy_single_vm.yml
+  loop: "{{ all_vms }}"
+  loop_control:
+    loop_var: vm
+    label: "{{ vm.vmid }} - {{ vm.name }}"
+  when: >-
+    cdx_vm_filter == 'all' or
+    (vm.vmid | string) in vm_filter_list or
+    vm.name in vm_filter_list
+
+# Phase 2: SSH Key Cleanup
+- name: "Phase 2 - Derive exercise directory"
+  set_fact:
+    exercise_dir: "{{ cdx_exercise_yaml | dirname }}"
+
+- name: "Phase 2 - Remove generated SSH keys"
+  file:
+    path: "{{ exercise_dir }}/secrets/ssh_keys"
+    state: absent
+  when: cdx_vm_filter == 'all'
+
+- name: "Phase 2 - SSH keys removed"
+  debug:
+    msg: "Removed SSH key directory: {{ exercise_dir }}/secrets/ssh_keys"
+  when: cdx_vm_filter == 'all'
+
+- name: "Phase 2 - SSH key cleanup skipped (filtered destroy)"
+  debug:
+    msg: "SSH key cleanup skipped - only removing specific VMs, not full teardown"
+  when: cdx_vm_filter != 'all'
+
+# Phase 3: Pool Deletion
+- name: "Phase 3 - Pool Deletion"
+  include_tasks: pool_delete.yml
+
+# Phase 4: Network Revert
+- name: "Phase 4 - Network Revert"
+  include_tasks: network_revert.yml
+
+- name: "TEARDOWN COMPLETE"
+  debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════════════
+        TEARDOWN COMPLETE - {{ exercise_name }}
+      ═══════════════════════════════════════════════════════════════════════

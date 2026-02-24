@@ -1,0 +1,406 @@
+---
+# =============================================================================
+# Role: deploy_configuration_manager
+# =============================================================================
+# Installs Microsoft Endpoint Configuration Manager (SCCM) as a standalone
+# Primary Site. Handles AD schema extension, prerequisites, and post-install
+# service verification.
+#
+# Hard dependencies (must be complete before this role runs):
+#   1. SQL Server — deploy_sql_server has run and the instance is accessible.
+#      SCCM requires full SQL Server (not Express) for the CM_<SiteCode> DB.
+#   2. Active Directory — domain_management.yml complete; executing user
+#      must be in Schema Admins + Enterprise Admins for schema extension.
+#   3. Windows ADK — either pre-installed or paths set via sccm_adk_setup_path
+#      / sccm_adk_pe_setup_path. ADK version must match the SCCM release.
+#
+# SCCM media layout expected on the target host:
+#   <sccm_setup_path>                  → setup.exe (or parent directory)
+#   <media_root>\SMSSETUP\BIN\X64\extadsch.exe  → AD schema extension tool
+#
+# Setup produces a detailed log at: C:\ConfigMgrSetup.log
+#
+# Called from:
+#   playbooks/sccm_management.yml → ansible_group: sccm_servers
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Section 1 — Phase gate + preflight
+# ----------------------------------------------------------------------------
+- name: Skip — SCCM service phase disabled in scenario
+  ansible.builtin.debug:
+    msg: >-
+      deploy_configuration_manager: scenario.phases.services.sccm is false
+      for {{ inventory_hostname }} — skipping.
+  when: not (scenario.phases.services.sccm | default(false) | bool)
+
+- name: End host — SCCM phase disabled
+  ansible.builtin.meta: end_host
+  when: not (scenario.phases.services.sccm | default(false) | bool)
+
+- name: Assert required variables are defined
+  ansible.builtin.assert:
+    that:
+      - sccm_setup_path  is defined and sccm_setup_path  | length > 0
+      - sccm_site_code   is defined and sccm_site_code   | length == 3
+      - sccm_site_name   is defined and sccm_site_name   | length > 0
+      - sccm_sql_server  is defined and sccm_sql_server  | length > 0
+      - scenario.domain.name is defined
+    fail_msg: >-
+      deploy_configuration_manager: sccm_setup_path, sccm_site_code (3 chars),
+      sccm_site_name, sccm_sql_server, and scenario.domain.name must all be
+      defined.
+
+# ----------------------------------------------------------------------------
+# Section 2 — Check if SCCM is already installed
+# ----------------------------------------------------------------------------
+- name: Check SCCM installation state via registry
+  ansible.windows.win_shell: |
+    if (Test-Path 'HKLM:\SOFTWARE\Microsoft\SMS\Setup') {
+        Write-Output "installed"
+    } else {
+        Write-Output "absent"
+    }
+  register: _sccm_install_check
+  changed_when: false
+
+- name: Set SCCM installed fact
+  ansible.builtin.set_fact:
+    _sccm_installed: "{{ (_sccm_install_check.stdout | trim) == 'installed' }}"
+
+- name: Display SCCM installation state
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} — SCCM site '{{ sccm_site_code }}'
+      {{ 'already installed — skipping install steps' if (_sccm_installed | bool) else 'not found — will install' }}
+
+# ----------------------------------------------------------------------------
+# Section 3 — Resolve runtime-derived facts
+# ----------------------------------------------------------------------------
+- name: Resolve SQL connection string and site role FQDNs
+  ansible.builtin.set_fact:
+    _sccm_sql_connection: >-
+      {{
+        sccm_sql_server + '\\' + sccm_sql_instance
+        if sccm_sql_instance | length > 0
+        else sccm_sql_server
+      }}
+    _sccm_mp: >-
+      {{
+        sccm_management_point
+        if sccm_management_point | length > 0
+        else inventory_hostname + '.' + scenario.domain.name
+      }}
+    _sccm_dp: >-
+      {{
+        sccm_distribution_point
+        if sccm_distribution_point | length > 0
+        else inventory_hostname + '.' + scenario.domain.name
+      }}
+
+- name: Display SCCM deployment plan
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} — SCCM {{ sccm_site_code }}
+      | sql={{ _sccm_sql_connection }}
+      | db={{ sccm_sql_database }}
+      | mp={{ _sccm_mp }}
+      | dp={{ _sccm_dp }}
+
+# ----------------------------------------------------------------------------
+# Section 4 — Verify SCCM setup media
+# ----------------------------------------------------------------------------
+- name: Verify SCCM setup media exists on host
+  ansible.windows.win_stat:
+    path: "{{ sccm_setup_path }}"
+  register: _sccm_setup_stat
+  when: not (_sccm_installed | bool)
+
+- name: Fail if SCCM setup media is missing
+  ansible.builtin.fail:
+    msg: >-
+      SCCM setup.exe not found at '{{ sccm_setup_path }}' on
+      {{ inventory_hostname }}. Pre-stage SCCM installation media and set
+      sccm_setup_path accordingly.
+  when:
+    - not (_sccm_installed | bool)
+    - not (_sccm_setup_stat.stat.exists | default(false))
+
+# ----------------------------------------------------------------------------
+# Section 5 — Windows ADK installation
+# Skipped when sccm_adk_setup_path is empty (ADK assumed pre-installed).
+# ----------------------------------------------------------------------------
+- name: Check if Windows ADK is already installed
+  ansible.windows.win_shell: |
+    $adk = Get-ItemProperty `
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' `
+        -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -like 'Windows Assessment and Deployment Kit*' }
+    if ($adk) { Write-Output "installed" } else { Write-Output "absent" }
+  register: _adk_check
+  changed_when: false
+  when: sccm_adk_setup_path | length > 0
+
+- name: Verify ADK setup exists on host
+  ansible.windows.win_stat:
+    path: "{{ sccm_adk_setup_path }}"
+  register: _adk_setup_stat
+  when:
+    - sccm_adk_setup_path | length > 0
+    - (_adk_check.stdout | default('absent') | trim) == 'absent'
+
+- name: Fail if ADK setup is missing
+  ansible.builtin.fail:
+    msg: >-
+      Windows ADK setup not found at '{{ sccm_adk_setup_path }}'.
+      Pre-stage the ADK installer or set sccm_adk_setup_path to the correct
+      path. ADK version must match the SCCM release being installed.
+  when:
+    - sccm_adk_setup_path | length > 0
+    - (_adk_check.stdout | default('absent') | trim) == 'absent'
+    - not (_adk_setup_stat.stat.exists | default(false))
+
+- name: Install Windows ADK
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $proc = Start-Process -FilePath '{{ sccm_adk_setup_path }}' `
+        -ArgumentList '/quiet', '/norestart', '/features', '{{ sccm_adk_features }}' `
+        -Wait -PassThru -NoNewWindow
+    if ($proc.ExitCode -notin @(0, 3010)) {
+        throw "ADK install failed with exit code $($proc.ExitCode)"
+    }
+    Write-Output "CHANGED: Installed Windows ADK (exit $($proc.ExitCode))"
+  register: _adk_install_result
+  when:
+    - sccm_adk_setup_path | length > 0
+    - (_adk_check.stdout | default('absent') | trim) == 'absent'
+    - _adk_setup_stat.stat.exists | default(false)
+  changed_when: "'CHANGED:' in (_adk_install_result.stdout | default(''))"
+  timeout: 1800  # 30 minutes
+
+- name: Check if Windows ADK WinPE add-on is already installed
+  ansible.windows.win_shell: |
+    $pe = Get-ItemProperty `
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*' `
+        -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -like 'Windows Assessment and Deployment Kit Windows Preinstallation Environment*' }
+    if ($pe) { Write-Output "installed" } else { Write-Output "absent" }
+  register: _adk_pe_check
+  changed_when: false
+  when: sccm_adk_pe_setup_path | length > 0
+
+- name: Install Windows ADK WinPE add-on
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $proc = Start-Process -FilePath '{{ sccm_adk_pe_setup_path }}' `
+        -ArgumentList '/quiet', '/norestart', '/features', '{{ sccm_adk_pe_features }}' `
+        -Wait -PassThru -NoNewWindow
+    if ($proc.ExitCode -notin @(0, 3010)) {
+        throw "ADK WinPE add-on install failed with exit code $($proc.ExitCode)"
+    }
+    Write-Output "CHANGED: Installed ADK WinPE add-on (exit $($proc.ExitCode))"
+  register: _adk_pe_result
+  when:
+    - sccm_adk_pe_setup_path | length > 0
+    - (_adk_pe_check.stdout | default('absent') | trim) == 'absent'
+  changed_when: "'CHANGED:' in (_adk_pe_result.stdout | default(''))"
+  timeout: 1800
+
+# ----------------------------------------------------------------------------
+# Section 6 — Verify SQL Server is reachable
+# A clear early failure here is far better than a cryptic SCCM setup error.
+# ----------------------------------------------------------------------------
+- name: Verify SQL Server is reachable from SCCM host
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $connStr = "Server={{ _sccm_sql_connection }};Integrated Security=true;Database=master;Connect Timeout=15"
+    try {
+        $conn = New-Object System.Data.SqlClient.SqlConnection($connStr)
+        $conn.Open()
+        $conn.Close()
+        Write-Output "reachable"
+    } catch {
+        throw "Cannot connect to SQL Server '{{ _sccm_sql_connection }}': $_. " +
+              "Ensure deploy_sql_server has run and the SQL service is running."
+    }
+  register: _sql_reachable
+  changed_when: false
+  when: not (_sccm_installed | bool)
+
+# ----------------------------------------------------------------------------
+# Section 7 — Active Directory prerequisites (run_once: true)
+# All three tasks need Schema Admins + Enterprise Admins rights.
+# ----------------------------------------------------------------------------
+- name: Check if SCCM AD schema extension is already applied
+  ansible.windows.win_shell: |
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $schemaNC = (Get-ADRootDSE).schemaNamingContext
+    $existing  = Get-ADObject -SearchBase $schemaNC `
+        -Filter { ldapDisplayName -eq 'mS-SMS-Site' } `
+        -ErrorAction SilentlyContinue
+    if ($existing) { Write-Output "extended" } else { Write-Output "not_extended" }
+  register: _sccm_schema_check
+  changed_when: false
+  run_once: true
+
+- name: Extend AD schema for SCCM (extadsch.exe)
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $mediaRoot = Split-Path -Parent '{{ sccm_setup_path }}'
+    $extadsch  = Join-Path $mediaRoot 'SMSSETUP\BIN\X64\extadsch.exe'
+
+    if (-not (Test-Path $extadsch)) {
+        throw "extadsch.exe not found at '$extadsch'. Ensure the full SCCM media is present under $(Split-Path -Parent '{{ sccm_setup_path }}')."
+    }
+
+    $proc = Start-Process -FilePath $extadsch -Wait -PassThru -NoNewWindow
+    if ($proc.ExitCode -ne 0) {
+        throw "extadsch.exe failed with exit code $($proc.ExitCode). Check C:\ExtADSch.log for details."
+    }
+    Write-Output "CHANGED: AD schema extended for SCCM"
+  register: _sccm_schema_result
+  run_once: true
+  when: (_sccm_schema_check.stdout | trim) == 'not_extended'
+  changed_when: "'CHANGED:' in (_sccm_schema_result.stdout | default(''))"
+  timeout: 600
+
+- name: Create CN=System Management container in AD
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Import-Module ActiveDirectory
+
+    $domainDN  = (Get-ADDomain).DistinguishedName
+    $systemDN  = "CN=System,$domainDN"
+    $sysManDN  = "CN=System Management,$systemDN"
+    $changes   = @()
+
+    if (-not (Get-ADObject -Filter { DistinguishedName -eq $sysManDN } -ErrorAction SilentlyContinue)) {
+        New-ADObject -Name 'System Management' -Path $systemDN -Type container -ErrorAction Stop
+        $changes += "CHANGED: Created CN=System Management container"
+    }
+
+    if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
+    else { Write-Output "OK: CN=System Management already exists" }
+  register: _sccm_container_result
+  run_once: true
+  changed_when: "'CHANGED:' in (_sccm_container_result.stdout | default(''))"
+
+- name: Grant SCCM computer account Full Control on System Management container
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Import-Module ActiveDirectory
+
+    $domainDN   = (Get-ADDomain).DistinguishedName
+    $sysManDN   = "CN=System Management,CN=System,$domainDN"
+    $sccmComp   = Get-ADComputer -Identity $env:COMPUTERNAME -ErrorAction Stop
+    $sid        = $sccmComp.SID
+
+    $adPath = "AD:$sysManDN"
+    $acl    = Get-Acl -Path $adPath
+
+    # Check if Full Control already granted to this computer
+    $alreadyGranted = $acl.Access | Where-Object {
+        $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -eq $sid.Value -and
+        $_.ActiveDirectoryRights -band [System.DirectoryServices.ActiveDirectoryRights]::GenericAll
+    }
+
+    if (-not $alreadyGranted) {
+        $rule = New-Object System.DirectoryServices.ActiveDirectoryAccessRule(
+            $sid,
+            [System.DirectoryServices.ActiveDirectoryRights]::GenericAll,
+            [System.Security.AccessControl.AccessControlType]::Allow,
+            [System.DirectoryServices.ActiveDirectorySecurityInheritance]::All
+        )
+        $acl.AddAccessRule($rule)
+        Set-Acl -Path $adPath -AclObject $acl -ErrorAction Stop
+        Write-Output "CHANGED: Granted Full Control to $($sccmComp.Name)$ on System Management"
+    } else {
+        Write-Output "OK: Full Control already granted to $($sccmComp.Name)$"
+    }
+  register: _sccm_acl_result
+  run_once: true
+  changed_when: "'CHANGED:' in (_sccm_acl_result.stdout | default(''))"
+
+# ----------------------------------------------------------------------------
+# Section 8 — Stage SCCM setup script on target host
+# ----------------------------------------------------------------------------
+- name: Create SCCM staging directory
+  ansible.windows.win_file:
+    path: "{{ sccm_temp_path }}"
+    state: directory
+  when: not (_sccm_installed | bool)
+
+- name: Render and stage SccmSetup.ini
+  ansible.windows.win_copy:
+    content: "{{ lookup('template', 'SccmSetup.ini.j2') }}"
+    dest: "{{ sccm_temp_path }}\\SccmSetup.ini"
+  when: not (_sccm_installed | bool)
+
+# ----------------------------------------------------------------------------
+# Section 9 — Install SCCM
+# Typical duration: 60–120 minutes. Progress visible in C:\ConfigMgrSetup.log.
+# ----------------------------------------------------------------------------
+- name: Run SCCM unattended setup
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $proc = Start-Process -FilePath '{{ sccm_setup_path }}' `
+        -ArgumentList '/SCRIPT', '{{ sccm_temp_path }}\SccmSetup.ini', '/NOUSERINPUT' `
+        -Wait -PassThru -NoNewWindow
+    Write-Output "ExitCode=$($proc.ExitCode)"
+    if ($proc.ExitCode -ne 0) {
+        throw "SCCM setup failed with exit code $($proc.ExitCode). Review C:\ConfigMgrSetup.log for details."
+    }
+  register: _sccm_install_result
+  failed_when: _sccm_install_result.rc != 0
+  changed_when: "'ExitCode=0' in (_sccm_install_result.stdout | default(''))"
+  timeout: 7200   # 2 hours — SCCM installations are slow
+  when: not (_sccm_installed | bool)
+
+# ----------------------------------------------------------------------------
+# Section 10 — Wait for SCCM services to reach running state
+# SMS_EXECUTIVE is the core SCCM service; it starts child component services.
+# ----------------------------------------------------------------------------
+- name: Wait for SMS_EXECUTIVE service to reach Running state
+  ansible.windows.win_shell: |
+    $timeout = 300
+    $elapsed = 0
+    while ($elapsed -lt $timeout) {
+        $svc = Get-Service -Name 'SMS_EXECUTIVE' -ErrorAction SilentlyContinue
+        if ($svc -and $svc.Status -eq 'Running') {
+            Write-Output "ready"
+            exit 0
+        }
+        Start-Sleep -Seconds 15
+        $elapsed += 15
+    }
+    throw "SMS_EXECUTIVE did not reach Running state within $timeout seconds"
+  register: _sccm_svc_ready
+  changed_when: false
+
+- name: Display SCCM service readiness
+  ansible.builtin.debug:
+    msg: "SMS_EXECUTIVE is Running on {{ inventory_hostname }}"
+
+# ----------------------------------------------------------------------------
+# Section 11 — Cleanup staging directory
+# ----------------------------------------------------------------------------
+- name: Remove SCCM staging directory
+  ansible.windows.win_file:
+    path: "{{ sccm_temp_path }}"
+    state: absent
+
+# ----------------------------------------------------------------------------
+# Section 12 — Summary
+# ----------------------------------------------------------------------------
+- name: deploy_configuration_manager summary
+  ansible.builtin.debug:
+    msg: >-
+      deploy_configuration_manager complete for {{ inventory_hostname }}.
+      site={{ sccm_site_code }} |
+      sql={{ _sccm_sql_connection }} |
+      was_installed={{ _sccm_installed }} |
+      install_ran={{ not (_sccm_installed | bool) }} |
+      schema_extended={{ _sccm_schema_result.changed | default(false) }} |
+      container_created={{ _sccm_container_result.changed | default(false) }}

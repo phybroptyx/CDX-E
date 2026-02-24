@@ -1,0 +1,126 @@
+---
+# =============================================================================
+# Configure Phase 4: Per-VM Configuration Push
+# =============================================================================
+# Pushes configuration files to VMs using the controller SSH key.
+#   vyos    - Push VyOS config via /bin/vbash -s (non-interactive CLI)
+#   linux   - Placeholder (manual SSH access)
+#   windows - Placeholder (manual WinRM access)
+#
+# VyOS non-interactive SSH:
+#   VyOS CLI commands (configure, commit, save) are NOT available in a
+#   plain /bin/vbash shell. Use /bin/vbash -l -s (login shell + stdin)
+#   so VyOS's own profile scripts load the CLI environment automatically.
+#   This avoids hardcoding paths like /opt/vyatta/etc/functions/script-command
+#   which may not exist on all VyOS versions (e.g. VyOS 2025).
+#
+# Expected variables:
+#   vm                    - VM dict (with os_type, mgmt_ip)
+#   exercise_dir          - Exercise directory path
+#   exercise_ssh_key_path - Controller private key path
+#   vm_credentials        - Credential dict from secrets/credentials.yml
+# =============================================================================
+
+- name: "PUSH {{ vm.name }} - Skip (no management IP)"
+  debug:
+    msg: "Skipping {{ vm.name }} - management IP not discovered"
+  when: vm.mgmt_ip == 'UNDISCOVERED'
+
+# =============================================================================
+# VyOS Config Push
+# =============================================================================
+
+- name: "PUSH {{ vm.name }} - Verify SSH key auth (VyOS)"
+  command: >
+    ssh -o StrictHostKeyChecking=no -o BatchMode=yes
+    -o ConnectTimeout={{ configure_ssh_timeout }}
+    -i {{ exercise_ssh_key_path }}
+    {{ vm_credentials.vyos.username }}@{{ vm.mgmt_ip }}
+    /bin/true
+  when:
+    - vm.mgmt_ip != 'UNDISCOVERED'
+    - vm.os_type == 'vyos'
+  ignore_errors: true
+  register: _vyos_ssh_check
+
+- name: "PUSH {{ vm.name }} - SSH key auth failed (VyOS)"
+  debug:
+    msg: >-
+      SSH key authentication failed for {{ vm.name }} ({{ vm.mgmt_ip }}).
+      Bootstrap may not have completed successfully.
+      Error: {{ _vyos_ssh_check.stderr | default('unknown') }}
+  when:
+    - vm.os_type == 'vyos'
+    - vm.mgmt_ip != 'UNDISCOVERED'
+    - _vyos_ssh_check is failed
+
+- name: "PUSH {{ vm.name }} - Check for VyOS config file"
+  stat:
+    path: "{{ exercise_dir }}/VyOS/{{ vm.name }}"
+  register: _vyos_config_file
+  when:
+    - vm.mgmt_ip != 'UNDISCOVERED'
+    - vm.os_type == 'vyos'
+    - _vyos_ssh_check is succeeded
+
+- name: "PUSH {{ vm.name }} - Push VyOS configuration"
+  shell: |
+    {
+      echo "configure"
+      cat {{ exercise_dir }}/VyOS/{{ vm.name }}
+      echo "commit"
+      echo "save"
+      echo "exit"
+    } | ssh -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -o ConnectTimeout={{ configure_ssh_timeout }} \
+        -i {{ exercise_ssh_key_path }} \
+        {{ vm_credentials.vyos.username }}@{{ vm.mgmt_ip }} /bin/vbash -l -s
+  args:
+    executable: /bin/bash
+  when:
+    - vm.mgmt_ip != 'UNDISCOVERED'
+    - vm.os_type == 'vyos'
+    - _vyos_ssh_check is succeeded
+    - _vyos_config_file.stat.exists | default(false)
+  ignore_errors: true
+  register: _vyos_push
+
+- name: "PUSH {{ vm.name }} - VyOS config push result"
+  debug:
+    msg: "{{ 'SUCCESS' if _vyos_push is succeeded else 'FAILED: ' ~ (_vyos_push.stderr | default('unknown error')) }}"
+  when:
+    - vm.os_type == 'vyos'
+    - vm.mgmt_ip != 'UNDISCOVERED'
+    - _vyos_ssh_check is succeeded
+    - _vyos_config_file.stat.exists | default(false)
+
+- name: "PUSH {{ vm.name }} - No VyOS config file found"
+  debug:
+    msg: "No config file at {{ exercise_dir }}/VyOS/{{ vm.name }} - skipping push"
+  when:
+    - vm.os_type == 'vyos'
+    - vm.mgmt_ip != 'UNDISCOVERED'
+    - _vyos_ssh_check is succeeded
+    - not (_vyos_config_file.stat.exists | default(false))
+
+# =============================================================================
+# Linux Config Push (Placeholder)
+# =============================================================================
+
+- name: "PUSH {{ vm.name }} - Linux configuration (stub)"
+  debug:
+    msg: "Linux config push not yet implemented. SSH access: ssh -i {{ exercise_ssh_key_path }} {{ vm_credentials.windows_linux.username }}@{{ vm.mgmt_ip }}"
+  when:
+    - vm.mgmt_ip != 'UNDISCOVERED'
+    - vm.os_type == 'linux'
+
+# =============================================================================
+# Windows Config Push (Placeholder)
+# =============================================================================
+
+- name: "PUSH {{ vm.name }} - Windows configuration (stub)"
+  debug:
+    msg: "Windows config push not yet implemented. WinRM endpoint: http://{{ vm.mgmt_ip }}:5985/wsman"
+  when:
+    - vm.mgmt_ip != 'UNDISCOVERED'
+    - vm.os_type == 'windows'

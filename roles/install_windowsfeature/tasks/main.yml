@@ -1,0 +1,112 @@
+---
+# =============================================================================
+# Role: install_windowsfeature
+# =============================================================================
+# Installs Windows Server roles and features appropriate for each host's
+# ansible_group.  Runs against Windows hosts only; skips Linux and VyOS.
+#
+# Feature selection (evaluated in priority order):
+#   1. windows_features        — explicit list set on the host (full override)
+#   2. windows_feature_sets[ansible_group] + windows_features_extra
+#                              — group default from all.yml, optionally extended
+#                                per-host with windows_features_extra: [...]
+#   3. Empty list              — no features to install; role skips cleanly
+#
+# Management tools and sub-features are included by default
+# (windowsfeature_include_mgmt_tools: true in defaults/main.yml).
+#
+# A reboot is performed immediately if any feature reports reboot_required,
+# so the host is consistent before the next role runs.
+#
+# Called from:
+#   playbooks/server_configuration.yml  → ansible_group: servers
+#   playbooks/domain_management.yml     → ansible_group: domain_controllers
+#   playbooks/workstation_configuration.yml → ansible_group: workstations
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Guard — non-Windows hosts
+# ----------------------------------------------------------------------------
+- name: Skip — non-Windows host
+  ansible.builtin.debug:
+    msg: "install_windowsfeature: skipping {{ inventory_hostname }} (os_type={{ ansible_os_type }})."
+  when: ansible_os_type != 'windows'
+
+- name: End host — non-Windows
+  ansible.builtin.meta: end_host
+  when: ansible_os_type != 'windows'
+
+# ----------------------------------------------------------------------------
+# Determine feature list
+# ----------------------------------------------------------------------------
+- name: Resolve feature list for this host
+  ansible.builtin.set_fact:
+    _features_to_install: >-
+      {{
+        windows_features
+        if (windows_features is defined and windows_features | length > 0)
+        else (
+          (windows_feature_sets[ansible_group] | default([]))
+          + (windows_features_extra | default([]))
+        )
+      }}
+
+# ----------------------------------------------------------------------------
+# Early exit — nothing to install
+# ----------------------------------------------------------------------------
+- name: Skip — no features defined for this host
+  ansible.builtin.debug:
+    msg: >-
+      install_windowsfeature: no features defined for
+      {{ inventory_hostname }} (ansible_group={{ ansible_group }}).
+      Add entries to windows_feature_sets['{{ ansible_group }}'] in all.yml,
+      or set windows_features: [...] on this host.
+  when: _features_to_install | length == 0
+
+- name: End host — nothing to install
+  ansible.builtin.meta: end_host
+  when: _features_to_install | length == 0
+
+# ----------------------------------------------------------------------------
+# Display install plan
+# ----------------------------------------------------------------------------
+- name: Display feature install plan
+  ansible.builtin.debug:
+    msg: |
+      Host           : {{ inventory_hostname }}
+      ansible_group  : {{ ansible_group }}
+      Features ({{ _features_to_install | length }}):
+      {% for f in _features_to_install %}
+        - {{ f }}
+      {% endfor %}
+
+# ----------------------------------------------------------------------------
+# Install features
+# ----------------------------------------------------------------------------
+- name: Install Windows features
+  ansible.windows.win_feature:
+    name: "{{ _features_to_install }}"
+    state: present
+    include_management_tools: "{{ windowsfeature_include_mgmt_tools }}"
+    include_sub_features: "{{ windowsfeature_include_sub_features }}"
+  register: _feature_result
+
+# ----------------------------------------------------------------------------
+# Reboot if required
+# ----------------------------------------------------------------------------
+- name: Reboot — feature installation requires restart
+  ansible.windows.win_reboot:
+    reboot_timeout: 600
+    post_reboot_delay: 30
+    msg: "Rebooting after Windows feature installation (CDX-E)"
+  when: _feature_result.reboot_required | default(false)
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+- name: install_windowsfeature summary
+  ansible.builtin.debug:
+    msg: >-
+      install_windowsfeature complete for {{ inventory_hostname }}.
+      Features installed : {{ _features_to_install | join(', ') }}
+      Reboot performed   : {{ _feature_result.reboot_required | default(false) }}

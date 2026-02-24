@@ -1,0 +1,23 @@
+---
+# =============================================================================
+# Role: configure_active_directory — Default Variables
+# =============================================================================
+
+# Maps scenario.yml domain.functional_level to the value expected by
+# ansible.windows.win_domain / win_domain_controller.
+# Windows Server 2016 and later share the "WinThreshold" forest level.
+ad_functional_level_map:
+  Win2008R2:    Win2008R2
+  Win2012:      Win2012
+  Win2012R2:    Win2012R2
+  Win2016:      WinThreshold
+  Win2019:      WinThreshold
+  WinThreshold: WinThreshold
+
+# Staging directory on the DC where JSON config files are temporarily copied.
+# Cleaned up at the end of the role.
+ad_temp_path: 'C:\Windows\Temp\cdx_ad'
+
+# Seconds to wait for Active Directory to become available after promotion.
+ad_ready_retries: 18
+ad_ready_delay:   10

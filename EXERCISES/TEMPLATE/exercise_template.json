@@ -1,0 +1,80 @@
+{
+  "_meta": {
+    "description": "CDX-E AD Structure Template — defines sites, site links, and OU hierarchy.",
+    "usage": "Copy to EXERCISES/<EXERCISE_NAME>/exercise_template.json and configure for the exercise organization.",
+    "consumed_by": "generate_structure.ps1 → structure.json → ad_deploy.ps1",
+    "version": "1.0"
+  },
+
+  "sites": [
+    {
+      "name": "Headquarters",
+      "description": "Primary location — replace with exercise organization name",
+      "subnet": {
+        "cidr": "10.0.0.0/24",
+        "location": "City, State, Country"
+      }
+    }
+    ,
+    {
+      "_comment": "Add additional sites below for multi-site exercises. Remove this block for single-site.",
+      "name": "Branch-Office-1",
+      "description": "Secondary location",
+      "subnet": {
+        "cidr": "10.0.1.0/24",
+        "location": "City, State, Country"
+      }
+    }
+  ],
+
+  "siteLinks": [
+    {
+      "_comment": "Define one link per site pair. Remove this block for single-site exercises.",
+      "name": "HQ-to-Branch",
+      "sites": ["Headquarters", "Branch-Office-1"],
+      "cost": 100,
+      "replicationIntervalMins": 15
+    }
+  ],
+
+  "organizationalStructure": {
+    "rootOU": "Sites",
+    "rootOUDescription": "Top-level container for all site-specific OUs",
+
+    "siteMappings": {
+      "HQ": {
+        "siteName": "Headquarters",
+        "departments": [
+          "Operations",
+          "IT-Core",
+          "HR",
+          "Engineering"
+        ]
+      },
+      "Branch": {
+        "_comment": "Remove Branch block for single-site exercises.",
+        "siteName": "Branch-Office-1",
+        "departments": [
+          "Operations",
+          "IT-Core"
+        ]
+      }
+    },
+
+    "departmentSubOUs": [
+      "Workstations",
+      "Servers",
+      "Users",
+      "Groups",
+      "ServiceAccounts",
+      "Resources"
+    ]
+  },
+
+  "advancedOptions": {
+    "createSiteSubnets": true,
+    "createSiteLinks": true,
+    "protectOUsFromDeletion": false,
+    "ouNamingScheme": "hierarchical"
+  }
+}

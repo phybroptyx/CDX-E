@@ -1,0 +1,7 @@
+﻿---
+galaxy_info:
+  author: CDX
+  description: "Applies base configuration to a Windows or Linux VM"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

@@ -1,0 +1,31 @@
+---
+# =============================================================================
+# CDX-E Playbook: Exercise Initiation
+# =============================================================================
+# Purpose: Read and store exercise scenario-specific variables.
+#          This playbook runs first in every deployment to load the exercise
+#          definition and make scenario facts available to all subsequent plays.
+#
+# Roles:
+#   - read_exercise_config
+#
+# Usage:
+#   ansible-playbook playbooks/exercise_initiation.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@secrets/credentials.yml"
+# =============================================================================
+
+- name: Exercise Initiation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [always, initiation]
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  vars:
+    exercise_dir: "{{ playbook_dir }}/EXERCISES/{{ exercise }}"
+
+  roles:
+    - read_exercise_config

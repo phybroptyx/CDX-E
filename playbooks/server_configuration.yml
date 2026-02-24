@@ -1,0 +1,42 @@
+---
+# =============================================================================
+# CDX-E Playbook: General Server Configuration
+# =============================================================================
+# Purpose: Apply base OS configuration and Windows Server features to
+#          member servers (ansible_group: servers).  Domain controllers run
+#          through domain_management.yml; workstations through
+#          workstation_configuration.yml.
+#
+# Roles:
+#   - configure_vm           — hostname, timezone, WinRM, PS policy
+#   - install_windowsfeature — features from windows_feature_sets['servers']
+#
+# Usage:
+#   ansible-playbook playbooks/server_configuration.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@Secrets/credentials.yml" --ask-vault-pass
+# =============================================================================
+
+- name: General Server Configuration
+  hosts: servers
+  gather_facts: false
+  tags: [servers, configuration]
+
+  vars_files:
+    - "{{ playbook_dir }}/Secrets/credentials.yml"
+
+  pre_tasks:
+    - name: "[preflight] Skip — servers phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.servers | default(true) | bool)
+
+    - name: "[preflight] Assert servers group is populated"
+      ansible.builtin.assert:
+        that: groups['servers'] | default([]) | length > 0
+        fail_msg: >-
+          servers group is empty. Check inventory_refresh output and ensure
+          vms.yaml has VMs with ansible_group: servers.
+
+  roles:
+    - configure_vm
+    - install_windowsfeature

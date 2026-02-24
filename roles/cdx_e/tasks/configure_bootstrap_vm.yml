@@ -1,0 +1,155 @@
+---
+# =============================================================================
+# Configure Phase 3: Per-VM Bootstrap (Key Distribution)
+# =============================================================================
+# Distributes the controller SSH public key to each VM.
+# Method varies by OS type:
+#   vyos    - sshpass + SSH, VyOS CLI to add public key
+#   linux   - sshpass + SSH, append to authorized_keys
+#   windows - Proxmox guest-exec API to enable WinRM
+#
+# VyOS non-interactive SSH:
+#   VyOS CLI commands (configure, commit, save) are NOT available in a
+#   plain /bin/vbash shell. Use /bin/vbash -l -s (login shell + stdin)
+#   so VyOS's own profile scripts load the CLI environment automatically.
+#   This avoids hardcoding paths like /opt/vyatta/etc/functions/script-command
+#   which may not exist on all VyOS versions (e.g. VyOS 2025).
+#   Heredoc via sshpass feeds stdin through the SSH tunnel to remote vbash.
+#
+# Expected variables:
+#   vm                    - VM dict (with os_type, mgmt_ip)
+#   controller_public_key - Public key content
+#   vm_credentials        - Credential dict from secrets/credentials.yml
+# =============================================================================
+
+- name: "BOOTSTRAP {{ vm.name }} - Skip (no management IP)"
+  debug:
+    msg: "Skipping {{ vm.name }} - management IP not discovered"
+  when: vm.mgmt_ip == 'UNDISCOVERED'
+
+# =============================================================================
+# VyOS Bootstrap
+# =============================================================================
+
+- name: "BOOTSTRAP {{ vm.name }} - Distribute SSH key (VyOS)"
+  shell: |
+    sshpass -p '{{ vm_credentials.vyos.password }}' \
+    ssh -o StrictHostKeyChecking=no -o ConnectTimeout={{ bootstrap_ssh_timeout }} \
+    {{ vm_credentials.vyos.username }}@{{ vm.mgmt_ip }} /bin/vbash -l -s <<'VYOS_EOF'
+    configure
+    set system login user {{ vm_credentials.vyos.username }} authentication public-keys controller type {{ controller_public_key.split()[0] }}
+    set system login user {{ vm_credentials.vyos.username }} authentication public-keys controller key {{ controller_public_key.split()[1] }}
+    commit
+    save
+    exit
+    VYOS_EOF
+  args:
+    executable: /bin/bash
+  when:
+    - vm.mgmt_ip != 'UNDISCOVERED'
+    - vm.os_type == 'vyos'
+  ignore_errors: true
+  register: _vyos_bootstrap
+  no_log: true
+
+- name: "BOOTSTRAP {{ vm.name }} - VyOS key distribution result"
+  debug:
+    msg: "{{ 'SUCCESS' if _vyos_bootstrap is succeeded else 'FAILED: ' ~ (_vyos_bootstrap.stderr | default('unknown error')) }}"
+  when:
+    - vm.os_type == 'vyos'
+    - vm.mgmt_ip != 'UNDISCOVERED'
+
+# =============================================================================
+# Linux Bootstrap
+# =============================================================================
+
+- name: "BOOTSTRAP {{ vm.name }} - Distribute SSH key (Linux)"
+  command: >
+    sshpass -p '{{ vm_credentials.windows_linux.password }}'
+    ssh -o StrictHostKeyChecking=no -o ConnectTimeout={{ bootstrap_ssh_timeout }}
+    {{ vm_credentials.windows_linux.username }}@{{ vm.mgmt_ip }}
+    "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '{{ controller_public_key }}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+  when:
+    - vm.mgmt_ip != 'UNDISCOVERED'
+    - vm.os_type == 'linux'
+  ignore_errors: true
+  register: _linux_bootstrap
+  no_log: true
+
+- name: "BOOTSTRAP {{ vm.name }} - Linux key distribution result"
+  debug:
+    msg: "{{ 'SUCCESS' if _linux_bootstrap is succeeded else 'FAILED: ' ~ (_linux_bootstrap.stderr | default('unknown error')) }}"
+  when:
+    - vm.os_type == 'linux'
+    - vm.mgmt_ip != 'UNDISCOVERED'
+
+# =============================================================================
+# Windows Bootstrap (WinRM via Proxmox guest-exec)
+# =============================================================================
+
+- name: "BOOTSTRAP {{ vm.name }} - Enable WinRM via guest-exec (Windows)"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ vm.proxmox.node }}/qemu/{{ vm.vmid }}/agent/exec"
+    method: POST
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    body_format: json
+    body:
+      command: "powershell.exe"
+      input-data: |
+        Set-Service WinRM -StartupType Automatic
+        Start-Service WinRM
+        $listener = Get-ChildItem WSMan:\localhost\Listener -ErrorAction SilentlyContinue | Where-Object { $_.Keys -contains 'Transport=HTTP' }
+        if (-not $listener) {
+          New-Item -Path WSMan:\localhost\Listener -Transport HTTP -Address * -Port 5985 -Force
+        }
+        Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value $true -Force
+        Set-Item WSMan:\localhost\Service\Auth\Basic -Value $true -Force
+        $rule = Get-NetFirewallRule -DisplayName 'WinRM HTTP' -ErrorAction SilentlyContinue
+        if (-not $rule) {
+          New-NetFirewallRule -DisplayName 'WinRM HTTP' -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow
+        }
+  when:
+    - vm.mgmt_ip != 'UNDISCOVERED'
+    - vm.os_type == 'windows'
+  ignore_errors: true
+  register: _winrm_exec
+
+- name: "BOOTSTRAP {{ vm.name }} - Wait for WinRM script execution"
+  pause:
+    seconds: 10
+  when:
+    - vm.os_type == 'windows'
+    - vm.mgmt_ip != 'UNDISCOVERED'
+    - _winrm_exec is succeeded
+
+- name: "BOOTSTRAP {{ vm.name }} - Verify WinRM is listening (Windows)"
+  uri:
+    url: "http://{{ vm.mgmt_ip }}:5985/wsman"
+    method: POST
+    headers:
+      Content-Type: "application/soap+xml;charset=UTF-8"
+    body: |
+      <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
+                  xmlns:wsmid="http://schemas.dmtf.org/wbem/wsman/identity/1/wsmanidentity.xsd">
+        <s:Header/>
+        <s:Body>
+          <wsmid:Identify/>
+        </s:Body>
+      </s:Envelope>
+    status_code: [200, 401]
+    timeout: "{{ bootstrap_ssh_timeout }}"
+  when:
+    - vm.os_type == 'windows'
+    - vm.mgmt_ip != 'UNDISCOVERED'
+    - _winrm_exec is succeeded
+  ignore_errors: true
+  register: _winrm_verify
+
+- name: "BOOTSTRAP {{ vm.name }} - WinRM bootstrap result"
+  debug:
+    msg: "{{ 'SUCCESS - WinRM listening on port 5985' if (_winrm_verify is succeeded) else 'FAILED - WinRM not responding' }}"
+  when:
+    - vm.os_type == 'windows'
+    - vm.mgmt_ip != 'UNDISCOVERED'

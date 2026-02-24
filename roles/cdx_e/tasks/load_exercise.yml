@@ -1,0 +1,65 @@
+---
+# =============================================================================
+# Load and parse exercise YAML specification
+# =============================================================================
+
+- name: Validate exercise YAML path is provided
+  assert:
+    that:
+      - cdx_exercise_yaml is defined
+      - cdx_exercise_yaml | length > 0
+    fail_msg: "exercise_yaml must be specified (e.g., -e 'exercise_yaml=../hardened_champion_vms.yaml')"
+
+- name: Load exercise YAML specification
+  include_vars:
+    file: "{{ cdx_exercise_yaml }}"
+    name: exercise_config
+
+- name: Set exercise metadata facts
+  set_fact:
+    exercise_name: "{{ exercise_config.exercise.name }}"
+    exercise_name_lower: "{{ exercise_config.exercise.name | lower }}"
+    exercise_pool: "EX_{{ exercise_config.exercise.name }}"
+    exercise_pool_comment: "Operation {{ exercise_config.exercise.name | replace('_', ' ') | title }}"
+    exercise_description: "{{ exercise_config.exercise.description | default('') }}"
+    all_vms: "{{ exercise_config.virtual_machines }}"
+    vm_filter_list: "{{ cdx_vm_filter.split(',') | map('trim') | list if cdx_vm_filter != 'all' else [] }}"
+    network_topology: "{{ exercise_config.network_topology | default({}) }}"
+    cloud_init_defaults: "{{ exercise_config.cloud_init_defaults | default({}) }}"
+
+- name: Query existing VMs from Proxmox cluster
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/cluster/resources?type=vm"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+  register: _cluster_vms
+  when: not cdx_dry_run | bool
+
+- name: Build existing VM lookup
+  set_fact:
+    existing_vmids: "{{ _cluster_vms.json.data | map(attribute='vmid') | map('int') | list }}"
+    existing_vm_names: "{{ dict(_cluster_vms.json.data | map(attribute='vmid') | zip(_cluster_vms.json.data | map(attribute='name'))) }}"
+  when: not cdx_dry_run | bool
+
+- name: Set empty VM lookup for dry run
+  set_fact:
+    existing_vmids: []
+    existing_vm_names: {}
+  when: cdx_dry_run | bool
+
+- name: Display exercise summary
+  debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════════════
+        CDX-E Framework - Exercise Lifecycle Management (Ansible)
+        Action:      {{ cdx_action | upper }}
+      ═══════════════════════════════════════════════════════════════════════
+        Exercise:    {{ exercise_name }}
+        Description: {{ exercise_description }}
+        Pool:        {{ exercise_pool }}
+        Total VMs:   {{ all_vms | length }}
+        VM Filter:   {{ cdx_vm_filter }}
+        Dry Run:     {{ cdx_dry_run }}
+      ═══════════════════════════════════════════════════════════════════════

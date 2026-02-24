@@ -1,0 +1,89 @@
+---
+# =============================================================================
+# Configure Phase 2: Management IP Discovery
+# =============================================================================
+# Waits for VMs to boot, then polls each VM's QEMU guest agent to discover
+# management network IPs (10.0.0.0/22 on net0).
+#
+# Uses uri+loop directly (not include_tasks) to avoid variable scoping issues
+# with set_fact accumulators. Uses json_query for the filter chain to handle
+# interfaces that lack the 'ip-addresses' key (e.g., loopback).
+#
+# Expected variables:
+#   configure_vms - List of VM dicts with os_type annotation
+# =============================================================================
+
+- name: "DISCOVER - Waiting for VMs to boot"
+  pause:
+    prompt: >-
+      All VMs have been started. Verify they are fully booted in Proxmox
+      before continuing. Press ENTER when ready to begin management IP discovery
+
+- name: "DISCOVER - Poll guest agent for each VM"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ item.proxmox.node }}/qemu/{{ item.vmid }}/agent/network-get-interfaces"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 500]
+  register: _ga_results
+  loop: "{{ configure_vms }}"
+  loop_control:
+    label: "{{ item.vmid }} - {{ item.name }}"
+  until: >-
+    _ga_results.status == 200 and
+    (_ga_results.json.data.result | default([])
+      | json_query('[*]."ip-addresses"[?"ip-address-type"==`ipv4`]."ip-address"')
+      | flatten | select('match', '^10\\.0\\.[0-3]\\.')
+      | list | length > 0)
+  retries: "{{ guest_agent_poll_retries }}"
+  delay: "{{ guest_agent_poll_interval }}"
+  ignore_errors: true
+
+- name: "DISCOVER - Initialize IP accumulator"
+  set_fact:
+    _vm_mgmt_ips: {}
+
+- name: "DISCOVER - Extract management IP from each result"
+  set_fact:
+    _vm_mgmt_ips: "{{ _vm_mgmt_ips | combine({_vmid: _ip}) }}"
+  vars:
+    _vmid: "{{ item.item.vmid | string }}"
+    _jq: '[*]."ip-addresses"[?"ip-address-type"==`ipv4`]."ip-address"'
+    _matched_ips: "{{ (item.json.data.result | default([]) | json_query(_jq) | flatten | select('match', '^10\\.0\\.[0-3]\\.') | list) if (item is succeeded and item.status | default(0) == 200) else [] }}"
+    _ip: "{{ _matched_ips[0] if (_matched_ips | length > 0) else 'UNDISCOVERED' }}"
+  loop: "{{ _ga_results.results }}"
+  loop_control:
+    label: "{{ item.item.vmid }} - {{ item.item.name }} -> {{ _ip }}"
+
+- name: "DISCOVER - Annotate VMs with management IPs"
+  set_fact:
+    _annotated_vms: "{{ (_annotated_vms | default([])) + [item | combine({'mgmt_ip': _vm_mgmt_ips[item.vmid | string] | default('UNDISCOVERED') | trim})] }}"
+  loop: "{{ configure_vms }}"
+  loop_control:
+    loop_var: item
+    label: "{{ item.vmid }} - {{ _vm_mgmt_ips[item.vmid | string] | default('UNDISCOVERED') | trim }}"
+
+- name: "DISCOVER - Apply management IP annotations"
+  set_fact:
+    configure_vms: "{{ _annotated_vms }}"
+
+- name: "DISCOVER - IP Mapping"
+  debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════════════
+        MANAGEMENT IP DISCOVERY RESULTS
+      ═══════════════════════════════════════════════════════════════════════
+      {% for vm in configure_vms %}
+        {{ '%-6s' | format(vm.vmid) }} {{ '%-25s' | format(vm.name) }} {{ '%-8s' | format(vm.os_type) }} {{ vm.mgmt_ip }}
+      {% endfor %}
+      ═══════════════════════════════════════════════════════════════════════
+
+- name: "DISCOVER - Warn about undiscovered VMs"
+  debug:
+    msg: "WARNING: {{ item.name }} ({{ item.vmid }}) - management IP not discovered, will be skipped in bootstrap/push phases"
+  loop: "{{ configure_vms | selectattr('mgmt_ip', 'equalto', 'UNDISCOVERED') | list }}"
+  loop_control:
+    label: "{{ item.vmid }} - {{ item.name }}"
+  when: configure_vms | selectattr('mgmt_ip', 'equalto', 'UNDISCOVERED') | list | length > 0

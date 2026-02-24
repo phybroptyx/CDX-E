@@ -1,0 +1,80 @@
+---
+# =============================================================================
+# Role: destroy_scenario
+# =============================================================================
+# Destroys scenario VMs via Terraform and removes the exercise resource pool.
+#
+# Expects facts set by read_exercise_config:
+#   scenario     — parsed scenario.yml
+#   exercise_dir — path to EXERCISES/<name>/
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight
+# ----------------------------------------------------------------------------
+- name: Assert required facts are present
+  ansible.builtin.assert:
+    that:
+      - scenario is defined
+      - exercise_dir is defined
+    fail_msg: "Required facts not found. Ensure exercise_initiation.yml runs first."
+
+- name: Check Terraform is available
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} version"
+  register: _tf_version
+  failed_when: _tf_version.rc != 0
+  changed_when: false
+
+- name: Check Terraform state exists
+  ansible.builtin.stat:
+    path: "{{ exercise_dir }}/terraform/terraform.tfstate"
+  register: _tf_state_stat
+
+- name: Warn if no Terraform state found
+  ansible.builtin.debug:
+    msg: >-
+      No Terraform state found at {{ exercise_dir }}/terraform/terraform.tfstate.
+      Skipping terraform destroy — VMs may need manual removal.
+  when: not _tf_state_stat.stat.exists
+
+# ----------------------------------------------------------------------------
+# Terraform destroy
+# ----------------------------------------------------------------------------
+- name: Terraform destroy
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} destroy -auto-approve -input=false"
+    chdir: "{{ exercise_dir }}/terraform"
+  register: _tf_destroy
+  changed_when: >-
+    'Destroy complete!' in _tf_destroy.stdout and
+    '0 destroyed' not in _tf_destroy.stdout
+  when: _tf_state_stat.stat.exists
+
+- name: Show Terraform destroy output
+  ansible.builtin.debug:
+    msg: "{{ _tf_destroy.stdout_lines }}"
+  when: _tf_state_stat.stat.exists
+
+# ----------------------------------------------------------------------------
+# Resource pool cleanup — after VMs are gone
+# ----------------------------------------------------------------------------
+- name: Delete exercise resource pool
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/pools/EX_{{ scenario.exercise.name }}"
+    method: DELETE
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 400, 404, 500]   # 400/404/500 = already gone, continue
+  when: _tf_state_stat.stat.exists
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+- name: Scenario VM teardown summary
+  ansible.builtin.debug:
+    msg: |
+      Scenario VM teardown complete.
+      Exercise: {{ scenario.exercise.name }}
+      State   : {{ exercise_dir }}/terraform/

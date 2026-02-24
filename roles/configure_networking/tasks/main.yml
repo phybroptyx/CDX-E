@@ -1,0 +1,276 @@
+---
+# =============================================================================
+# Role: configure_networking
+# =============================================================================
+# Two responsibilities:
+#
+#   Part 1 — Proxmox SDN
+#     Templates /etc/network/interfaces on each affected Proxmox node to
+#     create OVS bridges, CDX-I patch ports, and VLAN assignments defined
+#     in vms.yaml → network_topology.  Reloads networking via ifreload -a.
+#     All Proxmox node tasks are delegated from localhost.
+#
+#   Part 2 — VyOS router configuration
+#     Stages and applies per-router VyOS CLI config files found at:
+#       EXERCISES/<name>/VyOS/<vm-name>.conf
+#     Config is pushed via SSH (vbash -l -s).  Routers with no config file
+#     emit a warning and are skipped (not a failure — manual config valid).
+#
+# Expects facts set by read_exercise_config:
+#   virtual_machines  — list of VM objects from vms.yaml
+#   network_topology  — network_topology block from vms.yaml
+#   scenario          — parsed scenario.yml
+#   exercise_dir      — path to EXERCISES/<name>/
+#
+# Proxmox nodes must be in inventory/hosts.yml → proxmox_cluster.
+# VyOS hosts must be in the generated exercise_hosts.yml (ansible_host set).
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight
+# ----------------------------------------------------------------------------
+- name: Assert required facts are present
+  ansible.builtin.assert:
+    that:
+      - virtual_machines is defined
+      - scenario is defined
+      - exercise_dir is defined
+    fail_msg: >-
+      Required facts not found. Ensure read_exercise_config runs
+      before configure_networking.
+
+# ----------------------------------------------------------------------------
+# Guard — networking phase disabled
+# ----------------------------------------------------------------------------
+- name: Skip — networking phase disabled in scenario
+  ansible.builtin.meta: end_play
+  when: not (scenario.phases.networking | default(true) | bool)
+
+# ----------------------------------------------------------------------------
+# Guard — no network topology defined
+# ----------------------------------------------------------------------------
+- name: Skip — no network_topology.sites defined
+  ansible.builtin.debug:
+    msg: >-
+      No network_topology.sites defined in vms.yaml.
+      Skipping Proxmox SDN configuration.
+      Exercise bridges must already exist on the target Proxmox nodes.
+  when: network_topology.sites is not defined or network_topology.sites | length == 0
+
+- name: End play early — no network topology to deploy
+  ansible.builtin.meta: end_play
+  when: network_topology.sites is not defined or network_topology.sites | length == 0
+
+# ===========================================================================
+# Part 1: Proxmox SDN — OVS bridges on Proxmox nodes
+# ===========================================================================
+
+# ----------------------------------------------------------------------------
+# Build per-node bridge assignments from network_topology
+# ----------------------------------------------------------------------------
+- name: Build per-node site assignments
+  ansible.builtin.set_fact:
+    _sites_per_node: >-
+      {%- set result = {} -%}
+      {%- for site in network_topology.sites | default([]) -%}
+        {%- set node = site.node -%}
+        {%- if node not in result -%}
+          {%- set _ = result.update({node: []}) -%}
+        {%- endif -%}
+        {%- set _ = result[node].append(site) -%}
+      {%- endfor -%}
+      {{ result }}
+
+- name: Build per-node common bridge assignments
+  ansible.builtin.set_fact:
+    _common_per_node: >-
+      {%- set result = {} -%}
+      {%- for bridge in network_topology.common_bridges | default([]) -%}
+        {%- for node in bridge.nodes | default([]) -%}
+          {%- if node not in result -%}
+            {%- set _ = result.update({node: []}) -%}
+          {%- endif -%}
+          {%- set _ = result[node].append(bridge) -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ result }}
+
+- name: Determine affected Proxmox nodes
+  ansible.builtin.set_fact:
+    _affected_nodes: >-
+      {{ (_sites_per_node.keys() | list)
+         | union(_common_per_node.keys() | list)
+         | unique | sort }}
+
+- name: Display SDN deployment plan
+  ansible.builtin.debug:
+    msg: |
+      Deploying SDN configuration for exercise: {{ scenario.exercise.name }}
+      Affected nodes ({{ _affected_nodes | length }}): {{ _affected_nodes | join(', ') }}
+      {% for node in _affected_nodes %}
+      {{ node }}:
+        Sites         : {{ (_sites_per_node[node] | default([]) | map(attribute='label') | list) | join(', ') or '(none)' }}
+        Common bridges: {{ (_common_per_node[node] | default([]) | map(attribute='name') | list) | join(', ') or '(none)' }}
+      {% endfor %}
+
+# ----------------------------------------------------------------------------
+# Template /etc/network/interfaces on each affected Proxmox node
+# ----------------------------------------------------------------------------
+- name: Deploy /etc/network/interfaces on Proxmox node
+  ansible.builtin.template:
+    src: interfaces.j2
+    dest: /etc/network/interfaces
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  delegate_to: "{{ item }}"
+  vars:
+    node_name: "{{ item }}"
+    node_sites: "{{ _sites_per_node[item] | default([]) }}"
+    node_common_bridges: "{{ _common_per_node[item] | default([]) }}"
+    base_network: "{{ hostvars[item].base_network }}"
+    exercise_name: "{{ scenario.exercise.name }}"
+  loop: "{{ _affected_nodes }}"
+  loop_control:
+    label: "{{ item }}"
+  register: _template_results
+
+# ----------------------------------------------------------------------------
+# Pre-create OVS bridges (idempotent: --may-exist)
+# ifreload -a calls ovs-vsctl list-ports before creating bridges, which
+# fails if the bridge does not yet exist. Pre-creating with --may-exist
+# lets OVS register the bridges before ifupdown2 reconciles.
+# ----------------------------------------------------------------------------
+- name: Pre-create OVS bridges on Proxmox node
+  ansible.builtin.shell:
+    cmd: |
+      {% for site in _sites_per_node[item] | default([]) %}
+      {% for bridge in site.bridges | default([]) %}
+      ovs-vsctl --may-exist add-br {{ bridge.name }}
+      {% endfor %}
+      {% endfor %}
+      {% for bridge in _common_per_node[item] | default([]) %}
+      ovs-vsctl --may-exist add-br {{ bridge.name }}
+      {% endfor %}
+  delegate_to: "{{ item }}"
+  changed_when: false
+  loop: "{{ _affected_nodes }}"
+  loop_control:
+    label: "{{ item }}"
+
+# ----------------------------------------------------------------------------
+# Reload networking on nodes where the interfaces file changed
+# ----------------------------------------------------------------------------
+- name: Reload networking on Proxmox node
+  ansible.builtin.command: ifreload -a
+  delegate_to: "{{ item.item }}"
+  loop: "{{ _template_results.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.changed | default(false)
+
+# ===========================================================================
+# Part 2: VyOS router configuration
+# ===========================================================================
+
+# ----------------------------------------------------------------------------
+# Identify VyOS VMs
+# ----------------------------------------------------------------------------
+- name: Initialize VyOS VM list
+  ansible.builtin.set_fact:
+    _vyos_vms: []
+
+- name: Build VyOS VM list
+  ansible.builtin.set_fact:
+    _vyos_vms: "{{ _vyos_vms + [item] }}"
+  when: template_registry[item.template].os_type == 'vyos'
+  loop: "{{ virtual_machines }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Skip VyOS configuration — no VyOS VMs in exercise
+  ansible.builtin.debug:
+    msg: "No VyOS VMs defined in exercise. Skipping VyOS configuration."
+  when: _vyos_vms | length == 0
+
+# ----------------------------------------------------------------------------
+# Locate per-VM config files at EXERCISES/<name>/VyOS/<vm-name>.conf
+# ----------------------------------------------------------------------------
+- name: Check for VyOS config file
+  ansible.builtin.stat:
+    path: "{{ exercise_dir }}/VyOS/{{ item.name }}.conf"
+  loop: "{{ _vyos_vms }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: _vyos_conf_stats
+  when: _vyos_vms | length > 0
+
+# ----------------------------------------------------------------------------
+# Stage config on each VyOS host, then apply via vbash
+# ----------------------------------------------------------------------------
+- name: Stage VyOS config file on router
+  ansible.builtin.copy:
+    src: "{{ exercise_dir }}/VyOS/{{ item.item.name }}.conf"
+    dest: "/tmp/vyos-{{ item.item.name }}.conf"
+    mode: '0600'
+  delegate_to: "{{ item.item.name }}"
+  loop: "{{ _vyos_conf_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.stat.exists
+    - hostvars[item.item.name].ansible_host | default('') | length > 0
+
+- name: Apply VyOS configuration
+  ansible.builtin.shell: "vbash -l -s < /tmp/vyos-{{ item.item.name }}.conf"
+  delegate_to: "{{ item.item.name }}"
+  loop: "{{ _vyos_conf_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.stat.exists
+    - hostvars[item.item.name].ansible_host | default('') | length > 0
+  changed_when: true
+
+# ----------------------------------------------------------------------------
+# Warnings for missing or unreachable routers
+# ----------------------------------------------------------------------------
+- name: Warn — VyOS config file not found
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: No config file for {{ item.item.name }} at
+      {{ exercise_dir }}/VyOS/{{ item.item.name }}.conf
+      Manual VyOS configuration required for this router.
+  loop: "{{ _vyos_conf_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: not item.stat.exists
+
+- name: Warn — VyOS host has no ansible_host IP
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ item.item.name }} has no ansible_host IP in inventory.
+      Cannot push VyOS config. Ensure vm_power_management has resolved the IP
+      or set a static cloud_init.ip in vms.yaml.
+  loop: "{{ _vyos_conf_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.stat.exists
+    - hostvars[item.item.name].ansible_host | default('') | length == 0
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+- name: configure_networking summary
+  ansible.builtin.debug:
+    msg: |
+      configure_networking complete.
+      Exercise          : {{ scenario.exercise.name }}
+      Proxmox nodes     : {{ _affected_nodes | length }}
+      VyOS routers      : {{ _vyos_vms | length }}
+      Configs applied   : {{ _vyos_conf_stats.results | default([])
+                             | selectattr('stat.exists')
+                             | map(attribute='item.name') | list
+                             | join(', ') | default('none') }}

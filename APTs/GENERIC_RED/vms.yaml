@@ -1,0 +1,43 @@
+---
+# =============================================================================
+# APT VM Specification: GENERIC_RED
+# =============================================================================
+# Default Red Team VM fleet.
+# VMIDs 3001-3099 are reserved for Red Team / APT infrastructure.
+# =============================================================================
+
+virtual_machines:
+
+  # ---------------------------------------------------------------------------
+  # C2 Server — Adaptix C2 (open source, pre-installed via Packer template)
+  # ---------------------------------------------------------------------------
+  - vmid: 3001
+    name: "RT-C2-01"
+    template: "adaptix_c2"
+    ansible_group: "red_team"
+    resources:
+      memory_mb: 8192
+      cores: 4
+      sockets: 1
+    cloud_init:
+      ip: "10.0.3.10"
+      cidr: 24
+      gateway: "10.0.3.1"
+      nameserver: "10.0.0.10"
+
+  # ---------------------------------------------------------------------------
+  # Operator Workstation — Kali Linux
+  # ---------------------------------------------------------------------------
+  - vmid: 3010
+    name: "RT-OPS-01"
+    template: "kali"
+    ansible_group: "red_team"
+    resources:
+      memory_mb: 8192
+      cores: 4
+      sockets: 1
+    cloud_init:
+      ip: "10.0.3.20"
+      cidr: 24
+      gateway: "10.0.3.1"
+      nameserver: "10.0.0.10"

@@ -1,0 +1,27 @@
+---
+# =============================================================================
+# CDX-E Playbook: DHCP Server Management
+# =============================================================================
+# Purpose: Install and manage DHCP services on designated DHCP servers.
+#
+# Roles:
+#   - configure_vm
+#   - install_windowsfeature
+#
+# Usage:
+#   ansible-playbook playbooks/dhcp_management.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@secrets/credentials.yml"
+# =============================================================================
+
+- name: DHCP Server Management
+  hosts: dhcp_servers
+  gather_facts: false
+  tags: [dhcp, services]
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  roles:
+    - configure_vm
+    - install_windowsfeature

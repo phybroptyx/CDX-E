@@ -66,11 +66,13 @@ Verify connectivity:
 ssh root@cdx-pve-01 "hostname"
 ```
 
-### Host Network Configuration Script
+### Host Network Configuration
 
-Each Proxmox host requires the `exercise.sh` network configuration script located at `/root/exercise.sh`. This script manages exercise-specific network interface configurations (bridges, VLANs, etc.).
+Network configuration (OVS bridges, CDX-I patch ports, VLAN tags) is managed centrally via Ansible. Each exercise YAML includes a `network_topology` section that defines the required bridges per Proxmox node. During deploy, Ansible templates `/etc/network/interfaces` on each affected node via SSH and reloads networking with `ifreload -a`.
 
-See [Host Network Configuration](#host-network-configuration) for details.
+**Per-host base config** (management IPs, physical interfaces) is stored in `inventory/host_vars/<node>.yml`.
+
+> **Note:** This replaces the legacy `exercise.sh` script and per-host `interfaces.<exercise>` files. Those are no longer required on Proxmox hosts.
 
 ---
 
@@ -284,49 +286,40 @@ When a template is recreated:
 
 ---
 
-## Host Network Configuration
-
-### Purpose
-
-The `exercise.sh` script on each Proxmox host manages network interface configurations specific to each exercise. Different exercises require different network topologies (bridges, VLANs, isolated networks), and this script switches between them.
-
-### Location
-
-```
-/root/exercise.sh    # On each Proxmox host (cdx-pve-01, cdx-pve-02, cdx-pve-03)
-```
+## Host Network Configuration (Ansible-Managed)
 
 ### How It Works
 
-The script uses pre-configured network interface files stored in `/etc/network/`:
+Network configuration is fully managed by Ansible. No per-host scripts or pre-staged interface files are required.
 
-```
-/etc/network/
-├── interfaces                    # Active configuration
-├── interfaces.orig               # Original/baseline configuration
-├── interfaces.desert_citadel     # DESERT_CITADEL exercise config
-├── interfaces.obsidian_dagger    # OBSIDIAN_DAGGER exercise config
-└── interfaces.chilled_rocket     # CHILLED_ROCKET exercise config
-```
+**Data sources:**
 
-**Activation:** When called with an exercise name, the script:
-1. Backs up the current configuration
-2. Copies the exercise-specific configuration to `interfaces`
-3. Reloads network interfaces (`ifreload -a`)
+| Source | Content |
+|--------|---------|
+| `inventory/host_vars/<node>.yml` | Per-host base config (management IPs, physical interfaces, bridge structure) |
+| Exercise YAML `network_topology:` | OVS bridges, CDX-I patch ports, VLAN tags per site |
+| `roles/cdx_e/templates/interfaces.j2` | Jinja2 template composing the full `/etc/network/interfaces` |
 
-**Reversion:** When called with `revert`, the script:
-1. Backs up the current configuration
-2. Restores `interfaces.orig` as the active configuration
+**Deploy flow:**
+1. Ansible parses `network_topology` from the exercise YAML
+2. Builds per-node site assignments (which bridges go on which host)
+3. Templates `/etc/network/interfaces` on each affected node via SSH (`delegate_to`)
+4. Runs `ifreload -a` to apply (only if the file changed)
 
-### Manual Usage
+**Revert flow:**
+1. Re-templates `/etc/network/interfaces` with base config only (no exercise bridges)
+2. Runs `ifreload -a` — OVS patch ports and exercise bridges are removed
 
-```bash
-# Activate exercise network configuration
-./exercise.sh desert_citadel
+### What the Template Produces
 
-# Revert to original configuration
-./exercise.sh revert
-```
+For each exercise bridge, the template generates:
+- OVS bridge definition with STP disabled
+- For external (`_ex`) bridges: OVS patch port pair connecting to vmbr303 (CDX-I) with a VLAN tag
+- CDX-I bridge (vmbr303) `post-up` directives for its side of each patch port pair
+
+### Legacy Approach (Deprecated)
+
+The previous approach used per-host `exercise.sh` scripts and pre-staged `/etc/network/interfaces.<exercise>` files. These are no longer needed and can be removed from Proxmox hosts.
 
 ---
 
@@ -483,20 +476,21 @@ Target specific VMs using the `-VmFilter` parameter.
 
 ### Network Configuration Failures
 
-**Symptom:** `Network setup failed on cdx-pve-XX`
+**Symptom:** Network setup task fails during deploy
 
 **Solutions:**
-1. Verify `exercise.sh` exists on the host:
+1. Verify SSH connectivity from the Ansible control node:
    ```bash
-   ssh root@cdx-pve-01 "ls -la /root/exercise.sh"
+   ssh root@cdx-pve-01 "hostname"
    ```
-2. Check the exercise-specific interface file exists:
+2. Verify `host_vars` exists for the target node:
    ```bash
-   ssh root@cdx-pve-01 "ls -la /etc/network/interfaces.desert_citadel"
+   ls inventory/host_vars/cdx-pve-01.yml
    ```
-3. Manually test the script:
+3. Check the exercise YAML has a `network_topology` section with correct node assignments
+4. Verify `ifreload` is available on the Proxmox host:
    ```bash
-   ssh root@cdx-pve-01 "./exercise.sh desert_citadel"
+   ssh root@cdx-pve-01 "which ifreload"
    ```
 
 ### VM Already Exists (Deploy)

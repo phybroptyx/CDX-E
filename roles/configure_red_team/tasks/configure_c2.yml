@@ -1,0 +1,41 @@
+---
+# =============================================================================
+# configure_c2.yml — C2 platform configuration sub-tasks
+# Called in a loop from main.yml with loop_var: c2_platform
+# Only runs on inventory_hostname == c2_platform.vm
+# =============================================================================
+
+- name: "{{ c2_platform.name }} | Resolve platform config"
+  ansible.builtin.set_fact:
+    _c2_cfg: "{{ c2_platform_map[c2_platform.name] }}"
+
+- name: "{{ c2_platform.name }} | Assert binary exists on C2 VM"
+  ansible.builtin.stat:
+    path: "{{ _c2_cfg.binary_path }}"
+  register: _c2_binary_stat
+
+- name: "{{ c2_platform.name }} | Fail if binary not found"
+  ansible.builtin.fail:
+    msg: >-
+      {{ c2_platform.name }} binary not found at {{ _c2_cfg.binary_path }}
+      on {{ inventory_hostname }}.
+      Verify the '{{ template_registry | dict2items
+        | selectattr('value.packer_template', 'defined')
+        | selectattr('key', 'search', c2_platform.name | replace('_', ''))
+        | map(attribute='key') | first | default(c2_platform.name) }}'
+      Packer template was built and used for this VM.
+  when: not _c2_binary_stat.stat.exists
+
+- name: "{{ c2_platform.name }} | Ensure C2 service is started and enabled"
+  ansible.builtin.systemd:
+    name: "{{ _c2_cfg.service_name }}"
+    state: started
+    enabled: true
+  register: _c2_service_result
+
+- name: "{{ c2_platform.name }} | Report service status"
+  ansible.builtin.debug:
+    msg: >-
+      {{ c2_platform.name }} ({{ _c2_cfg.service_name }}) is
+      {{ 'running' if _c2_service_result.status.ActiveState == 'active' else 'NOT running' }}
+      on {{ inventory_hostname }}:{{ c2_platform.listener_port | default(_c2_cfg.default_port) }}

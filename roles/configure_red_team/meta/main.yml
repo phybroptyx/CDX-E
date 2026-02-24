@@ -1,0 +1,6 @@
+---
+galaxy_info:
+  author: CDX-E
+  description: "configure_red_team"
+  min_ansible_version: "2.14"
+dependencies: []

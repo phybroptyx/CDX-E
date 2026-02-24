@@ -1,0 +1,186 @@
+---
+# =============================================================================
+# Role: vm_power_management
+# =============================================================================
+# Powers on all exercise VMs via the Proxmox API and waits for management
+# connectivity before returning control to the pipeline.
+#
+# Readiness gates (in order):
+#   1. VM reaches 'running' state via proxmox_kvm (state: started)
+#   2. QEMU guest agent responds (Windows + Linux; skipped for VyOS)
+#   3. Port open: WinRM 5985 (Windows) or SSH 22 (Linux/VyOS)
+#      — only checked for VMs with a static cloud_init.ip
+#
+# Expects facts set by read_exercise_config:
+#   virtual_machines — list of VM objects from vms.yaml
+#   scenario         — parsed scenario.yml
+#
+# Timing vars (inventory/group_vars/all.yml):
+#   guest_agent_initial_delay  — seconds to wait after power-on before polling
+#   guest_agent_poll_interval  — seconds between guest agent poll attempts
+#   guest_agent_poll_retries   — max poll attempts before failing
+#   vm_power_wait_timeout      — max seconds for port connectivity wait
+#   vm_power_wait_sleep        — seconds between port connectivity checks
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight
+# ----------------------------------------------------------------------------
+- name: Assert required facts are present
+  ansible.builtin.assert:
+    that:
+      - virtual_machines is defined
+      - scenario is defined
+    fail_msg: "Required facts not found. Ensure read_exercise_config runs first."
+
+# ----------------------------------------------------------------------------
+# Categorize VMs by OS type
+# ----------------------------------------------------------------------------
+# Build three lists from template_registry so we don't rely on hostvars
+# (which may not be populated until after inventory_refresh runs).
+
+- name: Initialize VM category lists
+  ansible.builtin.set_fact:
+    _vms_windows:    []   # Windows — WinRM + QEMU agent
+    _vms_ssh:        []   # Linux + VyOS — SSH port wait
+    _vms_agent_poll: []   # QEMU agent capable — Windows + Linux (not VyOS)
+
+- name: Categorize Windows VMs
+  ansible.builtin.set_fact:
+    _vms_windows: "{{ _vms_windows + [item] }}"
+  when: template_registry[item.template].os_type == 'windows'
+  loop: "{{ virtual_machines }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Categorize SSH VMs (Linux + VyOS)
+  ansible.builtin.set_fact:
+    _vms_ssh: "{{ _vms_ssh + [item] }}"
+  when: template_registry[item.template].os_type in ['linux', 'vyos']
+  loop: "{{ virtual_machines }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Categorize QEMU agent VMs (Windows + Linux; VyOS excluded)
+  ansible.builtin.set_fact:
+    _vms_agent_poll: "{{ _vms_agent_poll + [item] }}"
+  when: template_registry[item.template].os_type in ['windows', 'linux']
+  loop: "{{ virtual_machines }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Show power-on plan
+  ansible.builtin.debug:
+    msg: |
+      VM power-on plan:
+        Exercise   : {{ scenario.exercise.name }}
+        Total VMs  : {{ virtual_machines | length }}
+        Windows    : {{ _vms_windows | length }}    (WinRM port 5985 + QEMU agent)
+        Linux/VyOS : {{ _vms_ssh | length }}         (SSH port 22; QEMU agent where supported)
+        Agent poll : {{ _vms_agent_poll | length }}  (non-VyOS VMs — have QEMU guest agent)
+
+# ----------------------------------------------------------------------------
+# Power on VMs
+# ----------------------------------------------------------------------------
+- name: Power on VMs
+  community.general.proxmox_kvm:
+    api_host:         "{{ proxmox_api_host }}"
+    api_user:         "{{ proxmox_api_user }}"
+    api_token_id:     "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    validate_certs:   "{{ proxmox_validate_certs }}"
+    node:             "{{ (item.proxmox | default({})).node | default(scenario.proxmox.node) }}"
+    vmid:             "{{ item.vmid }}"
+    state:            started
+  loop: "{{ virtual_machines }}"
+  loop_control:
+    label: "{{ item.name }} (vmid={{ item.vmid }})"
+  register: _power_on_results
+  ignore_errors: true   # 'started' is idempotent but we still want to catch real failures
+
+- name: Warn on any power-on failures
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ item.item.name }} (vmid={{ item.item.vmid }})
+      failed to start: {{ item.msg | default('unknown error') }}
+  loop: "{{ _power_on_results.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item is failed
+
+# ----------------------------------------------------------------------------
+# Initial boot delay
+# ----------------------------------------------------------------------------
+- name: Pause to allow VMs to begin booting before guest agent polling
+  ansible.builtin.pause:
+    seconds: "{{ guest_agent_initial_delay }}"
+
+# ----------------------------------------------------------------------------
+# Poll QEMU guest agent (Windows + Linux VMs; VyOS skipped)
+# ----------------------------------------------------------------------------
+# POST /agent/ping returns 200 once the guest agent is responsive.
+# Indicates the OS has booted far enough for management to begin.
+- name: Poll QEMU guest agent readiness
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/agent/ping
+    method: POST
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  loop: "{{ _vms_agent_poll }}"
+  loop_control:
+    label: "{{ item.name }} (vmid={{ item.vmid }})"
+  register: _agent_poll
+  retries: "{{ guest_agent_poll_retries }}"
+  delay:   "{{ guest_agent_poll_interval }}"
+  until: _agent_poll is not failed
+
+# ----------------------------------------------------------------------------
+# Wait for management connectivity (static-IP VMs only)
+# ----------------------------------------------------------------------------
+# VMs without cloud_init.ip are DHCP-assigned — their IPs aren't known
+# until inventory_refresh resolves them. Skip the port wait for those.
+
+- name: Wait for WinRM connectivity (Windows, static IP)
+  ansible.builtin.wait_for:
+    host:    "{{ item.cloud_init.ip }}"
+    port:    5985
+    timeout: "{{ vm_power_wait_timeout }}"
+    sleep:   "{{ vm_power_wait_sleep }}"
+  loop: "{{ _vms_windows }}"
+  loop_control:
+    label: "{{ item.name }} → {{ item.cloud_init.ip }}"
+  delegate_to: localhost
+  when: item.cloud_init is defined and (item.cloud_init.ip | default('')) | length > 0
+
+- name: Wait for SSH connectivity (Linux/VyOS, static IP)
+  ansible.builtin.wait_for:
+    host:    "{{ item.cloud_init.ip }}"
+    port:    22
+    timeout: "{{ vm_power_wait_timeout }}"
+    sleep:   "{{ vm_power_wait_sleep }}"
+  loop: "{{ _vms_ssh }}"
+  loop_control:
+    label: "{{ item.name }} → {{ item.cloud_init.ip }}"
+  delegate_to: localhost
+  when: item.cloud_init is defined and (item.cloud_init.ip | default('')) | length > 0
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+- name: VM power-on summary
+  ansible.builtin.debug:
+    msg: |
+      VM power-on complete.
+      Exercise      : {{ scenario.exercise.name }}
+      Total VMs     : {{ virtual_machines | length }}
+      Windows (WinRM): {{ _vms_windows | length }}
+      Linux/VyOS (SSH): {{ _vms_ssh | length }}
+      DHCP VMs (no port wait):
+        {{ virtual_machines
+           | rejectattr('cloud_init', 'defined')
+           | map(attribute='name') | list | join(', ') | default('none') }}

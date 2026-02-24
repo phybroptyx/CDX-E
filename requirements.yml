@@ -1,0 +1,11 @@
+---
+collections:
+  - name: community.general
+    version: ">=8.0.0"
+
+# Python dependencies (install on control node):
+#   pip install proxmoxer requests
+#
+# System dependencies (install on control node):
+#   apt install sshpass        # Required for configure bootstrap phase (password-based SSH)
+#   ssh-keygen / ssh           # Required for key generation and config push (typically pre-installed)

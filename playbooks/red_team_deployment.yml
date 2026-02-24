@@ -1,0 +1,123 @@
+---
+# =============================================================================
+# CDX-E Playbook: Red Team Deployment
+# =============================================================================
+# Purpose: Fully automated Red Team / adversary infrastructure lifecycle.
+#          Loads exercise config + APT profile, provisions Red Team VMs in
+#          Proxmox via Terraform (or destroys them), then powers on and
+#          configures the adversary tooling.
+#
+# Roles (Play 1 - provision):
+#   - deploy_red_team   (action=deploy)
+#   - destroy_red_team  (action=destroy)
+#
+# Roles (Play 2 - configure):
+#   - vm_power_management  (tiered power-on for red_team group)
+#   - configure_red_team   (C2 framework configuration, tool staging)
+#
+# Usage:
+#   ansible-playbook playbooks/red_team_deployment.yml \
+#     -e "exercise=OBSIDIAN_DAGGER action=deploy" \
+#     -e "@Secrets/credentials.yml" --ask-vault-pass
+#
+#   # Override APT profile at runtime:
+#   ansible-playbook playbooks/red_team_deployment.yml \
+#     -e "exercise=OBSIDIAN_DAGGER action=deploy apt=APT29" \
+#     -e "@Secrets/credentials.yml" --ask-vault-pass
+#
+# Tags: red_team
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play 1: load exercise configuration
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Pre-play 2: load APT profile
+# ----------------------------------------------------------------------------
+- name: Load APT Profile
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load APT adversary profile
+      ansible.builtin.import_role:
+        name: read_apt_config
+
+# ── Play 1: Red Team VM Provisioning (Terraform) ─────────────────────────────
+- name: Red Team VM Provisioning
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [red_team]
+
+  vars_files:
+    - "{{ playbook_dir }}/Secrets/credentials.yml"
+
+  vars:
+    red_team_action: "{{ action | default('deploy') }}"
+
+  pre_tasks:
+    - name: Import exercise and APT facts from controller
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+        apt_name:         "{{ hostvars['localhost'].apt_name }}"
+        apt_config:       "{{ hostvars['localhost'].apt_config }}"
+        apt_vms:          "{{ hostvars['localhost'].apt_vms }}"
+
+    - name: "[preflight] Skip — red_team phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.red_team | default(false) | bool)
+
+  roles:
+    - role: deploy_red_team
+      when: red_team_action == 'deploy'
+    - role: destroy_red_team
+      when: red_team_action == 'destroy'
+
+# ── Play 2: Red Team Power-On and Configuration ───────────────────────────────
+# Runs only on deploy. Skipped entirely on destroy.
+- name: Red Team Configuration
+  hosts: red_team
+  gather_facts: false
+  tags: [red_team]
+
+  vars_files:
+    - "{{ playbook_dir }}/Secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import facts from controller
+      ansible.builtin.set_fact:
+        scenario:    "{{ hostvars['localhost'].scenario }}"
+        apt_name:    "{{ hostvars['localhost'].apt_name }}"
+        apt_config:  "{{ hostvars['localhost'].apt_config }}"
+
+    - name: "[preflight] Skip — red_team phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.red_team | default(false) | bool)
+
+    - name: "[preflight] Skip Play 2 on destroy action"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
+    - name: "[preflight] Assert red_team inventory group is populated"
+      ansible.builtin.assert:
+        that: groups['red_team'] | default([]) | length > 0
+        fail_msg: >
+          No hosts in 'red_team' inventory group.
+          Ensure inventory_refresh completed after deploy_red_team.
+      run_once: true
+
+  roles:
+    - role: vm_power_management
+      vars:
+        target_tier: red_team
+    - role: configure_red_team

@@ -1,0 +1,146 @@
+---
+# =============================================================================
+# CDX-E Playbook: Domain Services Deployment
+# =============================================================================
+# Purpose: Conditional orchestrator for all domain-integrated services.
+#          Reads scenario.phases.services.* flags to determine which services
+#          to deploy. Each service is a separate play with its own host group
+#          and self-gates via meta: end_play if not required by the scenario.
+#
+# Entry point for full pipeline runs. Individual service playbooks
+# (dhcp_management.yml, sql_management.yml, etc.) remain available for
+# targeted standalone operations by White Cell.
+#
+# Usage:
+#   ansible-playbook playbooks/domain_services.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@secrets/credentials.yml"
+# =============================================================================
+
+# --- DHCP ------------------------------------------------------------------ #
+- name: "Domain Services: DHCP"
+  hosts: dhcp_servers
+  gather_facts: false
+  tags: [services, dhcp]
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  pre_tasks:
+    - name: "[preflight] Skip DHCP - not required by scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.services.dhcp | default(false) | bool)
+
+    - name: "[preflight] Assert DHCP hosts are reachable"
+      ansible.builtin.assert:
+        that: groups['dhcp_servers'] | default([]) | length > 0
+        fail_msg: "dhcp_servers group is empty but DHCP phase is enabled."
+
+  roles:
+    - configure_vm
+    - install_windowsfeature
+
+# --- SQL Server ------------------------------------------------------------ #
+- name: "Domain Services: SQL Server"
+  hosts: sql_servers
+  gather_facts: false
+  tags: [services, sql]
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  pre_tasks:
+    - name: "[preflight] Skip SQL - not required by scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.services.sql | default(false) | bool)
+
+    - name: "[preflight] Assert SQL hosts are reachable"
+      ansible.builtin.assert:
+        that: groups['sql_servers'] | default([]) | length > 0
+        fail_msg: "sql_servers group is empty but SQL phase is enabled."
+
+  roles:
+    - configure_vm
+    - install_windowsfeature
+    - deploy_sql_server
+
+# --- Microsoft Exchange ---------------------------------------------------- #
+- name: "Domain Services: Microsoft Exchange"
+  hosts: exchange_servers
+  gather_facts: false
+  tags: [services, exchange]
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  pre_tasks:
+    - name: "[preflight] Skip Exchange - not required by scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.services.exchange | default(false) | bool)
+
+    - name: "[preflight] Assert SQL is deployed before Exchange"
+      ansible.builtin.assert:
+        that: scenario.phases.services.sql | default(false) | bool
+        fail_msg: "Exchange requires SQL Server. Set scenario.phases.services.sql: true"
+
+    - name: "[preflight] Assert Exchange hosts are reachable"
+      ansible.builtin.assert:
+        that: groups['exchange_servers'] | default([]) | length > 0
+        fail_msg: "exchange_servers group is empty but Exchange phase is enabled."
+
+  roles:
+    - configure_vm
+    - install_windowsfeature
+    - deploy_microsoft_exchange
+
+# --- SCCM ------------------------------------------------------------------ #
+- name: "Domain Services: SCCM"
+  hosts: sccm_servers
+  gather_facts: false
+  tags: [services, sccm]
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  pre_tasks:
+    - name: "[preflight] Skip SCCM - not required by scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.services.sccm | default(false) | bool)
+
+    - name: "[preflight] Assert SQL is deployed before SCCM"
+      ansible.builtin.assert:
+        that: scenario.phases.services.sql | default(false) | bool
+        fail_msg: "SCCM requires SQL Server. Set scenario.phases.services.sql: true"
+
+    - name: "[preflight] Assert SCCM hosts are reachable"
+      ansible.builtin.assert:
+        that: groups['sccm_servers'] | default([]) | length > 0
+        fail_msg: "sccm_servers group is empty but SCCM phase is enabled."
+
+  roles:
+    - configure_vm
+    - install_windowsfeature
+    - deploy_configuration_manager
+
+# --- IIS ------------------------------------------------------------------- #
+- name: "Domain Services: IIS"
+  hosts: iis_servers
+  gather_facts: false
+  tags: [services, iis]
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  pre_tasks:
+    - name: "[preflight] Skip IIS - not required by scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.services.iis | default(false) | bool)
+
+    - name: "[preflight] Assert IIS hosts are reachable"
+      ansible.builtin.assert:
+        that: groups['iis_servers'] | default([]) | length > 0
+        fail_msg: "iis_servers group is empty but IIS phase is enabled."
+
+  roles:
+    - configure_vm
+    - install_windowsfeature

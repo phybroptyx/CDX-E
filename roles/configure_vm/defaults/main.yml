@@ -1,0 +1,2 @@
+---
+# All defaults for configure_vm live in inventory/group_vars/all.yml.

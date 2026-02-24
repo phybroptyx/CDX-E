@@ -1,0 +1,77 @@
+---
+# =============================================================================
+# Destroy a single VM (included per-VM from destroy.yml loop)
+# Variable 'vm' is passed from the parent loop
+# =============================================================================
+
+# ---- Idempotency Check ----
+
+- name: "Check if VM {{ vm.vmid }} exists"
+  set_fact:
+    _vm_exists: "{{ (vm.vmid | int) in existing_vmids }}"
+
+- name: "Skip {{ vm.name }} - does not exist"
+  debug:
+    msg: "VM {{ vm.vmid }} does not exist - skipping destruction"
+  when: not (_vm_exists | bool)
+
+- name: "Check VM name match for {{ vm.vmid }}"
+  set_fact:
+    _vm_name_matches: "{{ existing_vm_names[vm.vmid | string] | default(existing_vm_names[vm.vmid | int] | default('')) == vm.name }}"
+  when: _vm_exists | bool
+
+- name: "Skip {{ vm.name }} - name mismatch (safety check)"
+  debug:
+    msg: >-
+      VM ID {{ vm.vmid }} exists as '{{ existing_vm_names[vm.vmid | string] | default(existing_vm_names[vm.vmid | int] | default('UNKNOWN')) }}'
+      but expected '{{ vm.name }}' - skipping for safety
+  when: _vm_exists | bool and not (_vm_name_matches | default(false)) | bool
+
+# ---- Step 1: Hard-Stop VM ----
+
+- name: "Stop {{ vm.name }} ({{ vm.vmid }})"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/nodes/{{ vm.proxmox.node }}/qemu/{{ vm.vmid }}/status/stop"
+    method: POST
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 500]
+  when:
+    - _vm_exists | bool
+    - (_vm_name_matches | default(false)) | bool
+    - not cdx_dry_run | bool
+  ignore_errors: true
+
+- name: "Wait for VM to stop"
+  pause:
+    seconds: "{{ post_stop_delay }}"
+  when:
+    - _vm_exists | bool
+    - (_vm_name_matches | default(false)) | bool
+    - not cdx_dry_run | bool
+
+# ---- Step 2: Destroy VM ----
+
+- name: "Destroy {{ vm.name }} ({{ vm.vmid }})"
+  community.general.proxmox_kvm:
+    api_host: "{{ proxmox_api_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token_id }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    node: "{{ vm.proxmox.node }}"
+    vmid: "{{ vm.vmid }}"
+    state: absent
+    force: true
+  when:
+    - _vm_exists | bool
+    - (_vm_name_matches | default(false)) | bool
+    - not cdx_dry_run | bool
+
+- name: "{{ vm.name }} destroyed"
+  debug:
+    msg: "VM {{ vm.vmid }} ({{ vm.name }}) destroyed"
+  when:
+    - _vm_exists | bool
+    - (_vm_name_matches | default(false)) | bool

@@ -1,0 +1,47 @@
+# =============================================================================
+# CDX-E .gitignore
+# =============================================================================
+
+# Generated files (auto-created by generate_structure.ps1)
+EXERCISES/*/structure.json
+
+# PowerShell artifacts
+*.psm1.bak
+*.ps1.bak
+
+# Ansible artifacts
+*.retry
+.ansible/
+inventory/*.cache
+
+# Logs
+*.log
+logs/
+
+# Windows artifacts
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.tmp
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Secrets — actual credentials file (use Secrets/credentials.yml as template)
+# Encrypt with: ansible-vault encrypt Secrets/credentials.yml
+Secrets/credentials.yml
+
+# Generated dynamic inventory (written by inventory_refresh role)
+inventory/exercise_hosts.yml
+
+# Scenario instruction files (ad-hoc session context)
+*_instructions.*
+
+# Scratch / working files
+scratch/
+temp/
+tmp/

@@ -1,0 +1,38 @@
+---
+# =============================================================================
+# CDX-E Playbook: Workstation Configuration
+# =============================================================================
+# Purpose: Apply base configuration and optional Windows features to scenario
+#          workstations (Windows 7, 10, 11 endpoints).
+#
+# Roles:
+#   - configure_vm
+#   - install_windowsfeature
+#
+# Usage:
+#   ansible-playbook playbooks/workstation_configuration.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@secrets/credentials.yml"
+# =============================================================================
+
+- name: Workstation Configuration
+  hosts: workstations
+  gather_facts: false
+  tags: [workstations, endpoints]
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  pre_tasks:
+    - name: "[preflight] Skip - workstations phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.workstations | default(true) | bool)
+
+    - name: "[preflight] Assert workstations group is populated"
+      ansible.builtin.assert:
+        that: groups['workstations'] | default([]) | length > 0
+        fail_msg: "workstations group is empty. Check inventory_refresh output."
+
+  roles:
+    - configure_vm
+    - install_windowsfeature

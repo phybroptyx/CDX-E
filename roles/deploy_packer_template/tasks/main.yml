@@ -1,0 +1,239 @@
+---
+# =============================================================================
+# Role: deploy_packer_template
+# =============================================================================
+# Phase 1 of template_deployment.yml.
+# Checks for and builds missing Proxmox VM templates using Packer.
+#
+# Expects the following facts to already be set by read_exercise_config:
+#   virtual_machines  - list of VM objects (each with a 'template' key)
+#   scenario          - exercise/scenario name string
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Step 1 - Preflight: required facts
+# ----------------------------------------------------------------------------
+- name: Assert required facts are present
+  ansible.builtin.assert:
+    that:
+      - virtual_machines is defined
+      - scenario is defined
+    fail_msg: >-
+      Required facts 'virtual_machines' and 'scenario' are not defined.
+      Ensure exercise_initiation.yml (read_exercise_config role) runs
+      before template_deployment.yml.
+
+# ----------------------------------------------------------------------------
+# Step 2 - Preflight: Packer binary
+# ----------------------------------------------------------------------------
+- name: Stat Packer binary
+  ansible.builtin.stat:
+    path: "{{ packer_binary }}"
+  register: packer_stat
+
+- name: Assert Packer binary exists
+  ansible.builtin.assert:
+    that:
+      - packer_stat.stat.exists
+    fail_msg: >-
+      Packer binary not found at {{ packer_binary }}.
+      Install Packer or set packer_binary to the correct path.
+
+# ----------------------------------------------------------------------------
+# Step 3 - Preflight: ISO creation tool
+# ----------------------------------------------------------------------------
+- name: Verify ISO creation tool is available
+  ansible.builtin.shell:
+    cmd: which xorriso || which mkisofs || which genisoimage
+  register: iso_tool_check
+  failed_when: false
+  changed_when: false
+
+- name: Fail if no ISO creation tool found
+  ansible.builtin.fail:
+    msg: >-
+      Packer requires an ISO creation tool to assemble cd_files.
+      Install one of: xorriso, mkisofs (genisoimage), or oscdimg.
+      On Debian/Ubuntu: apt install xorriso
+      On RHEL/CentOS:   yum install xorriso
+  when: iso_tool_check.rc != 0
+
+# ----------------------------------------------------------------------------
+# Step 4 - Derive required templates from read_exercise_config facts
+# ----------------------------------------------------------------------------
+- name: Extract unique template names from exercise spec
+  ansible.builtin.set_fact:
+    required_templates: >-
+      {{ virtual_machines
+         | map(attribute='template')
+         | unique
+         | list }}
+
+- name: Validate all required templates are in the template registry
+  ansible.builtin.assert:
+    that:
+      - item in template_registry
+    fail_msg: >-
+      Template key '{{ item }}' is referenced in vms.yaml but is not defined
+      in template_registry (inventory/group_vars/all.yml).
+      Add an entry for '{{ item }}' to the template_registry before continuing.
+  loop: "{{ required_templates }}"
+
+# ----------------------------------------------------------------------------
+# Step 5 - Query Proxmox for existing templates
+# ----------------------------------------------------------------------------
+- name: Query existing Proxmox templates
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/cluster/resources?type=vm"
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+  register: proxmox_vms
+
+# ----------------------------------------------------------------------------
+# Step 6 - Compute templates_to_build
+# ----------------------------------------------------------------------------
+- name: Identify existing Proxmox template names
+  ansible.builtin.set_fact:
+    existing_templates: >-
+      {{ proxmox_vms.json.data
+         | selectattr('template', 'defined')
+         | selectattr('template', 'equalto', 1)
+         | map(attribute='name')
+         | list }}
+
+- name: Map existing Proxmox templates back to exercise keys
+  ansible.builtin.set_fact:
+    existing_template_keys: >-
+      {{ template_registry | dict2items
+         | selectattr('value.proxmox_name', 'in', existing_templates)
+         | map(attribute='key') | list }}
+
+- name: Determine templates to build
+  ansible.builtin.set_fact:
+    templates_to_build: >-
+      {{ required_templates if force_rebuild else
+         required_templates | difference(existing_template_keys) }}
+
+- name: Validate all templates_to_build have Packer definitions
+  ansible.builtin.assert:
+    that:
+      - template_registry[item].packer_template is not none
+      - template_registry[item].packer_vars is not none
+    fail_msg: >-
+      Template '{{ item }}' is required but has no Packer build definition
+      (packer_template or packer_vars is null in template_registry).
+      This template must be manually pre-staged in Proxmox before deployment.
+  loop: "{{ templates_to_build }}"
+  when: templates_to_build | length > 0
+
+# ----------------------------------------------------------------------------
+# Step 7 - Early exit if nothing needs building
+# ----------------------------------------------------------------------------
+- name: Notify that all templates already exist
+  ansible.builtin.debug:
+    msg: >-
+      All required templates already exist in Proxmox. Skipping build.
+      Required: {{ required_templates }}
+      Existing: {{ existing_template_keys }}
+  when: templates_to_build | length == 0
+
+- name: End play early — nothing to build
+  ansible.builtin.meta: end_play
+  when: templates_to_build | length == 0
+
+# ----------------------------------------------------------------------------
+# Step 8 - Display build plan
+# ----------------------------------------------------------------------------
+- name: Display build plan
+  ansible.builtin.debug:
+    msg: |
+      Required templates:     {{ required_templates }}
+      Proxmox names needed:   {{ required_templates | map('extract', template_registry) | map(attribute='proxmox_name') | list }}
+      Existing in Proxmox:    {{ existing_templates }}
+      Matched exercise keys:  {{ existing_template_keys }}
+      Templates to build:     {{ templates_to_build }}
+
+# ----------------------------------------------------------------------------
+# Step 9 - Check for pre-staged Packer plugins
+# ----------------------------------------------------------------------------
+- name: Check for pre-staged Packer plugins
+  ansible.builtin.find:
+    paths: "{{ packer_plugin_path }}"
+    patterns: "packer-plugin-proxmox*"
+    recurse: true
+  register: packer_plugins_installed
+
+# ----------------------------------------------------------------------------
+# Step 10 - Init plugins (online; skipped when pre-staged)
+# ----------------------------------------------------------------------------
+- name: Initialize Packer plugins (online only)
+  ansible.builtin.command:
+    cmd: >-
+      {{ packer_binary }} init
+      {{ packer_dir }}/templates/{{ item }}
+    chdir: "{{ packer_dir }}/templates"
+  environment:
+    PACKER_PLUGIN_PATH: "{{ packer_plugin_path }}"
+  loop: "{{ templates_to_build | map('extract', template_registry) | map(attribute='packer_template') | unique | list }}"
+  when:
+    - templates_to_build | length > 0
+    - packer_plugins_installed.matched == 0
+  changed_when: false
+
+# ----------------------------------------------------------------------------
+# Step 11 - Build templates
+# ----------------------------------------------------------------------------
+- name: Build missing templates with Packer
+  ansible.builtin.command:
+    cmd: >-
+      {{ packer_binary }} build
+      -var-file={{ packer_dir }}/vars/common.pkrvars.hcl
+      -var-file={{ packer_dir }}/vars/{{ template_registry[item].packer_vars }}
+      -var "proxmox_api_token_id={{ proxmox_api_user }}!{{ proxmox_api_token_id }}"
+      -var "proxmox_api_token_secret={{ proxmox_api_token_secret }}"
+      {{ packer_dir }}/templates/{{ template_registry[item].packer_template }}
+    chdir: "{{ packer_dir }}/templates"
+  environment:
+    PACKER_PLUGIN_PATH: "{{ packer_plugin_path }}"
+  loop: "{{ templates_to_build }}"
+  register: packer_results
+  changed_when: rc == 0
+
+# ----------------------------------------------------------------------------
+# Step 12 - Post-build validation: re-query Proxmox and assert each template
+# ----------------------------------------------------------------------------
+- name: Re-query Proxmox templates after build
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/cluster/resources?type=vm"
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+  register: proxmox_vms_post
+
+- name: Extract post-build Proxmox template names
+  ansible.builtin.set_fact:
+    post_build_templates: >-
+      {{ proxmox_vms_post.json.data
+         | selectattr('template', 'defined')
+         | selectattr('template', 'equalto', 1)
+         | map(attribute='name')
+         | list }}
+
+- name: Assert each built template is now registered in Proxmox
+  ansible.builtin.assert:
+    that:
+      - item in post_build_templates
+    fail_msg: >-
+      Template '{{ item }}' build appeared to succeed but was not found as a
+      Proxmox template. Check the Packer output above for errors.
+  loop: "{{ templates_to_build | map('extract', template_registry) | map(attribute='proxmox_name') | list }}"
+
+# ----------------------------------------------------------------------------
+# Step 13 - Report
+# ----------------------------------------------------------------------------
+- name: Report build results
+  ansible.builtin.debug:
+    msg: "Template '{{ item.item }}' build SUCCEEDED"
+  loop: "{{ packer_results.results | default([]) }}"
+  when: packer_results.results is defined

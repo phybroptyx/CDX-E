@@ -1,0 +1,116 @@
+---
+# =============================================================================
+# Action: Deploy (Full Exercise Setup)
+# Phase 1: Network setup on all Proxmox hosts
+# Phase 2: Resource pool creation
+# Phase 3: VM deployment (clone all, validate, configure all)
+# Phase 4: Post-deploy configuration (skipped when no_start or dry_run)
+# =============================================================================
+
+# Phase 1: Network Setup
+- name: "Phase 1 - Network Setup"
+  include_tasks: network_setup.yml
+
+# Phase 2: Pool Creation
+- name: "Phase 2 - Pool Creation"
+  include_tasks: pool_create.yml
+
+# Phase 3a: Clone ALL VMs
+- name: "Phase 3a - Snapshot pre-clone VMID list"
+  set_fact:
+    _pre_clone_vmids: "{{ existing_vmids | list }}"
+
+- name: "Phase 3a - Clone ALL VMs"
+  include_tasks: clone_single_vm.yml
+  loop: "{{ all_vms }}"
+  loop_control:
+    loop_var: vm
+    label: "{{ vm.vmid }} - {{ vm.name }}"
+  when: >-
+    cdx_vm_filter == 'all' or
+    (vm.vmid | string) in vm_filter_list or
+    vm.name in vm_filter_list
+
+# Phase 3b: Validate all clones exist
+- name: "Phase 3b - Re-query Proxmox cluster VMs"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/cluster/resources?type=vm"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+  register: _post_clone_cluster_vms
+  when: not cdx_dry_run | bool
+
+- name: "Phase 3b - Build post-clone VMID lookup"
+  set_fact:
+    _post_clone_vmids: "{{ _post_clone_cluster_vms.json.data | map(attribute='vmid') | map('int') | list }}"
+  when: not cdx_dry_run | bool
+
+- name: "Phase 3b - Set empty post-clone lookup for dry run"
+  set_fact:
+    _post_clone_vmids: []
+  when: cdx_dry_run | bool
+
+- name: "Phase 3b - Validate all expected VMs exist"
+  assert:
+    that:
+      - (vm.vmid | int) in _post_clone_vmids
+    fail_msg: "VM {{ vm.vmid }} ({{ vm.name }}) not found after clone phase"
+    quiet: true
+  loop: "{{ all_vms }}"
+  loop_control:
+    loop_var: vm
+    label: "{{ vm.vmid }} - {{ vm.name }}"
+  when:
+    - not cdx_dry_run | bool
+    - >-
+      cdx_vm_filter == 'all' or
+      (vm.vmid | string) in vm_filter_list or
+      vm.name in vm_filter_list
+
+- name: "Phase 3b - All clones validated"
+  debug:
+    msg: "All {{ all_vms | length }} VMs confirmed present in Proxmox cluster"
+  when: not cdx_dry_run | bool
+
+# Phase 3c: Configure ALL VMs
+- name: "Phase 3c - Configure ALL VMs"
+  include_tasks: configure_single_vm.yml
+  loop: "{{ all_vms }}"
+  loop_control:
+    loop_var: vm
+    label: "{{ vm.vmid }} - {{ vm.name }}"
+  when: >-
+    cdx_vm_filter == 'all' or
+    (vm.vmid | string) in vm_filter_list or
+    vm.name in vm_filter_list
+
+# Phase 4: Post-Deploy Configuration
+- name: "Phase 4 - Set configure flags"
+  set_fact:
+    _cdx_configure_keygen: true
+    _cdx_configure_force_keygen: false
+  when:
+    - not cdx_no_start | bool
+    - not cdx_dry_run | bool
+
+- name: "Phase 4 - Post-Deploy Configuration"
+  include_tasks: configure.yml
+  when:
+    - not cdx_no_start | bool
+    - not cdx_dry_run | bool
+
+- name: "Phase 4 - Skipped (no_start={{ cdx_no_start }}, dry_run={{ cdx_dry_run }})"
+  debug:
+    msg: "Post-deploy configuration skipped - VMs not running"
+  when: cdx_no_start | bool or cdx_dry_run | bool
+
+- name: "DEPLOY COMPLETE"
+  debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════════════════
+        DEPLOYMENT COMPLETE - {{ exercise_name }}
+        Pool: {{ exercise_pool }}
+        Access Proxmox: https://{{ proxmox_api_host }}:{{ proxmox_api_port }}
+      ═══════════════════════════════════════════════════════════════════════

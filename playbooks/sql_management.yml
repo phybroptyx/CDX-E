@@ -1,0 +1,69 @@
+---
+# =============================================================================
+# CDX-E Playbook: Microsoft SQL Server Management
+# =============================================================================
+# Purpose: Install and manage Microsoft SQL Server on designated hosts.
+#          Used as a standalone deployment or as a prerequisite for
+#          Exchange and SCCM deployments.
+#
+# Prerequisites:
+#   - Domain must be deployed (domain_management.yml) before this playbook.
+#   - SQL Server setup media pre-staged on target hosts (see sql_setup_path).
+#   - vault_sql_sa_password defined in Secrets/credentials.yml when
+#     sql_auth_mode: Mixed (the default).
+#
+# Roles:
+#   - configure_vm           — hostname, timezone, WinRM, PS policy
+#   - install_windowsfeature — prerequisites from windows_feature_sets['sql_servers']
+#   - deploy_sql_server      — unattended install, firewall, readiness check
+#
+# Usage:
+#   ansible-playbook playbooks/sql_management.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@Secrets/credentials.yml" --ask-vault-pass
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration on the Ansible controller
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Main play: SQL Server deployment
+# ----------------------------------------------------------------------------
+- name: Microsoft SQL Server Management
+  hosts: sql_servers
+  gather_facts: false
+  tags: [sql, services]
+
+  vars_files:
+    - "{{ playbook_dir }}/Secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from controller
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — SQL service phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.services.sql | default(false) | bool)
+
+    - name: "[preflight] Assert sql_servers group is populated"
+      ansible.builtin.assert:
+        that: groups['sql_servers'] | default([]) | length > 0
+        fail_msg: >-
+          sql_servers group is empty. Ensure inventory_refresh has run and
+          vms.yaml has at least one VM with ansible_group: sql_servers.
+
+  roles:
+    - configure_vm
+    - install_windowsfeature
+    - deploy_sql_server

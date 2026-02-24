@@ -1,0 +1,7 @@
+---
+# =============================================================================
+# Role: read_exercise_config - Default Variables
+# =============================================================================
+
+# Base path for exercise directories (relative to playbook_dir)
+exercises_base_dir: "{{ playbook_dir }}/EXERCISES"

@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: CDX
+  description: "Loads and validates SOC layout configuration (layout.yml + vms.yaml)"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

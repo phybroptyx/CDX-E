@@ -1,0 +1,122 @@
+---
+# =============================================================================
+# CDX-E Framework - Master Orchestration (ansible-optimized-v1.0)
+# =============================================================================
+# Full scenario lifecycle via modular playbook imports.
+# Phase execution is controlled by scenario.phases.* flags in the exercise's
+# scenario.yml. Each playbook self-gates via 'meta: end_play' if its phase
+# is disabled — no CLI flags required for phase skipping.
+#
+# Usage:
+#   # Full deployment (phases driven by scenario.yml)
+#   ansible-playbook site.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@secrets/credentials.yml"
+#
+#   # Destroy scenario VMs and network
+#   ansible-playbook site.yml \
+#     -e "exercise=OBSIDIAN_DAGGER action=destroy" \
+#     -e "@secrets/credentials.yml" \
+#     --tags terraform,network
+#
+#   # Run a single phase
+#   ansible-playbook site.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@secrets/credentials.yml" \
+#     --tags domain
+#
+# Tags reference:
+#   always          - Exercise initiation (always runs)
+#   packer          - Phase 1:  Template deployment
+#   terraform       - Phase 2:  VM deploy/destroy + Phase 2a/2b
+#   inventory       - Phase 2a: Inventory refresh
+#   power           - Phase 2b: VM power-on + connectivity wait
+#   network,sdn     - Phase 3:  Network/SDN configuration
+#   domain          - Phase 4:  Active Directory deployment
+#   servers         - Phase 5:  General server configuration
+#   services        - Phase 6:  Domain services (conditional per scenario)
+#   workstations    - Phase 7:  Endpoint configuration
+#   vulnerabilities - Phase 8:  Vulnerability deployment
+#   red_team        - Phase 9:  Red Team deployment + configuration (automated)
+#   blue_team,soc   - Phase 10: Blue Team SOC deployment + configuration
+#
+# Standalone (not in pipeline):
+#   environment_check.yml — run manually by White Cell before exercise start
+#
+# Note: Individual service playbooks (dhcp_management.yml, sql_management.yml,
+#       exchange_management.yml, sccm_management.yml, iis_management.yml) are
+#       available for targeted standalone operations and are NOT imported here.
+#       domain_services.yml handles all service orchestration in the pipeline.
+# =============================================================================
+
+# ── Phase 0: Exercise Initiation ─────────────────────────────────────────────
+# Loads scenario.yml and vms.yaml. Sets scenario/virtual_machines facts
+# for all subsequent plays. Always runs.
+- import_playbook: playbooks/exercise_initiation.yml
+
+# ── Phase 1: Template Deployment (Packer) ────────────────────────────────────
+# Checks for required Proxmox templates and builds missing ones.
+# Gates on: scenario.phases.packer
+- import_playbook: playbooks/template_deployment.yml
+
+# ── Phase 2: Virtual Machine Management (Terraform) ──────────────────────────
+# Deploys or destroys scenario VMs. VMs left powered off after deploy.
+# Gates on: scenario.phases.terraform
+- import_playbook: playbooks/vm_management.yml
+
+# ── Phase 2a: Inventory Refresh ──────────────────────────────────────────────
+# Reads Terraform outputs + vms.yaml to write dynamic inventory.
+# Must run before vm_power_management. Does not require VMs to be online.
+# Gates on: scenario.phases.terraform
+- import_playbook: playbooks/inventory_refresh.yml
+
+# ── Phase 2b: VM Power Management ────────────────────────────────────────────
+# Powers on all scenario VMs and waits for WinRM/SSH connectivity.
+# Must run after inventory_refresh (needs IPs). Must run before all
+# configuration phases.
+# Gates on: scenario.phases.terraform
+- import_playbook: playbooks/vm_power_management.yml
+
+# ── Phase 3: Network Management ──────────────────────────────────────────────
+# Configures SDN, firewall rules, and routing infrastructure.
+# Gates on: scenario.phases.networking
+- import_playbook: playbooks/network_management.yml
+
+# ── Phase 4: Domain Management ───────────────────────────────────────────────
+# Promotes first DC, deploys AD domain, additional DCs, GPOs.
+# serial: 1 enforced within playbook to avoid replication conflicts.
+# Gates on: scenario.phases.domain
+- import_playbook: playbooks/domain_management.yml
+
+# ── Phase 5: General Server Configuration ────────────────────────────────────
+# Applies base config to windows_servers (non-DC, non-service hosts).
+# Gates on: scenario.phases.servers
+- import_playbook: playbooks/server_configuration.yml
+
+# ── Phase 6: Domain Services ─────────────────────────────────────────────────
+# Conditional multi-service orchestrator. Each service play self-gates on
+# scenario.phases.services.<service>. Dependencies enforced inline
+# (Exchange and SCCM require SQL).
+- import_playbook: playbooks/domain_services.yml
+
+# ── Phase 7: Workstation Configuration ───────────────────────────────────────
+# Configures workstation endpoints (Win 7 / 10 / 11).
+# Gates on: scenario.phases.workstations
+- import_playbook: playbooks/workstation_configuration.yml
+
+# ── Phase 8: Vulnerability Deployment ────────────────────────────────────────
+# Deploys insecure configurations for training objectives.
+# Gates on: scenario.phases.vulnerabilities (default: false)
+- import_playbook: playbooks/vulnerability_deployment.yml
+
+# ── Phase 9: Red Team Deployment ─────────────────────────────────────────────
+# Provisions Red Team VMs via Terraform, powers on, and applies full automated
+# configuration. Red Team activation is pipeline-driven, not White Cell manual.
+# Gates on: scenario.phases.red_team (default: false)
+- import_playbook: playbooks/red_team_deployment.yml
+
+# ── Phase 10: Blue Team Deployment ───────────────────────────────────────────
+# Provisions Blue Team SOC VMs via Terraform, powers on, and deploys SOC stack
+# (SIEM, log aggregation, analyst workstations).
+# Gates on: scenario.phases.blue_team (default: false)
+- import_playbook: playbooks/blue_team_deployment.yml

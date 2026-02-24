@@ -1,0 +1,521 @@
+---
+# =============================================================================
+# CDX-E - Global Defaults
+# =============================================================================
+# Single source of truth for shared configuration.
+#
+# Override precedence (lowest → highest):
+#   this file → playbook vars_files → host_vars → -e extra vars
+#
+# Sensitive values (proxmox_api_token_secret, domain.*, vm_credentials.*)
+# MUST come from secrets/credentials.yml loaded via vars_files. There are
+# intentionally no fallback defaults for credentials here.
+# =============================================================================
+
+# =============================================================================
+# Proxmox API
+# =============================================================================
+
+proxmox_api_host: "{{ proxmox.api_host | default('cdx-pve-01') }}"
+proxmox_api_port: 8006
+proxmox_api_url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json"
+proxmox_api_user: "{{ proxmox.api_user | default('ansible@pam') }}"
+proxmox_api_token_id: "{{ proxmox.api_token_id | default('ansible') }}"
+proxmox_api_token_secret: "{{ proxmox.api_token_secret }}"   # required — load from secrets/credentials.yml
+proxmox_validate_certs: false
+
+# Node where VM templates reside (source for all clones)
+template_node: "cdx-pve-01"
+
+# All cluster nodes (used for pool and network operations)
+proxmox_hosts:
+  - "cdx-pve-01"
+  - "cdx-pve-02"
+  - "cdx-pve-03"
+
+# =============================================================================
+# Timing
+# =============================================================================
+
+# VM clone and configuration phase
+clone_timeout: 300
+post_clone_delay: 8
+post_stop_delay: 3
+guest_agent_initial_delay: 30
+guest_agent_poll_interval: 10
+guest_agent_poll_retries: 30
+bootstrap_ssh_timeout: 15
+configure_ssh_timeout: 30
+
+# VM power-on: seconds to wait for management port (WinRM/SSH) after boot
+vm_power_wait_timeout: 300
+vm_power_wait_sleep: 10
+
+# =============================================================================
+# Packer
+# =============================================================================
+
+packer_binary: "/usr/local/bin/packer"
+packer_dir: "{{ playbook_dir }}/INFRASTRUCTURE/packer"
+packer_plugin_path: "/opt/packer/plugins"
+
+# =============================================================================
+# Terraform
+# =============================================================================
+
+terraform_binary: "terraform"
+terraform_proxmox_provider_version: ">= 0.46.0"
+vm_clone_type: "full"
+
+# Ansible group names treated as team infrastructure (excluded from scenario VMs)
+team_groups:      ['red_team', 'apt', 'blue_team', 'soc']
+red_team_groups:  ['red_team', 'apt']
+blue_team_groups: ['blue_team', 'soc']
+
+# =============================================================================
+# VM Configuration
+# =============================================================================
+
+vm_timezone: "UTC"
+
+# Windows Server feature sets — keyed by ansible_group.
+# install_windowsfeature installs the list for the current host's group.
+# Override per-host by setting windows_features: [...] in the host's vars,
+# or extend a group's set with windows_features_extra: [...].
+windows_feature_sets:
+
+  domain_controllers:
+    # Core AD role + DNS (required for DC promotion by configure_active_directory)
+    - AD-Domain-Services
+    - DNS
+    # Management tooling
+    - GPMC
+    - RSAT-AD-Tools
+    - RSAT-AD-PowerShell
+    - RSAT-DNS-Server
+    # Runtime prerequisites
+    - Net-Framework-45-Features
+
+  servers:
+    # Domain management tools (useful on all member servers in a training range)
+    - RSAT-AD-Tools
+    - RSAT-AD-PowerShell
+    # Runtime
+    - Net-Framework-45-Features
+    # Network troubleshooting
+    - Telnet-Client
+
+  workstations: []   # Workstations: no server features by default
+
+  soc:
+    # SOC workstations benefit from AD management tools
+    - RSAT-AD-Tools
+    - RSAT-AD-PowerShell
+    - Net-Framework-45-Features
+
+  sql_servers:
+    # SQL Server prerequisites (engine manages its own .NET/VC++ installs)
+    - RSAT-AD-Tools
+    - RSAT-AD-PowerShell
+    - Net-Framework-45-Features
+    # Useful for troubleshooting SQL connectivity
+    - Telnet-Client
+
+  exchange_servers:
+    # Exchange Server prerequisites
+    - RSAT-AD-Tools
+    - RSAT-AD-PowerShell
+    - Net-Framework-45-Features
+    # Exchange requires these Windows features
+    - Web-Server
+    - Web-Mgmt-Console
+    - Web-Asp-Net45
+    - Web-ISAPI-Ext
+    - Web-ISAPI-Filter
+    - Web-Net-Ext45
+    - Web-Metabase
+    - Web-Lgcy-Mgmt-Console
+    - WAS-Process-Model
+    - WAS-Config-APIs
+    - Web-Dyn-Compression
+    - Web-Http-Errors
+    - Web-Http-Logging
+    - Web-Basic-Auth
+    - Web-Windows-Auth
+    - Web-Stat-Compression
+    - Web-Request-Monitor
+    - RPC-over-HTTP-proxy
+
+  sccm_servers:
+    # SCCM / Configuration Manager prerequisites
+    - RSAT-AD-Tools
+    - RSAT-AD-PowerShell
+    # .NET 4.5 (required) + .NET 3.5 (required for some SCCM components)
+    - Net-Framework-45-Features
+    - NET-Framework-Features
+    # BITS — Background Intelligent Transfer Service (used by SCCM clients)
+    - BITS
+    # IIS — required for Management Point and Distribution Point roles
+    - Web-Server
+    - Web-Mgmt-Console
+    - Web-Asp-Net45
+    - Web-Windows-Auth
+    # Remote Differential Compression — required by SCCM
+    - RDC
+    # WDS is required for OS Deployment boot images (optional for basic SCCM)
+    # - WDS
+    - Telnet-Client
+
+  # Red/Blue team and routing VMs are configured by their own roles
+  red_team:  []
+  apt:       []
+  blue_team: []
+  routers:   []
+
+# =============================================================================
+# Template Registry
+# =============================================================================
+# Single source of truth for every supported OS template.
+#
+# Fields:
+#   id             — Proxmox VMID of the built template (null = not yet assigned)
+#   status         — build state: built | in-progress | planned
+#   os             — Human-readable OS name (used in descriptions / debug output)
+#   os_type        — OS category: windows | linux | vyos | opnsense
+#   packer_template — Packer .pkr.hcl filename (planned filenames kept for all entries)
+#   packer_vars    — Packer .pkrvars.hcl filename
+#   proxmox_name   — Proxmox template name Packer registers after a successful build
+#
+# Status values:
+#   built       — template exists in Proxmox and is ready for cloning
+#   in-progress — being built manually; Packer build design is planned
+#   planned     — VMID reserved; Packer build not yet started
+#
+# Usage examples:
+#   template_registry[vm.template].id             → Proxmox source VMID for cloning
+#   template_registry[item].packer_template       → .pkr.hcl file to build
+#   template_registry[item].os_type               → windows / linux / vyos / opnsense
+# =============================================================================
+
+template_registry:
+
+  # ── Network ──────────────────────────────────────────────────────────────
+  vyos:
+    id: 2017
+    status: planned
+    os: "VyOS 2025"
+    os_type: "vyos"
+    packer_template: "vyos.pkr.hcl"
+    packer_vars: "vyos.pkrvars.hcl"
+    proxmox_name: "cdx-vyos-base"
+
+  opnsense:
+    id: 2043
+    status: planned
+    os: "OPNsense 25.7"
+    os_type: "opnsense"
+    packer_template: "opnsense.pkr.hcl"
+    packer_vars: "opnsense.pkrvars.hcl"
+    proxmox_name: "cdx-opnsense257"
+
+  # ── Windows Server ────────────────────────────────────────────────────────
+  server_2025:
+    id: 2037
+    status: built
+    os: "Windows Server 2025"
+    os_type: "windows"
+    packer_template: "windows-server-2025.pkr.hcl"
+    packer_vars: "server_2025.pkrvars.hcl"
+    proxmox_name: "cdx-win2025-base"
+
+  server_2025_core:
+    id: 2038
+    status: planned
+    os: "Windows Server 2025 Core"
+    os_type: "windows"
+    packer_template: "windows-server-2025.pkr.hcl"
+    packer_vars: "server_2025_core.pkrvars.hcl"
+    proxmox_name: "cdx-win2025-core"
+
+  server_2022:
+    id: 2033
+    status: built
+    os: "Windows Server 2022"
+    os_type: "windows"
+    packer_template: "windows-server-2022.pkr.hcl"
+    packer_vars: "server_2022.pkrvars.hcl"
+    proxmox_name: "cdx-win2022-base"
+
+  server_2022_core:
+    id: 2034
+    status: planned
+    os: "Windows Server 2022 Core"
+    os_type: "windows"
+    packer_template: "windows-server-2022.pkr.hcl"
+    packer_vars: "server_2022_core.pkrvars.hcl"
+    proxmox_name: "cdx-win2022-core"
+
+  server_2019:
+    id: 2031
+    status: built
+    os: "Windows Server 2019"
+    os_type: "windows"
+    packer_template: "windows-server-2019.pkr.hcl"
+    packer_vars: "server_2019.pkrvars.hcl"
+    proxmox_name: "cdx-win2019-base"
+
+  server_2019_core:
+    id: 2032
+    status: planned
+    os: "Windows Server 2019 Core"
+    os_type: "windows"
+    packer_template: "windows-server-2019.pkr.hcl"
+    packer_vars: "server_2019_core.pkrvars.hcl"
+    proxmox_name: "cdx-win2019-core"
+
+  server_2016:
+    id: 2029
+    status: built
+    os: "Windows Server 2016"
+    os_type: "windows"
+    packer_template: "windows-server-2016.pkr.hcl"
+    packer_vars: "server_2016.pkrvars.hcl"
+    proxmox_name: "cdx-win2016-base"
+
+  server_2016_core:
+    id: 2030
+    status: planned
+    os: "Windows Server 2016 Core"
+    os_type: "windows"
+    packer_template: "windows-server-2016.pkr.hcl"
+    packer_vars: "server_2016_core.pkrvars.hcl"
+    proxmox_name: "cdx-win2016-core"
+
+  server_2012r2:
+    id: 2026
+    status: built
+    os: "Windows Server 2012 R2"
+    os_type: "windows"
+    packer_template: "windows-server-2012r2.pkr.hcl"
+    packer_vars: "server_2012r2.pkrvars.hcl"
+    proxmox_name: "cdx-win2012r2-base"
+
+  server_2012r2_core:
+    id: 2027
+    status: planned
+    os: "Windows Server 2012 R2 Core"
+    os_type: "windows"
+    packer_template: "windows-server-2012r2.pkr.hcl"
+    packer_vars: "server_2012r2_core.pkrvars.hcl"
+    proxmox_name: "cdx-win2012r2-core"
+
+  server_2008r2:
+    id: 2024
+    status: built
+    os: "Windows Server 2008 R2"
+    os_type: "windows"
+    packer_template: "windows-server-2008r2.pkr.hcl"
+    packer_vars: "server_2008r2.pkrvars.hcl"
+    proxmox_name: "cdx-win2008r2-base"
+
+  server_2008r2_core:
+    id: 2023
+    status: planned
+    os: "Windows Server 2008 R2 Core"
+    os_type: "windows"
+    packer_template: "windows-server-2008r2.pkr.hcl"
+    packer_vars: "server_2008r2_core.pkrvars.hcl"
+    proxmox_name: "cdx-win2008r2-core"
+
+  # ── Windows Desktop ───────────────────────────────────────────────────────
+  windows_11:
+    id: 2036
+    status: in-progress
+    os: "Windows 11"
+    os_type: "windows"
+    packer_template: "windows-11.pkr.hcl"
+    packer_vars: "windows_11.pkrvars.hcl"
+    proxmox_name: "cdx-win11-base"
+
+  windows_10:
+    id: 2035
+    status: in-progress
+    os: "Windows 10"
+    os_type: "windows"
+    packer_template: "windows-10.pkr.hcl"
+    packer_vars: "windows_10.pkrvars.hcl"
+    proxmox_name: "cdx-win10-base"
+
+  "windows_8.1":
+    id: 2028
+    status: in-progress
+    os: "Windows 8.1"
+    os_type: "windows"
+    packer_template: "windows-8.1.pkr.hcl"
+    packer_vars: "windows_81.pkrvars.hcl"
+    proxmox_name: "cdx-win81-base"
+
+  windows_7:
+    id: 2025
+    status: in-progress
+    os: "Windows 7"
+    os_type: "windows"
+    packer_template: "windows-7.pkr.hcl"
+    packer_vars: "windows_7.pkrvars.hcl"
+    proxmox_name: "cdx-win7-base"
+
+  # ── Linux ─────────────────────────────────────────────────────────────────
+  kali:
+    id: 2018
+    status: built
+    os: "Kali Linux 2025.4"
+    os_type: "linux"
+    packer_template: "kali-2025.4.pkr.hcl"
+    packer_vars: "kali_2025_4.pkrvars.hcl"
+    proxmox_name: "cdx-kali-base"
+
+  kali_purple:
+    id: 2016
+    status: planned
+    os: "Kali Purple 2025.4"
+    os_type: "linux"
+    packer_template: "kali-purple-2025.4.pkr.hcl"
+    packer_vars: "kali_purple_2025_4.pkrvars.hcl"
+    proxmox_name: "cdx-kali-purple-base"
+
+  parrot:
+    id: 2048
+    status: planned
+    os: "Parrot Security"
+    os_type: "linux"
+    packer_template: "parrot.pkr.hcl"
+    packer_vars: "parrot.pkrvars.hcl"
+    proxmox_name: "cdx-parrot-base"
+
+  ubuntu_2110:
+    id: 2021
+    status: built
+    os: "Ubuntu 21.10"
+    os_type: "linux"
+    packer_template: "ubuntu-2110.pkr.hcl"
+    packer_vars: "ubuntu_2110.pkrvars.hcl"
+    proxmox_name: "cdx-ubuntu2110-base"
+
+  ubuntu_server_1604:
+    id: 2022
+    status: built
+    os: "Ubuntu Server 16.04"
+    os_type: "linux"
+    packer_template: "ubuntu-server-1604.pkr.hcl"
+    packer_vars: "ubuntu_server_1604.pkrvars.hcl"
+    proxmox_name: "cdx-ubuntu1604-svr"
+
+  debian_12:
+    id: 2044
+    status: planned
+    os: "Debian 12.9"
+    os_type: "linux"
+    packer_template: "debian-12.pkr.hcl"
+    packer_vars: "debian_12.pkrvars.hcl"
+    proxmox_name: "cdx-debian129-base"
+
+  centos_7:
+    id: 2019
+    status: built
+    os: "CentOS 7"
+    os_type: "linux"
+    packer_template: "centos-7.pkr.hcl"
+    packer_vars: "centos_7.pkrvars.hcl"
+    proxmox_name: "cdx-centos7-base"
+
+  centos_7_server:
+    id: 2020
+    status: built
+    os: "CentOS 7 Server"
+    os_type: "linux"
+    packer_template: "centos-7.pkr.hcl"
+    packer_vars: "centos_7_server.pkrvars.hcl"
+    proxmox_name: "cdx-centos7-server"
+
+  centos_7_gnome:
+    id: 2040
+    status: built
+    os: "CentOS 7 GNOME"
+    os_type: "linux"
+    packer_template: "centos-7.pkr.hcl"
+    packer_vars: "centos_7_gnome.pkrvars.hcl"
+    proxmox_name: "cdx-centos7-gnome"
+
+  docker_base:
+    id: 2045
+    status: planned
+    os: "Docker Base"
+    os_type: "linux"
+    packer_template: "docker-base.pkr.hcl"
+    packer_vars: "docker_base.pkrvars.hcl"
+    proxmox_name: "cdx-docker-base"
+
+  # ── Red Team ──────────────────────────────────────────────────────────────
+  commando_vm:
+    id: 2039
+    status: in-progress
+    os: "Commando VM (Windows 10) — Mandiant"
+    os_type: "windows"
+    packer_template: "commando-vm.pkr.hcl"
+    packer_vars: "commando_vm.pkrvars.hcl"
+    proxmox_name: "cdx-commandovm-base"
+
+  flare_vm:
+    id: 2049
+    status: planned
+    os: "FLARE VM (Windows) — Mandiant"
+    os_type: "windows"
+    packer_template: "flare-vm.pkr.hcl"
+    packer_vars: "flare_vm.pkrvars.hcl"
+    proxmox_name: "cdx-flarevm-base"
+
+  threat_pursuit_vm:
+    id: 2050
+    status: planned
+    os: "Threat Pursuit VM (Windows) — Mandiant"
+    os_type: "windows"
+    packer_template: "threat-pursuit-vm.pkr.hcl"
+    packer_vars: "threat_pursuit_vm.pkrvars.hcl"
+    proxmox_name: "cdx-threat-pursuit-base"
+
+  cobalt_strike_c2:
+    id: 2041
+    status: planned
+    os: "Cobalt Strike C2 Server"
+    os_type: "linux"
+    packer_template: "cobalt-strike-c2.pkr.hcl"
+    packer_vars: "cobalt_strike_c2.pkrvars.hcl"
+    proxmox_name: "cdx-cstrike-c2"
+
+  adaptix_c2:
+    id: 2042
+    status: planned
+    os: "Adaptix C2 Server"
+    os_type: "linux"
+    packer_template: "adaptix-c2.pkr.hcl"
+    packer_vars: "adaptix_c2.pkrvars.hcl"
+    proxmox_name: "cdx-adaptix-c2"
+
+  # ── Blue Team / SOC ───────────────────────────────────────────────────────
+  hh_sensor:
+    id: 2046
+    status: planned
+    os: "Hedgehog Linux (Network Sensor)"
+    os_type: "linux"
+    packer_template: "hedgehog-sensor.pkr.hcl"
+    packer_vars: "hh_sensor.pkrvars.hcl"
+    proxmox_name: "cdx-hh-sensor"
+
+  malcolm_server:
+    id: 2047
+    status: planned
+    os: "Malcolm Network Analysis Server"
+    os_type: "linux"
+    packer_template: "malcolm-server.pkr.hcl"
+    packer_vars: "malcolm_server.pkrvars.hcl"
+    proxmox_name: "cdx-malcolm-server"

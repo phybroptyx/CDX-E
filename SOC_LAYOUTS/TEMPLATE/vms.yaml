@@ -1,0 +1,55 @@
+---
+# =============================================================================
+# SOC Layout VM Specification Template
+# =============================================================================
+# Defines all virtual machines for this SOC layout.
+# Loaded by read_soc_layout and exposed as the 'soc_vms' fact.
+#
+# These VMs are deployed via deploy_blue_team into a separate Terraform state
+# (terraform_blue_team/) independent of the scenario and red_team states.
+#
+# VMID Ranges (from scenario.yml vm_id_ranges.blue_team):
+#   Default range: 1000-1099 per exercise
+#   Use 1001-1009 for SOC server infrastructure (Malcolm, SIEM, logging)
+#   Use 1010-1019 for perimeter firewalls / sensors
+#   Use 1020-1029 for analyst workstations
+#
+# Template keys must match entries in inventory/group_vars/all.yml → template_registry.
+# ansible_group must be 'blue_team' or 'soc' — both go into terraform_blue_team/ state.
+# =============================================================================
+
+virtual_machines:
+
+  # ---------------------------------------------------------------------------
+  # SOC Server (Malcolm, SIEM, etc.)
+  # ---------------------------------------------------------------------------
+  - vmid: 1001
+    name: "SOC-SERVER-01"
+    template: "malcolm_server"        # Replace with appropriate SIEM/analysis template
+    ansible_group: "soc"
+    resources:
+      memory_mb: 32768
+      cores: 8
+      sockets: 1
+    cloud_init:
+      ip: "10.0.1.10"               # Update to match exercise Blue Team network
+      cidr: 24
+      gateway: "10.0.1.1"
+      nameserver: "10.0.0.10"
+
+  # ---------------------------------------------------------------------------
+  # Analyst Workstation
+  # ---------------------------------------------------------------------------
+  - vmid: 1020
+    name: "SOC-WKS-01"
+    template: "kali_purple"
+    ansible_group: "blue_team"
+    resources:
+      memory_mb: 8192
+      cores: 4
+      sockets: 1
+    cloud_init:
+      ip: "10.0.1.20"
+      cidr: 24
+      gateway: "10.0.1.1"
+      nameserver: "10.0.0.10"

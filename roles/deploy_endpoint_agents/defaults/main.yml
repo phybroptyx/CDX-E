@@ -1,0 +1,25 @@
+---
+# =============================================================================
+# Role: deploy_endpoint_agents — Default Variables
+# =============================================================================
+
+# SIEM agent platform to deploy.
+# Supported: wazuh, elastic, splunk_uf
+endpoint_agent_platform: wazuh
+
+# Wazuh manager connection
+wazuh_manager_host: "{{ soc_layout.malcolm.vm | default('SOC-MALCOLM-01') }}"
+wazuh_manager_port: 1514
+wazuh_registration_port: 1515
+
+# Wazuh agent package URLs (overridable for air-gapped environments)
+wazuh_agent_deb_url: "https://packages.wazuh.com/4.x/apt/pool/main/w/wazuh-agent/wazuh-agent_4.7.0-1_amd64.deb"
+wazuh_agent_msi_url: "https://packages.wazuh.com/4.x/windows/wazuh-agent-4.7.0-1.msi"
+
+# Elastic agent package URLs
+elastic_fleet_url: ""       # Set to Fleet server URL if using elastic platform
+elastic_enrollment_token: "{{ vault_elastic_enrollment_token | default('') }}"
+
+# Splunk Universal Forwarder settings
+splunk_uf_deployment_server: ""   # Set if using splunk_uf platform
+splunk_uf_port: 8089

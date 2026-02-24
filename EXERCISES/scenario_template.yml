@@ -1,0 +1,89 @@
+---
+# =============================================================================
+# CDX-E Scenario Configuration Template
+# =============================================================================
+# SUPERSEDED — Use EXERCISES/TEMPLATE/ instead.
+#
+# The full exercise scaffold (scenario.yml, vms.yaml, exercise_template.json,
+# users.json, gpo.json, services.json) lives in EXERCISES/TEMPLATE/.
+#
+# Usage:
+#   cp -r EXERCISES/TEMPLATE EXERCISES/MY_EXERCISE_NAME
+#
+# This file is retained for reference only.
+# =============================================================================
+
+# Exercise metadata
+exercise:
+  name: EXERCISE_NAME
+  description: "Brief description of this exercise"
+  classification: UNCLASSIFIED  # UNCLASSIFIED / CUI / SECRET
+  teams:
+    white_cell: true
+    red_team:   true
+    blue_team:  true
+    purple_team: false
+
+# Active Directory / Domain settings
+domain:
+  name: cdx.lab
+  netbios: CDX
+  functional_level: Win2019        # Win2008R2 / Win2012R2 / Win2016 / Win2019
+  admin_password: "{{ vault_domain_admin_password }}"
+  sites:
+    - name: Default-First-Site-Name
+      subnets: []
+
+# =============================================================================
+# Phase execution control
+# Set each phase to true/false. When false, the corresponding playbook
+# performs a 'meta: end_play' and skips gracefully.
+# =============================================================================
+phases:
+
+  # Phase 1: Build missing Proxmox VM templates via Packer
+  packer: true
+
+  # Phase 2: Deploy / destroy VMs via Terraform
+  terraform: true
+
+  # Phase 3: Configure SDN, firewall, and routing
+  networking: true
+
+  # Phase 4: Deploy Active Directory domain
+  domain: true
+
+  # Phase 5: Configure general Windows servers
+  servers: true
+
+  # Phase 6: Domain services (individual flags below)
+  services:
+    dhcp:     false
+    sql:      false
+    exchange: false
+    sccm:     false
+    iis:      false
+
+  # Phase 7: Configure workstations / endpoints
+  workstations: true
+
+  # Phase 8: Deploy insecure configurations (training objectives)
+  vulnerabilities: false
+
+  # Phase 9: Provision and configure Red Team / adversary infrastructure (automated)
+  red_team: false
+
+  # Phase 10: Provision and configure Blue Team SOC infrastructure
+  blue_team: false
+
+# Network configuration
+network:
+  management_vlan: 100
+  exercise_vlans:  []
+  dns_servers:
+    - 192.168.1.1
+
+# Proxmox targeting
+proxmox:
+  node: cdx-pve-01
+  storage: QNAP

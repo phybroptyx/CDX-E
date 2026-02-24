@@ -1,0 +1,123 @@
+---
+# =============================================================================
+# Role: configure_vm
+# =============================================================================
+# Applies base OS configuration to each exercise VM.
+# Runs against actual hosts (not localhost) after inventory_refresh and
+# vm_power_management have completed.
+#
+# OS branching uses ansible_os_type set per-host in exercise_hosts.yml.
+#
+# Windows:
+#   - Hostname, reboot if required
+#   - Timezone (Windows format, e.g. "UTC")
+#   - Disable automatic updates (registry)
+#   - PowerShell execution policy: Unrestricted
+#   - Ensure ansible_user is in local Administrators
+#   - Ensure WinRM NTLM + Basic auth enabled
+#
+# Linux:
+#   - Hostname
+#   - Timezone (IANA format, e.g. "UTC")
+#   - Disable unattended-upgrades service (non-fatal)
+#
+# VyOS:
+#   - Skipped; managed by configure_networking
+#
+# Expects:
+#   ansible_os_type  — set per-host in generated inventory
+#   vm_timezone      — from inventory/group_vars/all.yml (default: "UTC")
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Windows
+# ----------------------------------------------------------------------------
+- name: Windows | Set hostname
+  ansible.windows.win_hostname:
+    name: "{{ inventory_hostname }}"
+  register: _hostname_set
+  when: ansible_os_type == 'windows'
+
+- name: Windows | Reboot if hostname changed
+  ansible.windows.win_reboot:
+    reboot_timeout: 300
+    post_reboot_delay: 15
+  when:
+    - ansible_os_type == 'windows'
+    - _hostname_set.reboot_required | default(false)
+
+- name: Windows | Set timezone
+  community.windows.win_timezone:
+    timezone: "{{ vm_timezone }}"
+  when: ansible_os_type == 'windows'
+
+- name: Windows | Disable automatic updates (registry)
+  ansible.windows.win_registry:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU
+    name: "{{ item.name }}"
+    data: "{{ item.data }}"
+    type: dword
+  loop:
+    - { name: NoAutoUpdate,                    data: 1 }
+    - { name: NoAutoRebootWithLoggedOnUsers,    data: 1 }
+    - { name: AUOptions,                        data: 2 }
+  when: ansible_os_type == 'windows'
+
+- name: Windows | Set PowerShell execution policy to Unrestricted
+  ansible.windows.win_shell: |
+    Set-ExecutionPolicy Unrestricted -Scope LocalMachine -Force
+  changed_when: false
+  when: ansible_os_type == 'windows'
+
+- name: Windows | Ensure ansible_user is in local Administrators
+  ansible.windows.win_group_membership:
+    name: Administrators
+    members:
+      - "{{ ansible_user }}"
+    state: present
+  when: ansible_os_type == 'windows'
+
+- name: Windows | Ensure WinRM NTLM and Basic auth are enabled
+  ansible.windows.win_shell: |
+    Set-Item -Path 'WSMan:\localhost\Service\Auth\Ntlm'  -Value $true
+    Set-Item -Path 'WSMan:\localhost\Service\Auth\Basic' -Value $true
+  changed_when: false
+  when: ansible_os_type == 'windows'
+
+# ----------------------------------------------------------------------------
+# Linux
+# ----------------------------------------------------------------------------
+- name: Linux | Set hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+  when: ansible_os_type == 'linux'
+
+- name: Linux | Set timezone
+  community.general.timezone:
+    name: "{{ vm_timezone }}"
+  when: ansible_os_type == 'linux'
+
+- name: Linux | Disable unattended-upgrades
+  ansible.builtin.systemd:
+    name: unattended-upgrades
+    state: stopped
+    enabled: false
+  ignore_errors: true
+  when: ansible_os_type == 'linux'
+
+# ----------------------------------------------------------------------------
+# VyOS — skip (managed by configure_networking)
+# ----------------------------------------------------------------------------
+- name: VyOS | Skip base configuration
+  ansible.builtin.debug:
+    msg: "VyOS host {{ inventory_hostname }} — base config handled by configure_networking."
+  when: ansible_os_type == 'vyos'
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+- name: configure_vm summary
+  ansible.builtin.debug:
+    msg: >-
+      configure_vm complete for {{ inventory_hostname }}
+      (os_type={{ ansible_os_type }}, timezone={{ vm_timezone }}).

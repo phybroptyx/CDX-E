@@ -1,0 +1,116 @@
+---
+# =============================================================================
+# Role: read_apt_config
+# =============================================================================
+# Loads an APT (Adversary Profile) configuration from the APTs/ library and
+# sets cacheable facts for all subsequent plays in the run.
+#
+# APT selection priority (highest to lowest):
+#   1. Runtime override: -e "apt=APT29"
+#   2. Scenario default: scenario.red_team.apt
+#   3. Role default:     default_apt (GENERIC_RED)
+#
+# Facts set (all cacheable):
+#   apt_name       — APT directory name (e.g., "GENERIC_RED")
+#   apt_dir        — Absolute path to APT directory
+#   apt_config     — Parsed apt.yml content
+#   apt_vms        — List of VM objects from APT vms.yaml
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Step 1 — Resolve APT name
+# ----------------------------------------------------------------------------
+- name: Resolve APT name
+  ansible.builtin.set_fact:
+    _resolved_apt: >-
+      {{ apt
+         if (apt is defined and apt | length > 0)
+         else (scenario.red_team.apt
+               if (scenario is defined and
+                   scenario.red_team is defined and
+                   scenario.red_team.apt is defined)
+               else default_apt) }}
+
+- name: Display resolved APT
+  ansible.builtin.debug:
+    msg: "Loading APT profile: {{ _resolved_apt }}"
+
+# ----------------------------------------------------------------------------
+# Step 2 — Validate APT directory exists
+# ----------------------------------------------------------------------------
+- name: Set APT directory path
+  ansible.builtin.set_fact:
+    _apt_dir: "{{ apts_base_dir }}/{{ _resolved_apt }}"
+
+- name: Stat APT directory
+  ansible.builtin.stat:
+    path: "{{ _apt_dir }}"
+  register: _apt_dir_stat
+
+- name: Assert APT directory exists
+  ansible.builtin.assert:
+    that:
+      - _apt_dir_stat.stat.exists
+      - _apt_dir_stat.stat.isdir
+    fail_msg: >-
+      APT directory not found: {{ _apt_dir }}
+      Available APTs: run 'ls {{ apts_base_dir }}'
+      Create a new APT by copying APTs/TEMPLATE/ to APTs/{{ _resolved_apt }}/
+
+# ----------------------------------------------------------------------------
+# Step 3 — Load APT configuration
+# ----------------------------------------------------------------------------
+- name: Load APT profile (apt.yml)
+  ansible.builtin.include_vars:
+    file: "{{ _apt_dir }}/apt.yml"
+    name: _apt_yaml
+
+- name: Assert apt.yml has required keys
+  ansible.builtin.assert:
+    that:
+      - _apt_yaml.apt is defined
+      - _apt_yaml.apt.name is defined
+      - _apt_yaml.c2_platforms is defined
+    fail_msg: >-
+      APTs/{{ _resolved_apt }}/apt.yml is missing required keys.
+      Expected: apt.name, c2_platforms.
+      See APTs/TEMPLATE/apt.yml for the schema.
+
+# ----------------------------------------------------------------------------
+# Step 4 — Load APT VM specification
+# ----------------------------------------------------------------------------
+- name: Load APT VM specification (vms.yaml)
+  ansible.builtin.include_vars:
+    file: "{{ _apt_dir }}/vms.yaml"
+    name: _apt_vms_yaml
+
+- name: Assert APT vms.yaml has required keys
+  ansible.builtin.assert:
+    that:
+      - _apt_vms_yaml.virtual_machines is defined
+      - _apt_vms_yaml.virtual_machines | length > 0
+    fail_msg: >-
+      APTs/{{ _resolved_apt }}/vms.yaml is missing 'virtual_machines' or it is empty.
+
+# ----------------------------------------------------------------------------
+# Step 5 — Set cacheable facts
+# ----------------------------------------------------------------------------
+- name: Set cacheable APT facts
+  ansible.builtin.set_fact:
+    apt_name:   "{{ _resolved_apt }}"
+    apt_dir:    "{{ _apt_dir }}"
+    apt_config: "{{ _apt_yaml }}"
+    apt_vms:    "{{ _apt_vms_yaml.virtual_machines }}"
+  cacheable: true
+
+# ----------------------------------------------------------------------------
+# Step 6 — Display APT profile summary
+# ----------------------------------------------------------------------------
+- name: Display APT profile summary
+  ansible.builtin.debug:
+    msg:
+      - "APT Name     : {{ _apt_yaml.apt.name }}"
+      - "Description  : {{ _apt_yaml.apt.description | default('N/A') }}"
+      - "C2 platforms : {{ _apt_yaml.c2_platforms | map(attribute='name') | join(', ') }}"
+      - "VM count     : {{ _apt_vms_yaml.virtual_machines | length }}"
+      - "VM list      : {{ _apt_vms_yaml.virtual_machines | map(attribute='name') | join(', ') }}"

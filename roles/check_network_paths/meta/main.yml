@@ -1,0 +1,7 @@
+﻿---
+galaxy_info:
+  author: CDX
+  description: "Validates network connectivity across all scenario hosts"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

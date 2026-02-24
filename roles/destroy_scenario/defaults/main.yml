@@ -1,0 +1,2 @@
+---
+# All defaults for destroy_scenario live in inventory/group_vars/all.yml.

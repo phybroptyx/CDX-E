@@ -1,0 +1,10 @@
+---
+# =============================================================================
+# Role: read_soc_layout — Default Variables
+# =============================================================================
+
+# Base path for SOC layout library directories (relative to playbook_dir)
+soc_layouts_base_dir: "{{ playbook_dir }}/SOC_LAYOUTS"
+
+# Default SOC layout if neither 'layout' variable nor scenario.blue_team.layout is set
+default_soc_layout: "malcolm_basic"

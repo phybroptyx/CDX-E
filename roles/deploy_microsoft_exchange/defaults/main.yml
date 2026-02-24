@@ -1,0 +1,85 @@
+---
+# =============================================================================
+# Role: deploy_microsoft_exchange — Default Variables
+# =============================================================================
+
+# ── Version ──────────────────────────────────────────────────────────────────
+# Exchange Server version to install.  Accepted values: 2010, 2013, 2016
+# Exchange does NOT require SQL Server — it uses the Extensible Storage
+# Engine (ESE) for all mailbox storage.
+exchange_version: 2016
+
+# ── Setup media ──────────────────────────────────────────────────────────────
+# Absolute path to Exchange setup.exe on the target host.
+# Exchange media (~5 GB) must be pre-staged before running this role.
+# Acceptable paths:
+#   - Local    : 'C:\ExchangeSetup\setup.exe'
+#   - UNC share: '\\fileserver\share\Exchange2016\setup.exe'
+#   - DVD/ISO  : 'D:\setup.exe'
+#
+# Version note: Exchange 2010 media contains both setup.exe (GUI) and
+# setup.com (CLI); either works with command-line parameters.
+exchange_setup_path: 'C:\ExchangeSetup\setup.exe'
+
+# ── Exchange organisation ────────────────────────────────────────────────────
+# Name of the Exchange organisation in Active Directory.
+# Set once per forest during AD preparation — changing it later requires
+# a full reinstall. Defaults to the domain NetBIOS name.
+exchange_org_name: "{{ scenario.domain.netbios | default('CDX') }}"
+
+# ── Roles ────────────────────────────────────────────────────────────────────
+# Roles to install on this host.  Leave empty to use the version default.
+# Version defaults (all-in-one, suitable for a training range):
+#   2010: Mailbox,ClientAccess,HubTransport
+#   2013: Mailbox,ClientAccess
+#   2016: Mailbox  (ClientAccess is merged into Mailbox in 2016)
+# Multi-role strings are comma-separated, no spaces.
+exchange_roles: ''
+
+# ── Internal version metadata (read-only) ────────────────────────────────────
+# Consumed by tasks to derive version-specific behaviour.
+# Do not override these in host/group vars.
+exchange_version_map:
+  '2010':
+    roles:        'Mailbox,ClientAccess,HubTransport'
+    role_flag:    '/Roles'      # Exchange 2010 uses plural /Roles
+    registry_key: 'v14'
+    windows_components_flag: false   # /InstallWindowsComponents not available
+  '2013':
+    roles:        'Mailbox,ClientAccess'
+    role_flag:    '/Role'
+    registry_key: 'v15'
+    windows_components_flag: true
+  '2016':
+    roles:        'Mailbox'
+    role_flag:    '/Role'
+    registry_key: 'v15'
+    windows_components_flag: true
+
+# ── Mailbox database ─────────────────────────────────────────────────────────
+# Name of the first mailbox database created during installation.
+exchange_mdb_name: 'CDX Mailbox Database'
+
+# ── UCMA 4.0 ─────────────────────────────────────────────────────────────────
+# Path to the Unified Communications Managed API 4.0 installer.
+# Required for Exchange 2013 and 2016; not needed for Exchange 2010.
+# Leave empty to auto-detect from the Exchange media directory:
+#   <exchange_media_dir>\UCMARedist\UcmaRuntimeSetup.exe
+exchange_ucma_path: ''
+
+# ── Post-install: send connector ─────────────────────────────────────────────
+# Create a default wildcard Internet send connector after installation.
+# Applies to Exchange 2013 and 2016 only (HubTransport in 2010 handles
+# connectors differently). Set false to skip.
+exchange_create_send_connector: true
+exchange_send_connector_name: 'CDX Internet Relay'
+
+# ── Post-install: virtual directory URLs ─────────────────────────────────────
+# External FQDN for OWA/ECP/EWS/OAB/ActiveSync virtual directory URLs.
+# Example: 'mail.example.cdx.lab'
+# Leave empty to skip external URL configuration (do it manually later).
+exchange_external_fqdn: ''
+
+# ── Staging ───────────────────────────────────────────────────────────────────
+# Temporary directory for any staging files placed on the target host.
+exchange_temp_path: 'C:\Windows\Temp\cdx_exchange'

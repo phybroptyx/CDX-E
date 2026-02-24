@@ -1,0 +1,27 @@
+---
+# =============================================================================
+# Phase: Resource Pool Creation
+# Creates the exercise resource pool via Proxmox API
+# =============================================================================
+
+- name: "POOL CREATE - Creating resource pool '{{ exercise_pool }}'"
+  uri:
+    url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json/pools"
+    method: POST
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    body_format: form-urlencoded
+    body:
+      poolid: "{{ exercise_pool }}"
+      comment: "{{ exercise_pool_comment }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 400, 500]  # 400/500 if pool already exists
+  register: pool_result
+  when: not cdx_dry_run | bool
+
+- name: Report pool creation result
+  debug:
+    msg: >-
+      {% if pool_result is skipped %}DRY RUN - Would create pool '{{ exercise_pool }}'
+      {% elif pool_result.status in [400, 500] %}Pool '{{ exercise_pool }}' already exists - continuing
+      {% else %}Pool '{{ exercise_pool }}' created ({{ exercise_pool_comment }}){% endif %}

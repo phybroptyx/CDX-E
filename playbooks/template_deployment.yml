@@ -1,0 +1,54 @@
+---
+# =============================================================================
+# CDX-E Playbook: Template Deployment
+# =============================================================================
+# Purpose: Determine what Proxmox VM templates are required for the scenario,
+#          check if they already exist, and build any missing templates via
+#          Hashicorp Packer.
+#
+# Roles:
+#   - read_exercise_config     — load scenario + virtual_machines facts
+#   - deploy_packer_template   — query Proxmox, build missing templates
+#
+# Usage:
+#   ansible-playbook playbooks/template_deployment.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@Secrets/credentials.yml" --ask-vault-pass
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration on the Ansible controller
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Main play: Packer template build
+# ----------------------------------------------------------------------------
+- name: Template Deployment
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [packer, templates]
+
+  vars_files:
+    - "{{ playbook_dir }}/Secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from controller
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — Packer phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.packer | default(true) | bool)
+
+  roles:
+    - deploy_packer_template

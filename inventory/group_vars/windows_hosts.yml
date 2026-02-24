@@ -1,0 +1,15 @@
+---
+# =============================================================================
+# Connection variables — Windows exercise VMs
+# =============================================================================
+# Applied to all hosts in the windows_hosts group (written by inventory_refresh).
+# ansible_password must be set at runtime via secrets/credentials.yml.
+# =============================================================================
+
+ansible_connection: winrm
+ansible_port: 5985
+ansible_winrm_transport: ntlm
+ansible_winrm_server_cert_validation: ignore
+ansible_winrm_kerberos_delegation: false
+
+# ansible_password: set in secrets/credentials.yml as vault_cloud_init_password

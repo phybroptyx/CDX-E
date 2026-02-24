@@ -1,0 +1,28 @@
+---
+# =============================================================================
+# CDX-E Playbook: Microsoft IIS Server Management
+# =============================================================================
+# Purpose: Install and manage Microsoft Internet Information Services on
+#          designated web server hosts.
+#
+# Roles:
+#   - configure_vm
+#   - install_windowsfeature
+#
+# Usage:
+#   ansible-playbook playbooks/iis_management.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@secrets/credentials.yml"
+# =============================================================================
+
+- name: Microsoft IIS Server Management
+  hosts: iis_servers
+  gather_facts: false
+  tags: [iis, web, services]
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  roles:
+    - configure_vm
+    - install_windowsfeature

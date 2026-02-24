@@ -1,0 +1,84 @@
+configure
+
+########################################
+# System Identity / Base Services
+########################################
+
+set system host-name 'SDP-TL-1'
+set system domain-name 'talokan.midgard.mrvl'
+set system time-zone 'America/New_York'
+
+set service ntp server '46.244.164.88'
+set service ssh port '22'
+
+########################################
+# Interfaces
+# eth0: Management (pre-configured, do NOT modify here)
+########################################
+
+# eth1: Internal - Talokan VLAN 140 (38.38.140.0/24)
+set interfaces ethernet eth1 description 'Internal'
+set interfaces ethernet eth1 address '38.38.140.1/24'
+
+# eth2: External / Upstream toward Tier-1 (EQIX-5)
+set interfaces ethernet eth2 description 'to ISP'
+set interfaces ethernet eth2 address '38.38.139.171/21'
+
+# eth3: SOC Connection
+set interfaces ethernet eth3 description 'to SOC'
+set interfaces ethernet eth3 address '10.30.3.1/24'
+
+########################################
+# Static Routing
+########################################
+
+# Default route to the upstream Tier-1 router
+set protocols static route 0.0.0.0/0 next-hop '38.38.136.124'
+
+########################################
+# OSPF – "Public Internet" View Only
+# - OSPF only on external segment (Area 5, matches EQIX-5 T1)
+# - Redistribute ONLY the Talokan public summary into OSPF
+# - No RFC1918 (10.30.3.0/24) leaked into the Internet LSDB
+########################################
+
+# Use external IP as OSPF router-id for clarity
+set protocols ospf parameters router-id '38.38.139.171'
+
+# Enable OSPF on the external link toward CDX-IXP-T1-EQIX-5 in Area 5
+# (Tier-1 already has "area 5 network 38.38.136.0/21")
+set protocols ospf area 5 network '38.38.140.0/24'
+
+# Policy: only advertise the Talokan internal /24 summary into OSPF
+
+# Prefix-list for Talokan internal public space
+set policy prefix-list TL-INTERNAL rule 10 action 'permit'
+set policy prefix-list TL-INTERNAL rule 10 prefix '38.38.140.0/24'
+
+# Explicit deny-any to avoid leaking other statics
+set policy prefix-list TL-INTERNAL rule 100 action 'deny'
+set policy prefix-list TL-INTERNAL rule 100 prefix '0.0.0.0/0'
+
+# Route-map to control redistribution of static routes into OSPF
+set policy route-map OSPF-REDIST-STATIC-TL rule 10 action 'permit'
+set policy route-map OSPF-REDIST-STATIC-TL rule 10 match ip address prefix-list 'TL-INTERNAL'
+
+# Optional hard stop: deny everything else
+set policy route-map OSPF-REDIST-STATIC-TL rule 100 action 'deny'
+
+# Redistribute static routes into OSPF using the route-map
+set protocols ospf redistribute static route-map 'OSPF-REDIST-STATIC-TL'
+
+########################################
+# NAT
+# (None – this SDP is purely routed, no translation)
+########################################
+# (Intentionally no "set nat ..." statements)
+
+########################################
+# Commit & Save
+########################################
+
+commit
+save
+exit

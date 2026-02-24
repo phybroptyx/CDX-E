@@ -1,0 +1,123 @@
+---
+# =============================================================================
+# CDX-E Playbook: Blue Team Deployment
+# =============================================================================
+# Purpose: Fully automated Blue Team / SOC infrastructure lifecycle.
+#          Loads exercise config + SOC layout, provisions Blue Team VMs in
+#          Proxmox via Terraform (or destroys them), then powers on and
+#          configures the SOC stack.
+#
+# Roles (Play 1 - provision):
+#   - deploy_blue_team   (action=deploy)
+#   - destroy_blue_team  (action=destroy)
+#
+# Roles (Play 2 - configure):
+#   - vm_power_management  (tiered power-on for blue_team group)
+#   - configure_blue_team  (SOC stack: Malcolm, Hedgehog sensor, analyst workstations)
+#
+# Usage:
+#   ansible-playbook playbooks/blue_team_deployment.yml \
+#     -e "exercise=OBSIDIAN_DAGGER action=deploy" \
+#     -e "@Secrets/credentials.yml" --ask-vault-pass
+#
+#   # Override SOC layout at runtime:
+#   ansible-playbook playbooks/blue_team_deployment.yml \
+#     -e "exercise=OBSIDIAN_DAGGER action=deploy layout=malcolm_basic" \
+#     -e "@Secrets/credentials.yml" --ask-vault-pass
+#
+# Tags: blue_team, soc
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play 1: load exercise configuration
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Pre-play 2: load SOC layout
+# ----------------------------------------------------------------------------
+- name: Load SOC Layout
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load SOC layout configuration
+      ansible.builtin.import_role:
+        name: read_soc_layout
+
+# ── Play 1: Blue Team VM Provisioning (Terraform) ────────────────────────────
+- name: Blue Team VM Provisioning
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [blue_team, soc]
+
+  vars_files:
+    - "{{ playbook_dir }}/Secrets/credentials.yml"
+
+  vars:
+    blue_team_action: "{{ action | default('deploy') }}"
+
+  pre_tasks:
+    - name: Import exercise and SOC layout facts from controller
+      ansible.builtin.set_fact:
+        scenario:          "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:      "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines:  "{{ hostvars['localhost'].virtual_machines }}"
+        soc_layout_name:   "{{ hostvars['localhost'].soc_layout_name }}"
+        soc_layout:        "{{ hostvars['localhost'].soc_layout }}"
+        soc_vms:           "{{ hostvars['localhost'].soc_vms }}"
+
+    - name: "[preflight] Skip — blue_team phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.blue_team | default(false) | bool)
+
+  roles:
+    - role: deploy_blue_team
+      when: blue_team_action == 'deploy'
+    - role: destroy_blue_team
+      when: blue_team_action == 'destroy'
+
+# ── Play 2: Blue Team Power-On and SOC Configuration ─────────────────────────
+# Runs only on deploy. Skipped entirely on destroy.
+- name: Blue Team SOC Configuration
+  hosts: blue_team
+  gather_facts: false
+  tags: [blue_team, soc]
+
+  vars_files:
+    - "{{ playbook_dir }}/Secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import facts from controller
+      ansible.builtin.set_fact:
+        scenario:        "{{ hostvars['localhost'].scenario }}"
+        soc_layout_name: "{{ hostvars['localhost'].soc_layout_name }}"
+        soc_layout:      "{{ hostvars['localhost'].soc_layout }}"
+
+    - name: "[preflight] Skip — blue_team phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.blue_team | default(false) | bool)
+
+    - name: "[preflight] Skip Play 2 on destroy action"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
+    - name: "[preflight] Assert blue_team inventory group is populated"
+      ansible.builtin.assert:
+        that: groups['blue_team'] | default([]) | length > 0
+        fail_msg: >
+          No hosts in 'blue_team' inventory group.
+          Ensure inventory_refresh completed after deploy_blue_team.
+      run_once: true
+
+  roles:
+    - role: vm_power_management
+      vars:
+        target_tier: blue_team
+    - role: configure_blue_team

@@ -1,0 +1,250 @@
+---
+# =============================================================================
+# Role: deploy_sql_server
+# =============================================================================
+# Installs Microsoft SQL Server unattended on Windows Server hosts, then
+# performs post-install configuration (firewall rules, readiness check).
+#
+# SQL Server setup media must be pre-staged on the target host before this
+# role runs (see sql_setup_path in defaults/main.yml). The media is too
+# large to transfer via Ansible.
+#
+# Prerequisites:
+#   - Host must be domain-joined (configure_active_directory complete).
+#   - AD-Domain-Services feature NOT required; SQL prereqs are self-contained.
+#   - sql_sa_password loaded from vault when sql_auth_mode: Mixed.
+#
+# Called from:
+#   playbooks/sql_management.yml → ansible_group: sql_servers
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Section 1 — Phase gate + preflight
+# ----------------------------------------------------------------------------
+- name: Skip — SQL service phase disabled in scenario
+  ansible.builtin.debug:
+    msg: >-
+      deploy_sql_server: scenario.phases.services.sql is false for
+      {{ inventory_hostname }} — skipping.
+  when: not (scenario.phases.services.sql | default(false) | bool)
+
+- name: End host — SQL phase disabled
+  ansible.builtin.meta: end_host
+  when: not (scenario.phases.services.sql | default(false) | bool)
+
+- name: Assert required variables are defined
+  ansible.builtin.assert:
+    that:
+      - sql_setup_path is defined and sql_setup_path | length > 0
+      - sql_instance_name is defined and sql_instance_name | length > 0
+      - sql_sysadmin_accounts is defined and sql_sysadmin_accounts | length > 0
+      - not (sql_auth_mode | upper == 'MIXED') or (sql_sa_password | length > 0)
+    fail_msg: >-
+      deploy_sql_server: required variables are missing.
+      Ensure sql_setup_path is set and, when sql_auth_mode=Mixed, that
+      vault_sql_sa_password is defined in Secrets/credentials.yml.
+
+# ----------------------------------------------------------------------------
+# Section 2 — Check if SQL Server is already installed
+# ----------------------------------------------------------------------------
+- name: Query SQL Server service state
+  ansible.windows.win_shell: |
+    $svc = Get-Service -Name "MSSQL`$${{ sql_instance_name }}", 'MSSQLSERVER' -ErrorAction SilentlyContinue |
+           Where-Object { $_.Status -ne $null } |
+           Select-Object -First 1
+    if ($svc) { Write-Output "installed" } else { Write-Output "absent" }
+  register: _sql_svc_check
+  changed_when: false
+
+- name: Set SQL installed fact
+  ansible.builtin.set_fact:
+    _sql_installed: "{{ (_sql_svc_check.stdout | trim) == 'installed' }}"
+
+- name: Display SQL Server installation state
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} — SQL Server instance '{{ sql_instance_name }}'
+      {{ 'already installed — skipping install step' if (_sql_installed | bool) else 'not found — will install' }}
+
+# ----------------------------------------------------------------------------
+# Section 3 — Verify setup media is present
+# ----------------------------------------------------------------------------
+- name: Verify SQL Server setup media exists on host
+  ansible.windows.win_stat:
+    path: "{{ sql_setup_path }}"
+  register: _setup_stat
+  when: not (_sql_installed | bool)
+
+- name: Fail if setup media is missing
+  ansible.builtin.fail:
+    msg: >-
+      SQL Server setup.exe not found at '{{ sql_setup_path }}' on
+      {{ inventory_hostname }}. Pre-stage the SQL Server installation media
+      before running this role (see sql_setup_path in defaults/main.yml).
+  when:
+    - not (_sql_installed | bool)
+    - not (_setup_stat.stat.exists | default(false))
+
+# ----------------------------------------------------------------------------
+# Section 4 — Stage ConfigurationFile.ini on target host
+# ----------------------------------------------------------------------------
+- name: Create SQL staging directory
+  ansible.windows.win_file:
+    path: "{{ sql_temp_path }}"
+    state: directory
+  when: not (_sql_installed | bool)
+
+- name: Render and stage ConfigurationFile.ini
+  ansible.windows.win_copy:
+    content: "{{ lookup('template', 'ConfigurationFile.ini.j2') }}"
+    dest: "{{ sql_temp_path }}\\ConfigurationFile.ini"
+  when: not (_sql_installed | bool)
+
+# ----------------------------------------------------------------------------
+# Section 5 — Install SQL Server
+# ----------------------------------------------------------------------------
+- name: Run SQL Server unattended setup
+  ansible.windows.win_shell: |
+    $proc = Start-Process -FilePath '{{ sql_setup_path }}' `
+        -ArgumentList '/ConfigurationFile={{ sql_temp_path }}\ConfigurationFile.ini' `
+        -Wait -PassThru -NoNewWindow
+    exit $proc.ExitCode
+  register: _sql_install_result
+  # 0   = success
+  # 3010 = success, reboot required
+  failed_when: _sql_install_result.rc not in [0, 3010]
+  changed_when: _sql_install_result.rc in [0, 3010]
+  timeout: 2700   # 45 minutes — SQL Server installs can be slow
+  when: not (_sql_installed | bool)
+
+- name: Reboot after SQL Server installation
+  ansible.windows.win_reboot:
+    reboot_timeout: 600
+    post_reboot_delay: 30
+    msg: "Rebooting after SQL Server installation (CDX-E)"
+  when:
+    - not (_sql_installed | bool)
+    - _sql_install_result.rc | default(0) == 3010
+
+# ----------------------------------------------------------------------------
+# Section 6 — Post-install: non-default TCP port configuration
+# Only runs when sql_port != 1433 (TCPENABLED=1 is set in ConfigurationFile,
+# default port 1433 requires no registry adjustment).
+# ----------------------------------------------------------------------------
+- name: Configure non-standard SQL Server TCP port
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+
+    # Locate the instance registry key (version-agnostic)
+    $baseKey = 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server'
+    $instanceKey = Get-ChildItem $baseKey |
+        Where-Object { (Get-ItemPropertyValue $_.PSPath -Name 'InstalledInstances' -ErrorAction SilentlyContinue) -contains '{{ sql_instance_name }}' } |
+        Select-Object -ExpandProperty PSChildName -First 1
+
+    if (-not $instanceKey) {
+        # Fallback: search for MSSQL<ver>.INSTANCENAME pattern
+        $instanceKey = Get-ChildItem $baseKey |
+            Where-Object { $_.PSChildName -match "^MSSQL\d+\.{{ sql_instance_name }}$" } |
+            Select-Object -ExpandProperty PSChildName -First 1
+    }
+
+    if (-not $instanceKey) {
+        throw "Cannot locate SQL Server registry key for instance '{{ sql_instance_name }}'"
+    }
+
+    $tcpPath  = "$baseKey\$instanceKey\MSSQLServer\SuperSocketNetLib\Tcp"
+    $ipAllPath = "$tcpPath\IPAll"
+
+    Set-ItemProperty -Path $ipAllPath -Name 'TcpPort'         -Value '{{ sql_port }}' -Type String
+    Set-ItemProperty -Path $ipAllPath -Name 'TcpDynamicPorts' -Value ''               -Type String
+    Write-Output "CHANGED: Set SQL Server TCP port to {{ sql_port }}"
+  register: _sql_port_result
+  when: sql_port | int != 1433
+  changed_when: "'CHANGED:' in (_sql_port_result.stdout | default(''))"
+
+# ----------------------------------------------------------------------------
+# Section 7 — Windows Firewall rules
+# ----------------------------------------------------------------------------
+- name: Allow SQL Server TCP port through Windows Firewall
+  ansible.windows.win_firewall_rule:
+    name: "SQL Server - CDX-E (TCP {{ sql_port }})"
+    localport: "{{ sql_port }}"
+    action: allow
+    direction: in
+    protocol: tcp
+    state: present
+    enabled: true
+
+- name: Allow SQL Server Browser through Windows Firewall (UDP 1434)
+  ansible.windows.win_firewall_rule:
+    name: "SQL Server Browser - CDX-E (UDP 1434)"
+    localport: 1434
+    action: allow
+    direction: in
+    protocol: udp
+    state: present
+    enabled: true
+
+# ----------------------------------------------------------------------------
+# Section 8 — Restart SQL Server service to apply port changes
+# Only needed if we changed the TCP port (Section 6 ran).
+# ----------------------------------------------------------------------------
+- name: Restart SQL Server service to apply port change
+  ansible.windows.win_service:
+    name: >-
+      {{
+        'MSSQLSERVER'
+        if sql_instance_name == 'MSSQLSERVER'
+        else 'MSSQL$' + sql_instance_name
+      }}
+    state: restarted
+  when:
+    - sql_port | int != 1433
+    - _sql_port_result is defined
+    - _sql_port_result.changed | default(false)
+
+# ----------------------------------------------------------------------------
+# Section 9 — Wait for SQL Server to accept connections
+# ----------------------------------------------------------------------------
+- name: Wait for SQL Server to accept connections
+  ansible.windows.win_shell: |
+    $timeout = 120
+    $elapsed = 0
+    while ($elapsed -lt $timeout) {
+        try {
+            $conn = New-Object System.Data.SqlClient.SqlConnection(
+                "Server=localhost,{{ sql_port }};Integrated Security=true;Database=master;Connect Timeout=5"
+            )
+            $conn.Open()
+            $conn.Close()
+            Write-Output "ready"
+            exit 0
+        } catch {
+            Start-Sleep -Seconds 10
+            $elapsed += 10
+        }
+    }
+    throw "SQL Server did not become ready within $timeout seconds"
+  register: _sql_ready
+  changed_when: false
+
+# ----------------------------------------------------------------------------
+# Section 10 — Cleanup staging directory
+# ----------------------------------------------------------------------------
+- name: Remove SQL staging directory
+  ansible.windows.win_file:
+    path: "{{ sql_temp_path }}"
+    state: absent
+
+# ----------------------------------------------------------------------------
+# Section 11 — Summary
+# ----------------------------------------------------------------------------
+- name: deploy_sql_server summary
+  ansible.builtin.debug:
+    msg: >-
+      deploy_sql_server complete for {{ inventory_hostname }}.
+      instance={{ sql_instance_name }} |
+      port={{ sql_port }} |
+      auth={{ sql_auth_mode }} |
+      was_installed={{ _sql_installed }} |
+      install_ran={{ not (_sql_installed | bool) }}

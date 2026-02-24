@@ -1,0 +1,38 @@
+---
+# =============================================================================
+# Role: configure_red_team — Default Variables
+# =============================================================================
+
+# C2 platform configuration map
+# Maps platform name (apt_config.c2_platforms[].name) to binary/service info.
+# Templates are Packer-baked; these defaults match the pre-installed paths.
+c2_platform_map:
+  adaptix:
+    service_name: adaptix
+    binary_path: /opt/adaptix/adaptixserver
+    config_path: /opt/adaptix/config.json
+    default_port: 8443
+    requires_license: false
+  cobalt_strike:
+    service_name: teamserver
+    binary_path: /opt/cobaltstrike/teamserver
+    profile_dir: /opt/cobaltstrike/profiles
+    default_port: 50050
+    requires_license: true
+  sliver:
+    service_name: sliver-server
+    binary_path: /usr/local/bin/sliver-server
+    config_dir: /root/.sliver
+    default_port: 31337
+    requires_license: false
+
+# Default destination on Red Team VMs for staged toolkit files
+redteam_toolkit_dir: /opt/redteam
+
+# Operator tool packages to install on Kali/operator workstations
+redteam_operator_packages:
+  - crackmapexec
+  - impacket-scripts
+  - bloodhound
+  - neo4j
+  - seclists
