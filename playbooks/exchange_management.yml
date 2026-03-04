@@ -27,7 +27,7 @@
 #   ansible-playbook playbooks/exchange_management.yml \
 #     -e "exercise=OBSIDIAN_DAGGER" \
 #     -e "exchange_version=2016" \
-#     -e "@Secrets/credentials.yml" --ask-vault-pass
+#     -e "@secrets/credentials.yml" --ask-vault-pass
 # =============================================================================
 
 # ----------------------------------------------------------------------------
@@ -50,7 +50,7 @@
   tags: [exchange, services]
 
   vars_files:
-    - "{{ playbook_dir }}/Secrets/credentials.yml"
+    - "{{ playbook_dir }}/secrets/credentials.yml"
 
   pre_tasks:
     - name: Import exercise facts from controller

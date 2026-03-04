@@ -1,0 +1,3 @@
+---
+# No handlers — networking reload is triggered inline via task loop on
+# _interfaces_results.results to allow per-node conditional execution.

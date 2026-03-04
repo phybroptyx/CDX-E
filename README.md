@@ -11,7 +11,7 @@ The framework is **exercise-agnostic and phase-driven**. Each exercise is define
 Red Team infrastructure is driven by **APT profiles** (`APTs/<NAME>/`). Blue Team infrastructure is driven by **SOC layouts** (`SOC_LAYOUTS/<NAME>/`). Both are reusable, exercise-independent libraries.
 
 ```
-Packer → Terraform → Inventory → Power → Network → Configure → AD → Services → Red Team → Blue Team → Agents
+Packer → Stage → Terraform → Inventory → Power → Network → Configure → AD → Services → Red Team → Blue Team → Agents
 ```
 
 All shared configuration (Proxmox API endpoints, template registry, timing, Terraform provider versions) lives in a single file: `inventory/group_vars/all.yml`.
@@ -28,6 +28,7 @@ CDX-E/
 ├── playbooks/                           # One playbook per pipeline phase
 │   ├── exercise_initiation.yml          # Phase 0 — load exercise config
 │   ├── template_deployment.yml          # Phase 1 — Packer template builds
+│   ├── template_staging.yml             # Phase 1b — Stage RAID-local template copies (standalone)
 │   ├── vm_management.yml                # Phase 2 — Terraform deploy/destroy (scenario VMs)
 │   ├── inventory_refresh.yml            # Phase 3 — write dynamic inventory
 │   ├── vm_power_management.yml          # Phase 4 — power on, wait for agent
@@ -45,6 +46,7 @@ CDX-E/
 │   ├── read_apt_config/                 # Loads APTs/<apt>/apt.yml + vms.yaml → facts
 │   ├── read_soc_layout/                 # Loads SOC_LAYOUTS/<layout>/layout.yml + vms.yaml → facts
 │   ├── deploy_packer_template/          # Packer build: check Proxmox → build missing
+│   ├── stage_templates/                 # Phase 1b: full-copy QNAP masters → per-node RAID
 │   ├── deploy_scenario/                 # Terraform: scenario VMs
 │   ├── deploy_red_team/                 # Terraform: Red Team VMs (from APT profile)
 │   ├── deploy_blue_team/                # Terraform: Blue Team VMs (from SOC layout)
@@ -175,6 +177,7 @@ Each phase is a standalone playbook. Run them sequentially for a full exercise s
 |---|---|---|---|---|
 | 0 | `exercise_initiation.yml` | `read_exercise_config` | ✅ | Loads `scenario.yml` + `vms.yaml`; sets cacheable facts for all subsequent plays |
 | 1 | `template_deployment.yml` | `deploy_packer_template` | ✅ | Queries Proxmox for existing templates; builds missing ones with Packer; validates post-build |
+| 1b | `template_staging.yml` | `stage_templates` | ✅ | Full-copies QNAP master templates to per-node RAID storage so Terraform can create linked clones locally; skips `qnap_direct` templates and VMIDs already staged |
 | 2 | `vm_management.yml` | `deploy_scenario` | ✅ | Generates and applies Terraform config for scenario VMs; independent state dir per exercise |
 | 3 | `inventory_refresh.yml` | `inventory_refresh` | ✅ | Reads Terraform outputs from all three state dirs; writes `inventory/exercise_hosts.yml` |
 | 4 | `vm_power_management.yml` | `vm_power_management` | ✅ | Starts VMs via Proxmox API; polls QEMU guest agent until OS is ready; waits for WinRM/SSH |
@@ -364,8 +367,12 @@ analysts:
 ansible-playbook playbooks/exercise_initiation.yml \
   -e "exercise=OBSIDIAN_DAGGER" -e "@Secrets/credentials.yml" --ask-vault-pass
 
-# 1. Build missing Packer templates
+# 1. Build missing Packer templates + stage RAID-local copies (Phase 1 + 1b combined)
 ansible-playbook playbooks/template_deployment.yml \
+  -e "exercise=OBSIDIAN_DAGGER" -e "@Secrets/credentials.yml" --ask-vault-pass
+
+# 1b. (Optional standalone) Re-stage templates without rebuilding them
+ansible-playbook playbooks/template_staging.yml \
   -e "exercise=OBSIDIAN_DAGGER" -e "@Secrets/credentials.yml" --ask-vault-pass
 
 # 2. Deploy scenario VMs via Terraform
@@ -436,41 +443,60 @@ ansible-playbook playbooks/template_deployment.yml \
 
 Defined in `inventory/group_vars/all.yml` → `template_registry`. All templates have planned Packer build files.
 
-| Key | VMID | OS | Status |
-|---|---|---|---|
-| `vyos` | 2017 | VyOS 2025 | built |
-| `server_2025` | 2037 | Windows Server 2025 | in-progress |
-| `server_2025_core` | 2038 | Windows Server 2025 Core | in-progress |
-| `server_2022` | 2029 | Windows Server 2022 | built |
-| `server_2022_core` | 2030 | Windows Server 2022 Core | built |
-| `server_2019` | 2027 | Windows Server 2019 | built |
-| `server_2019_core` | 2028 | Windows Server 2019 Core | built |
-| `server_2016` | 2025 | Windows Server 2016 | built |
-| `server_2016_core` | 2026 | Windows Server 2016 Core | built |
-| `server_2012r2` | 2024 | Windows Server 2012 R2 | built |
-| `server_2012r2_core` | 2022 | Windows Server 2012 R2 Core | built |
-| `server_2008r2` | 2023 | Windows Server 2008 R2 | built |
-| `windows_11` | 2033 | Windows 11 | built |
-| `windows_10` | 2031 | Windows 10 | built |
-| `windows_8.1` | 2032 | Windows 8.1 | built |
-| `windows_7` | 2016 | Windows 7 | built |
-| `kali` | 2018 | Kali Linux 2025.4 | built |
-| `kali_purple` | 2016 | Kali Purple 2025.4 | planned |
-| `commando_vm` | 2039 | Commando VM (Windows) — Mandiant | in-progress |
-| `flare_vm` | 2049 | FLARE VM (Windows) — Mandiant | planned |
-| `threat_pursuit_vm` | 2050 | Threat Pursuit VM (Windows) — Mandiant | planned |
-| `cobalt_strike_c2` | 2041 | Cobalt Strike C2 Server | planned |
-| `adaptix_c2` | 2042 | Adaptix C2 Server | planned |
-| `ubuntu_server` | 2020 | Ubuntu Server 22.04 | built |
-| `ubuntu_server_1604` | 2021 | Ubuntu Server 16.04 | built |
-| `ubuntu_2110` | 2021 | Ubuntu 21.10 | built |
-| `debian_12` | 2044 | Debian 12 | planned |
-| `centos_7` | 2019 | CentOS 7 | built |
-| `docker_base` | 2045 | Docker Host (Ubuntu) | planned |
-| `parrot` | 2048 | Parrot OS | planned |
-| `opnsense` | 2043 | OPNsense 25.7 | planned |
-| `malcolm_server` | 2047 | Malcolm Network Analysis | planned |
-| `hh_sensor` | 2046 | Hedgehog Linux (Sensor) | planned |
+### VMID Namespace Allocation
+
+| Range | Storage | Purpose |
+|---|---|---|
+| `2000–2099` | QNAP | Packer master / golden templates (shared NAS) |
+| `2100–2199` | RAID (cdx-pve-01) | Staged copies for linked-clone source on node 01 |
+| `2200–2299` | RAID (cdx-pve-02) | Staged copies for linked-clone source on node 02 |
+| `2300–2399` | RAID (cdx-pve-03) | Staged copies for linked-clone source on node 03 |
+
+Staged VMID formula: `staged_vmid = master_vmid + proxmox_node_template_offset[node]`
+(offsets: cdx-pve-01 = +100, cdx-pve-02 = +200, cdx-pve-03 = +300)
+
+Templates flagged `qnap_direct: true` (e.g. `vyos`) are linked-cloned directly from QNAP and are never staged to RAID.
+
+### Template Inventory
+
+Staged VMID = QNAP master VMID + per-node offset. `vyos` is `qnap_direct: true` — linked-cloned directly from the QNAP master; never RAID-staged.
+
+| Key | OS | Status | QNAP | pve-01 | pve-02 | pve-03 |
+|---|---|---|---|---|---|---|
+| `vyos` | VyOS 2025 | planned | 2017 | — | — | — |
+| `opnsense` | OPNsense 25.7 | planned | 2043 | 2143 | 2243 | 2343 |
+| `server_2025` | Windows Server 2025 | built | 2037 | 2137 | 2237 | 2337 |
+| `server_2025_core` | Windows Server 2025 Core | planned | 2038 | 2138 | 2238 | 2338 |
+| `server_2022` | Windows Server 2022 | built | 2033 | 2133 | 2233 | 2333 |
+| `server_2022_core` | Windows Server 2022 Core | planned | 2034 | 2134 | 2234 | 2334 |
+| `server_2019` | Windows Server 2019 | built | 2031 | 2131 | 2231 | 2331 |
+| `server_2019_core` | Windows Server 2019 Core | planned | 2032 | 2132 | 2232 | 2332 |
+| `server_2016` | Windows Server 2016 | built | 2029 | 2129 | 2229 | 2329 |
+| `server_2016_core` | Windows Server 2016 Core | planned | 2030 | 2130 | 2230 | 2330 |
+| `server_2012r2` | Windows Server 2012 R2 | built | 2026 | 2126 | 2226 | 2326 |
+| `server_2012r2_core` | Windows Server 2012 R2 Core | planned | 2027 | 2127 | 2227 | 2327 |
+| `server_2008r2` | Windows Server 2008 R2 | built | 2024 | 2124 | 2224 | 2324 |
+| `server_2008r2_core` | Windows Server 2008 R2 Core | planned | 2023 | 2123 | 2223 | 2323 |
+| `windows_11` | Windows 11 | built | 2036 | 2136 | 2236 | 2336 |
+| `windows_10` | Windows 10 | built | 2035 | 2135 | 2235 | 2335 |
+| `windows_8.1` | Windows 8.1 | built | 2028 | 2128 | 2228 | 2328 |
+| `windows_7` | Windows 7 | built | 2025 | 2125 | 2225 | 2325 |
+| `kali` | Kali Linux 2025.4 | built | 2018 | 2118 | 2218 | 2318 |
+| `kali_purple` | Kali Purple 2025.4 | in-progress | 2016 | 2116 | 2216 | 2316 |
+| `parrot` | Parrot OS | planned | 2048 | 2148 | 2248 | 2348 |
+| `ubuntu_2110` | Ubuntu 21.10 | built | 2021 | 2121 | 2221 | 2321 |
+| `ubuntu_server_1604` | Ubuntu Server 16.04 | built | 2022 | 2122 | 2222 | 2322 |
+| `debian_12` | Debian 12 | planned | 2044 | 2144 | 2244 | 2344 |
+| `centos_7` | CentOS 7 | built | 2019 | 2119 | 2219 | 2319 |
+| `centos_7_server` | CentOS 7 Server | built | 2020 | 2120 | 2220 | 2320 |
+| `centos_7_gnome` | CentOS 7 GNOME | planned | 2040 | 2140 | 2240 | 2340 |
+| `docker_base` | Docker Host (Ubuntu) | planned | 2045 | 2145 | 2245 | 2345 |
+| `commando_vm` | Commando VM (Win 10) — Mandiant | built | 2039 | 2139 | 2239 | 2339 |
+| `flare_vm` | FLARE VM (Windows) — Mandiant | built | 2049 | 2149 | 2249 | 2349 |
+| `cobalt_strike_c2` | Cobalt Strike C2 Server | planned | 2041 | 2141 | 2241 | 2341 |
+| `adaptix_c2` | Adaptix C2 Server | planned | 2042 | 2142 | 2242 | 2342 |
+| `hh_sensor` | Hedgehog Linux (Sensor) | planned | 2046 | 2146 | 2246 | 2346 |
+| `malcolm_server` | Malcolm Network Analysis | planned | 2047 | 2147 | 2247 | 2347 |
 
 ---
 
@@ -486,7 +512,9 @@ Set in `inventory/group_vars/all.yml`. Override via `-e` or `Secrets/credentials
 | Token ID | `ansible` | `proxmox_api_token_id` |
 | Validate certs | `false` | `proxmox_validate_certs` |
 | Template node | `cdx-pve-01` | `template_node` |
-| Clone type | `full` | `vm_clone_type` |
+| Template storage (QNAP) | `QNAP` | `packer_template_storage` |
+| Clone storage (RAID) | `raid` | `vm_clone_storage` |
+| Clone type | `linked` | `vm_clone_type` |
 | VM timezone | `UTC` | `vm_timezone` |
 | Guest agent delay | `30s` | `guest_agent_initial_delay` |
 | WinRM/SSH wait timeout | `300s` | `vm_power_wait_timeout` |

@@ -1,0 +1,142 @@
+{
+  "_meta": {
+    "version": "1.0",
+    "exerciseName": "DC_303",
+    "description": "DC303 baseline Group Policy configuration",
+    "lastUpdated": "2026-02-27",
+    "domainFQDN": "dc303.cdx.lab",
+    "imageBasePath": "\\\\dc303.cdx.lab\\NETLOGON\\Images"
+  },
+
+  "gpos": [
+    {
+      "name": "DC303 Baseline Workstation Policy",
+      "id": null,
+      "backupPath": null,
+      "description": "Baseline security hardening for all DC303 domain workstations"
+    },
+    {
+      "name": "DC303 Baseline Server Policy",
+      "id": null,
+      "backupPath": null,
+      "description": "Baseline security hardening for all DC303 domain servers"
+    },
+    {
+      "name": "DC303 Domain Branding - Logon Screen",
+      "id": null,
+      "backupPath": null,
+      "description": "DC303 logon and lock screen branding for all domain systems",
+      "settings": {
+        "computer": [
+          {
+            "key": "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Personalization",
+            "valueName": "LockScreenImage",
+            "value": "\\\\dc303.cdx.lab\\NETLOGON\\Images\\dc303-login-banner.jpg",
+            "type": "String"
+          },
+          {
+            "key": "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\Personalization",
+            "valueName": "NoChangingLockScreen",
+            "value": 1,
+            "type": "DWord"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DC303 Domain Branding - Workstation Wallpaper",
+      "id": null,
+      "backupPath": null,
+      "description": "DC303 corporate desktop wallpaper for all domain workstations",
+      "settings": {
+        "user": [
+          {
+            "key": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+            "valueName": "Wallpaper",
+            "value": "\\\\dc303.cdx.lab\\NETLOGON\\Images\\dc303-desktop-wallpaper.jpg",
+            "type": "String"
+          },
+          {
+            "key": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
+            "valueName": "WallpaperStyle",
+            "value": "4",
+            "type": "String"
+          },
+          {
+            "key": "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\ActiveDesktop",
+            "valueName": "NoChangingWallPaper",
+            "value": 1,
+            "type": "DWord"
+          }
+        ]
+      }
+    }
+  ],
+
+  "links": [
+    {
+      "gpoName": "DC303 Baseline Workstation Policy",
+      "targetOu": "OU=Workstations,OU=Operations,OU=HQ,OU=DC303",
+      "enforced": false,
+      "enabled": true,
+      "linkOrder": 1
+    },
+    {
+      "gpoName": "DC303 Baseline Workstation Policy",
+      "targetOu": "OU=Workstations,OU=Engineering,OU=HQ,OU=DC303",
+      "enforced": false,
+      "enabled": true,
+      "linkOrder": 1
+    },
+    {
+      "gpoName": "DC303 Baseline Workstation Policy",
+      "targetOu": "OU=Workstations,OU=Finance,OU=HQ,OU=DC303",
+      "enforced": false,
+      "enabled": true,
+      "linkOrder": 1
+    },
+    {
+      "gpoName": "DC303 Baseline Server Policy",
+      "targetOu": "OU=Servers,OU=IT-Core,OU=HQ,OU=DC303",
+      "enforced": false,
+      "enabled": true,
+      "linkOrder": 1
+    },
+    {
+      "gpoName": "DC303 Domain Branding - Logon Screen",
+      "targetOu": "OU=DC303",
+      "enforced": true,
+      "enabled": true,
+      "linkOrder": 1,
+      "comment": "Applied at domain root — enforced on all domain systems"
+    },
+    {
+      "gpoName": "DC303 Domain Branding - Workstation Wallpaper",
+      "targetOu": "OU=DC303",
+      "enforced": false,
+      "enabled": true,
+      "linkOrder": 2,
+      "comment": "Applied at domain root — default wallpaper for all workstations"
+    }
+  ],
+
+  "imageFiles": {
+    "description": "Branding image files — stage to \\\\dc303.cdx.lab\\NETLOGON\\Images before running GPO deployment",
+    "sourcePath": "Domain Files",
+    "targetPath": "\\\\dc303.cdx.lab\\NETLOGON\\Images",
+    "files": [
+      {
+        "filename": "dc303-login-banner.jpg",
+        "purpose": "Logon and lock screen for all domain systems",
+        "recommendedResolution": "1920x1080",
+        "gpoUsage": "DC303 Domain Branding - Logon Screen"
+      },
+      {
+        "filename": "dc303-desktop-wallpaper.jpg",
+        "purpose": "Default desktop wallpaper for all workstations",
+        "recommendedResolution": "1920x1080",
+        "gpoUsage": "DC303 Domain Branding - Workstation Wallpaper"
+      }
+    ]
+  }
+}

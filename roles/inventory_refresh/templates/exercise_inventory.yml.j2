@@ -7,30 +7,40 @@
 # Connection vars by OS type:
 #   Windows  → inventory/group_vars/windows_hosts.yml (WinRM)
 #   Linux    → inventory/group_vars/linux_hosts.yml   (SSH)
-#   VyOS     → inventory/group_vars/vyos_hosts.yml    (SSH, ansible_user=root)
+#   VyOS     → inventory/group_vars/vyos_hosts.yml    (SSH, ansible_user=vyos)
+#
+# IP address pattern:
+#   ansible_host  — Layer0 management IP (DHCP). Populated by vm_power_management
+#                   via inventory/host_vars/<name>.yml after VM boot. Empty here
+#                   because management IPs are not known at inventory_refresh time.
+#   cloud_init_ip — Exercise-network static IP from vms.yaml (cloud_init.ip).
+#                   Used by AD/DNS/DHCP config roles for service configuration.
+#                   NOT used for Ansible connectivity.
 # =============================================================================
 
 all:
   children:
 
     # ─── All exercise VMs ─────────────────────────────────────────────────────
-    # ansible_host:    management IP (empty string for DHCP-assigned VMs)
-    # ansible_user:    cdxadmin (Windows/Linux) or root (VyOS)
+    # ansible_host:    set at runtime via inventory/host_vars/<name>.yml
+    # cloud_init_ip:   exercise-network static IP (not the Ansible connection IP)
+    # ansible_user:    cdxadmin (Windows/Linux) or vyos (VyOS)
     # ansible_os_type: windows | linux | vyos  (used by configuration roles)
     # vm_id:           Proxmox VMID
     # template:        template_registry key
     # ansible_group:   vms.yaml ansible_group value (informational)
     exercise_hosts:
       hosts:
-{% for vm in virtual_machines %}
+{% for vm in _all_vms %}
 {% set _os = template_registry[vm.template].os_type %}
         {{ vm.name }}:
-          ansible_host: "{{ _vm_ip_map[vm.name] | default('') }}"
-          ansible_user: "{{ 'root' if _os == 'vyos' else 'cdxadmin' }}"
+          cloud_init_ip: "{{ _vm_ip_map[vm.name] | default('') }}"
+          ansible_user: "{{ 'vyos' if _os == 'vyos' else 'cdxadmin' }}"
           ansible_os_type: "{{ _os }}"
           vm_id: {{ vm.vmid }}
           template: "{{ vm.template }}"
           ansible_group: "{{ vm.ansible_group }}"
+          additional_groups: {{ vm.additional_groups | default([]) | to_yaml | trim }}
 {% endfor %}
 
     # ─── OS-type parent groups ─────────────────────────────────────────────────

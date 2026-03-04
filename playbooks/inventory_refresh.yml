@@ -11,15 +11,57 @@
 # Must run AFTER vm_management (Terraform outputs must exist).
 # Must run BEFORE vm_power_management (provides IPs for connectivity waits).
 #
+# All three VM tiers are included in the generated inventory when their
+# Terraform state directories are present:
+#   terraform/            — scenario VMs (required)
+#   terraform_red_team/   — Red Team VMs (when red_team phase was deployed)
+#   terraform_blue_team/  — Blue Team VMs (when blue_team phase was deployed)
+#
 # Roles:
 #   - inventory_refresh
 #
 # Usage:
 #   ansible-playbook playbooks/inventory_refresh.yml \
 #     -e "exercise=OBSIDIAN_DAGGER" \
-#     -e "@secrets/credentials.yml"
+#     -e "@secrets/credentials.yml" --ask-vault-pass
 # =============================================================================
 
+# ----------------------------------------------------------------------------
+# Pre-play 1: load exercise configuration
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Pre-play 2: load APT profile (provides apt_vms for Red Team inventory)
+# ----------------------------------------------------------------------------
+- name: Load APT Profile
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load APT adversary profile
+      ansible.builtin.import_role:
+        name: read_apt_config
+
+# ----------------------------------------------------------------------------
+# Pre-play 3: load SOC layout (provides soc_vms for Blue Team inventory)
+# ----------------------------------------------------------------------------
+- name: Load SOC Layout
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load SOC layout configuration
+      ansible.builtin.import_role:
+        name: read_soc_layout
+
+# ----------------------------------------------------------------------------
+# Main play: write exercise_hosts.yml and refresh in-memory inventory
+# ----------------------------------------------------------------------------
 - name: Inventory Refresh
   hosts: localhost
   connection: local
@@ -30,6 +72,18 @@
     - "{{ playbook_dir }}/secrets/credentials.yml"
 
   pre_tasks:
+    - name: Import exercise and team facts from pre-plays
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+        apt_vms:          "{{ hostvars['localhost'].apt_vms | default([]) }}"
+        soc_vms:          "{{ hostvars['localhost'].soc_vms | default([]) }}"
+
+    - name: "[preflight] Skip — destroy workflow, no inventory to build"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
     - name: "[preflight] Skip if terraform phase is disabled"
       ansible.builtin.meta: end_play
       when: not (scenario.phases.terraform | default(true) | bool)

@@ -39,6 +39,49 @@
   when: not _tf_state_stat.stat.exists
 
 # ----------------------------------------------------------------------------
+# Power off VMs — Proxmox requires VMs to be stopped before deletion
+# ----------------------------------------------------------------------------
+- name: Power off VMs before destroy
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/status/stop
+    method: POST
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 500]   # 500 = already stopped — idempotent
+  loop: "{{ virtual_machines }}"
+  loop_control:
+    label: "{{ item.name }} (vmid={{ item.vmid }})"
+  ignore_errors: true   # VM may not exist or already be stopped
+  when: _tf_state_stat.stat.exists
+
+- name: Wait for VMs to reach stopped state
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/status/current
+    method: GET
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 500]   # 500 = VM doesn't exist yet (already destroyed)
+  loop: "{{ virtual_machines }}"
+  loop_control:
+    label: "{{ item.name }} (vmid={{ item.vmid }})"
+  register: _vm_status
+  retries: 12
+  delay: 5
+  until: >-
+    _vm_status.status == 500 or
+    _vm_status.json.data.status | default('stopped') == 'stopped'
+  ignore_errors: true
+  when: _tf_state_stat.stat.exists
+
+# ----------------------------------------------------------------------------
 # Terraform destroy
 # ----------------------------------------------------------------------------
 - name: Terraform destroy
@@ -68,6 +111,14 @@
     validate_certs: "{{ proxmox_validate_certs }}"
     status_code: [200, 400, 404, 500]   # 400/404/500 = already gone, continue
   when: _tf_state_stat.stat.exists
+
+# ----------------------------------------------------------------------------
+# Clean up dynamic inventory file so downstream plays have no stale hosts
+# ----------------------------------------------------------------------------
+- name: Remove exercise_hosts.yml inventory file
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../inventory/exercise_hosts.yml"
+    state: absent
 
 # ----------------------------------------------------------------------------
 # Summary

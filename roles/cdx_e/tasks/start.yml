@@ -5,7 +5,7 @@
 # =============================================================================
 
 - name: "Start VMs"
-  community.general.proxmox_kvm:
+  community.proxmox.proxmox_kvm:
     api_host: "{{ proxmox_api_host }}"
     api_user: "{{ proxmox_api_user }}"
     api_token_id: "{{ proxmox_api_token_id }}"

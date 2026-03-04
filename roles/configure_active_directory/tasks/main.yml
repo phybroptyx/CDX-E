@@ -199,14 +199,16 @@
     foreach ($site in $template.sites) {
         if (-not $site.name) { continue }
 
-        $existing = Get-ADReplicationSite -Filter { Name -eq $site.name } -ErrorAction SilentlyContinue
+        $siteName = $site.name
+        $existing = Get-ADReplicationSite -Filter "Name -eq '$siteName'" -ErrorAction SilentlyContinue
         if (-not $existing) {
             New-ADReplicationSite -Name $site.name -Description $site.description -ErrorAction Stop
             $changes += "CHANGED: Created site '$($site.name)'"
         }
 
         if ($site.subnet -and $site.subnet.cidr) {
-            $existingSubnet = Get-ADReplicationSubnet -Filter { Name -eq $site.subnet.cidr } -ErrorAction SilentlyContinue
+            $subnetName     = $site.subnet.cidr
+            $existingSubnet = Get-ADReplicationSubnet -Filter "Name -eq '$subnetName'" -ErrorAction SilentlyContinue
             if (-not $existingSubnet) {
                 $loc = if ($site.subnet.location) { $site.subnet.location } else { $site.name }
                 New-ADReplicationSubnet -Name $site.subnet.cidr -Site $site.name -Location $loc -ErrorAction Stop
@@ -220,7 +222,8 @@
         foreach ($link in $template.siteLinks) {
             if (-not $link.name) { continue }
 
-            $existing = Get-ADReplicationSiteLink -Filter { Name -eq $link.name } -ErrorAction SilentlyContinue
+            $linkName = $link.name
+            $existing = Get-ADReplicationSiteLink -Filter "Name -eq '$linkName'" -ErrorAction SilentlyContinue
             if (-not $existing) {
                 $cost      = if ($link.cost) { $link.cost } else { 100 }
                 $replMins  = if ($link.replicationIntervalMins) { $link.replicationIntervalMins } else { 15 }
@@ -264,7 +267,7 @@
     $rootDN = "OU=$rootOU,$domainDN"
 
     # ── Root OU ───────────────────────────────────────────────────────────────
-    if (-not (Get-ADOrganizationalUnit -Filter { DistinguishedName -eq $rootDN } -ErrorAction SilentlyContinue)) {
+    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rootDN'" -ErrorAction SilentlyContinue)) {
         New-ADOrganizationalUnit -Name $rootOU -Path $domainDN `
             -Description $org.rootOUDescription `
             -ProtectedFromAccidentalDeletion $false -ErrorAction Stop
@@ -278,7 +281,7 @@
         $siteInfo = $org.siteMappings.$siteKey
         $siteDN   = "OU=$siteKey,$rootDN"
 
-        if (-not (Get-ADOrganizationalUnit -Filter { DistinguishedName -eq $siteDN } -ErrorAction SilentlyContinue)) {
+        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$siteDN'" -ErrorAction SilentlyContinue)) {
             New-ADOrganizationalUnit -Name $siteKey -Path $rootDN `
                 -ProtectedFromAccidentalDeletion $false -ErrorAction Stop
             $changes += "CHANGED: Created site OU '$siteKey'"
@@ -287,7 +290,7 @@
         foreach ($dept in $siteInfo.departments) {
             $deptDN = "OU=$dept,$siteDN"
 
-            if (-not (Get-ADOrganizationalUnit -Filter { DistinguishedName -eq $deptDN } -ErrorAction SilentlyContinue)) {
+            if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$deptDN'" -ErrorAction SilentlyContinue)) {
                 New-ADOrganizationalUnit -Name $dept -Path $siteDN `
                     -ProtectedFromAccidentalDeletion $false -ErrorAction Stop
                 $changes += "CHANGED: Created department OU '$dept' under '$siteKey'"
@@ -296,7 +299,7 @@
             foreach ($subOU in $org.departmentSubOUs) {
                 $subDN = "OU=$subOU,$deptDN"
 
-                if (-not (Get-ADOrganizationalUnit -Filter { DistinguishedName -eq $subDN } -ErrorAction SilentlyContinue)) {
+                if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$subDN'" -ErrorAction SilentlyContinue)) {
                     New-ADOrganizationalUnit -Name $subOU -Path $deptDN `
                         -ProtectedFromAccidentalDeletion $false -ErrorAction Stop
                     $changes += "CHANGED: Created sub-OU '$subOU' under '$dept/$siteKey'"
@@ -331,7 +334,8 @@
     foreach ($group in $usersData.groups) {
         if (-not $group.sAMAccountName) { continue }
 
-        $existing = Get-ADGroup -Filter { SamAccountName -eq $group.sAMAccountName } -ErrorAction SilentlyContinue
+        $groupSam = $group.sAMAccountName
+        $existing = Get-ADGroup -Filter "SamAccountName -eq '$groupSam'" -ErrorAction SilentlyContinue
         if (-not $existing) {
             $ouDN = "$($group.ou),$domainDN"
             New-ADGroup -Name $group.name `
@@ -373,7 +377,8 @@
     foreach ($user in $usersData.users) {
         if (-not $user.sAMAccountName) { continue }
 
-        $existing = Get-ADUser -Filter { SamAccountName -eq $user.sAMAccountName } -ErrorAction SilentlyContinue
+        $userSam  = $user.sAMAccountName
+        $existing = Get-ADUser -Filter "SamAccountName -eq '$userSam'" -ErrorAction SilentlyContinue
         if (-not $existing) {
             $ouDN        = "$($user.ou),$domainDN"
             $secPassword = ConvertTo-SecureString $user.password -AsPlainText -Force
@@ -407,9 +412,9 @@
 
         # Group memberships — run for new and pre-existing users
         foreach ($groupName in $user.groups) {
-            $grp = Get-ADGroup -Filter { Name -eq $groupName } -ErrorAction SilentlyContinue
+            $grp = Get-ADGroup -Filter "Name -eq '$groupName'" -ErrorAction SilentlyContinue
             if (-not $grp) {
-                $grp = Get-ADGroup -Filter { SamAccountName -eq $groupName } -ErrorAction SilentlyContinue
+                $grp = Get-ADGroup -Filter "SamAccountName -eq '$groupName'" -ErrorAction SilentlyContinue
             }
             if ($grp) {
                 $isMember = Get-ADGroupMember -Identity $grp.SamAccountName -ErrorAction SilentlyContinue |

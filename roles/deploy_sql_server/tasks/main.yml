@@ -42,7 +42,7 @@
     fail_msg: >-
       deploy_sql_server: required variables are missing.
       Ensure sql_setup_path is set and, when sql_auth_mode=Mixed, that
-      vault_sql_sa_password is defined in Secrets/credentials.yml.
+      vault_sql_sa_password is defined in secrets/credentials.yml.
 
 # ----------------------------------------------------------------------------
 # Section 2 — Check if SQL Server is already installed

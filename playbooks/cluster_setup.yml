@@ -1,0 +1,35 @@
+---
+# =============================================================================
+# CDX-E Playbook: Cluster Setup
+# =============================================================================
+# One-time bootstrap for all Proxmox cluster nodes. Installs OVS and
+# ifupdown2 prerequisites, then deploys the base /etc/network/interfaces
+# from each node's vault-encrypted host_vars.base_network.
+#
+# Role:
+#   - configure_proxmox_nodes
+#
+# Run this once during initial cluster initialization, or after adding a
+# new node. This playbook does NOT require an exercise to be specified.
+#
+# Prerequisites:
+#   - inventory/host_vars/<node>.yml populated and vault-encrypted for all
+#     nodes in proxmox_hosts (see inventory/host_vars/*.yml.example)
+#   - SSH access (root) from the controller to all Proxmox cluster nodes
+#   - Proxmox API token in secrets/credentials.yml
+#
+# Usage:
+#   ansible-playbook playbooks/cluster_setup.yml \
+#     -e "@secrets/credentials.yml" --ask-vault-pass
+# =============================================================================
+
+- name: Configure Proxmox Cluster Nodes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - "{{ playbook_dir }}/secrets/credentials.yml"
+
+  roles:
+    - configure_proxmox_nodes

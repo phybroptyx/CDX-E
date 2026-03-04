@@ -1,0 +1,128 @@
+---
+# =============================================================================
+# stage_templates — Phase 1b
+# =============================================================================
+# Ensures RAID-local copies of required Packer templates exist on the target
+# Proxmox node before Terraform runs. Exercise VMs are then linked-cloned from
+# these local RAID copies, keeping all VM I/O off the QNAP NAS.
+#
+# Templates with qnap_direct: true in template_registry are skipped — they are
+# linked-cloned directly from the QNAP master (e.g. VyOS routers).
+#
+# Staged copies persist after exercise teardown. The destroy roles do not touch
+# them. Stale copies (after a QNAP master rebuild) must be deleted manually;
+# they will be re-staged automatically on the next exercise run that needs them.
+#
+# VMID formula: staged_vmid = master_vmid + proxmox_node_template_offset[node]
+#   Example: server_2016 (2029) on cdx-pve-01 → 2029 + 100 = 2129
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight
+# ----------------------------------------------------------------------------
+- name: "[preflight] Assert required facts are present"
+  ansible.builtin.assert:
+    that:
+      - scenario is defined
+      - virtual_machines is defined
+      - template_registry is defined
+      - proxmox_node_template_offset is defined
+    fail_msg: >-
+      stage_templates requires read_exercise_config to have run first.
+      scenario, virtual_machines, template_registry, and
+      proxmox_node_template_offset must all be defined.
+
+- name: "[preflight] Assert target node has a configured offset"
+  ansible.builtin.assert:
+    that:
+      - (proxmox_node_override | default(scenario.proxmox.node)) in proxmox_node_template_offset
+    fail_msg: >-
+      Node '{{ proxmox_node_override | default(scenario.proxmox.node) }}' is not in
+      proxmox_node_template_offset. Add it to inventory/group_vars/all.yml →
+      proxmox_node_template_offset.
+
+# ----------------------------------------------------------------------------
+# Resolve staging context
+# ----------------------------------------------------------------------------
+- name: "Set staging node and offset"
+  ansible.builtin.set_fact:
+    _stage_node:   "{{ proxmox_node_override | default(scenario.proxmox.node) }}"
+    _stage_offset: "{{ proxmox_node_template_offset[proxmox_node_override | default(scenario.proxmox.node)] | int }}"
+
+- name: "Derive required template keys from all VM sources"
+  ansible.builtin.set_fact:
+    _required_template_keys: >-
+      {{
+        (
+          (virtual_machines             | map(attribute='template') | list) +
+          (apt_vms  | default([])       | map(attribute='template') | list) +
+          (soc_vms  | default([])       | map(attribute='template') | list)
+        ) | unique | list
+      }}
+
+- name: "Filter: keep only templates that require RAID staging"
+  ansible.builtin.set_fact:
+    _templates_to_stage: >-
+      {%- set result = [] -%}
+      {%- for key in _required_template_keys -%}
+        {%- if key in template_registry
+               and not (template_registry[key].qnap_direct | default(false)) -%}
+          {%- set _ = result.append(key) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ result | unique }}
+
+- name: "Display staging plan"
+  ansible.builtin.debug:
+    msg: |
+      Stage Templates — Phase 1b
+      Target node : {{ _stage_node }} (offset +{{ _stage_offset }})
+      Templates   : {{ _templates_to_stage | length }} to check
+      QNAP-direct : {{ _required_template_keys | difference(_templates_to_stage) | list }}
+
+- name: "Early exit — no templates require RAID staging"
+  ansible.builtin.meta: end_play
+  when: _templates_to_stage | length == 0
+
+# ----------------------------------------------------------------------------
+# Query Proxmox for existing VMIDs on the target node
+# ----------------------------------------------------------------------------
+- name: "Query Proxmox cluster resources"
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/cluster/resources?type=vm"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+  register: _proxmox_resources
+
+- name: "Build list of existing VMIDs on {{ _stage_node }}"
+  ansible.builtin.set_fact:
+    _existing_node_vmids: >-
+      {{
+        _proxmox_resources.json.data
+        | selectattr('node', 'equalto', _stage_node)
+        | map(attribute='vmid')
+        | map('int')
+        | list
+      }}
+
+# ----------------------------------------------------------------------------
+# Stage missing templates
+# ----------------------------------------------------------------------------
+- name: "Stage template '{{ item }}' to RAID on {{ _stage_node }}"
+  ansible.builtin.include_tasks: stage_single_template.yml
+  loop: "{{ _templates_to_stage }}"
+  when: >-
+    (template_registry[item].id | int + _stage_offset | int)
+    not in _existing_node_vmids
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+- name: "Staging complete"
+  ansible.builtin.debug:
+    msg: >-
+      Phase 1b complete on {{ _stage_node }}.
+      {{ _templates_to_stage | length }} template(s) verified;
+      all required RAID copies are present.

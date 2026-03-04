@@ -5,19 +5,26 @@
 # =============================================================================
 
 {% for vm in _tf_vms %}
+{%- set _vm_node = vm.proxmox.node | default(scenario.proxmox.node) %}
+{%- if template_registry[vm.template].qnap_direct | default(false) %}
+{%- set _clone_vmid = template_registry[vm.template].id | int %}
+{%- set _clone_node = template_node %}
+{%- else %}
+{%- set _clone_vmid = template_registry[vm.template].id | int + proxmox_node_template_offset[_vm_node] | int %}
+{%- set _clone_node = _vm_node %}
+{%- endif %}
 # ── {{ vm.name }} ({{ vm.template }}) ──────────────────────────────────────────
 resource "proxmox_virtual_environment_vm" "{{ vm.name | lower | regex_replace('[^a-z0-9]', '_') }}" {
   name      = "{{ vm.name }}"
-  node_name = "{{ vm.proxmox.node | default(scenario.proxmox.node) }}"
+  node_name = "{{ _vm_node }}"
   vm_id     = {{ vm.vmid }}
   pool_id   = "EX_{{ scenario.exercise.name }}"
 
   clone {
-    vm_id        = {{ template_registry[vm.template].id }}
-    node_name    = "{{ template_node }}"
-    datastore_id = "{{ vm.proxmox.storage | default(scenario.proxmox.storage) }}"
-    full         = {{ 'true' if (vm.clone_type | default(vm_clone_type)) == 'full' else 'false' }}
-    retries      = 3
+    vm_id     = {{ _clone_vmid }}
+    node_name = "{{ _clone_node }}"
+    full      = false
+    retries   = 3
   }
 
   cpu {
@@ -29,10 +36,53 @@ resource "proxmox_virtual_environment_vm" "{{ vm.name | lower | regex_replace('[
   memory {
     dedicated = {{ vm.resources.memory_mb }}
   }
+{% if vm.cloud_init is defined %}
+
+  # Cloud-init: static IP assignment via Proxmox cloud-init drive.
+  # Consumed by Cloudbase-Init (Windows) or cloud-init (Linux) on first boot.
+  initialization {
+    ip_config {
+      ipv4 {
+        address = "{{ vm.cloud_init.ip }}/{{ vm.cloud_init.cidr }}"
+        gateway = "{{ vm.cloud_init.gateway }}"
+      }
+    }
+{% if vm.cloud_init.nameserver is defined %}
+    dns {
+      servers = ["{{ vm.cloud_init.nameserver }}"]
+    }
+{% endif %}
+  }
+{% endif %}
+{% if vm.network is defined and vm.network.additional_nics | default([]) | length > 0 %}
+
+  # NIC layout: net0 = management (Proxmox access / Ansible); net1+ = exercise bridges.
+  # All network_device blocks must be specified when any are defined — bpg/proxmox
+  # replaces the full NIC list rather than merging with the template's NICs.
+  network_device {
+    # net0 — management NIC (inherits template config, re-declared to allow adding net1+)
+    bridge   = "{{ vm_management_bridge }}"
+    model    = "virtio"
+    firewall = false
+  }
+{% for nic in vm.network.additional_nics %}
+  network_device {
+    # net{{ nic.nic_id }} — {{ nic.bridge }}
+    bridge   = "{{ nic.bridge }}"
+    model    = "{{ nic.model | default('virtio') }}"
+    firewall = {{ 'true' if nic.firewall | default(false) | bool else 'false' }}
+  }
+{% endfor %}
+{% endif %}
 
   # VMs are left powered-off after deployment.
   # The vm_power_management role handles power-on after inventory_refresh.
   started = false
+
+  # Use standard VGA display — avoids inheriting SPICE/QXL from the Packer template.
+  vga {
+    type = "std"
+  }
 
   lifecycle {
     ignore_changes = [started]

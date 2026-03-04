@@ -56,16 +56,31 @@ vm_power_wait_sleep: 10
 # =============================================================================
 
 packer_binary: "/usr/local/bin/packer"
-packer_dir: "{{ playbook_dir }}/INFRASTRUCTURE/packer"
+packer_dir: "{{ playbook_dir }}/../INFRASTRUCTURE/packer"
 packer_plugin_path: "/opt/packer/plugins"
+packer_disk_type: "qcow2"           # Disk format for all Packer template builds
+packer_disk_cache_mode: "writeback" # Disk cache mode for Packer template builds
+packer_template_storage: "QNAP"     # Proxmox storage pool where Packer registers built templates
 
 # =============================================================================
 # Terraform
 # =============================================================================
 
 terraform_binary: "terraform"
-terraform_proxmox_provider_version: ">= 0.46.0"
-vm_clone_type: "full"
+terraform_proxmox_provider_version: "~> 0.68"
+terraform_plugin_dir: "/opt/terraform/plugins"  # Pre-staged provider dir (empty string = online download)
+vm_clone_type: "linked"             # All exercise VMs are linked clones from RAID-staged template copies
+vm_clone_storage: "raid"            # Destination storage for Terraform VM clones (per-node ~6TB RAID array)
+vm_management_bridge: "Layer0"      # Proxmox bridge for management NIC (net0) on all exercise VMs
+                                    # Layer0 = CDX-I management network (DHCP); NOT the Proxmox host bridge (vmbr0)
+
+# Per-node VMID offset for RAID-staged template copies.
+# staged_vmid = template_registry[key].id + proxmox_node_template_offset[target_node]
+# VMID namespace: 2000-2099 QNAP masters | 2100-2199 pve-01 | 2200-2299 pve-02 | 2300-2399 pve-03
+proxmox_node_template_offset:
+  cdx-pve-01: 100
+  cdx-pve-02: 200
+  cdx-pve-03: 300
 
 # Ansible group names treated as team infrastructure (excluded from scenario VMs)
 team_groups:      ['red_team', 'apt', 'blue_team', 'soc']
@@ -166,6 +181,15 @@ windows_feature_sets:
     # - WDS
     - Telnet-Client
 
+  dhcp_servers:
+    # DHCP Server role + management tools
+    - DHCP
+    - RSAT-DHCP
+    # AD tools (needed to authorize DHCP in AD)
+    - RSAT-AD-Tools
+    - RSAT-AD-PowerShell
+    - Net-Framework-45-Features
+
   # Red/Blue team and routing VMs are configured by their own roles
   red_team:  []
   apt:       []
@@ -203,7 +227,8 @@ template_registry:
   vyos:
     id: 2017
     status: planned
-    os: "VyOS 2025"
+    qnap_direct: true               # Skip RAID staging — linked-clone directly from QNAP master
+    os: "VyOS 1.5 Rolling (202512150610)"
     os_type: "vyos"
     packer_template: "vyos.pkr.hcl"
     packer_vars: "vyos.pkrvars.hcl"
@@ -330,7 +355,7 @@ template_registry:
   # ── Windows Desktop ───────────────────────────────────────────────────────
   windows_11:
     id: 2036
-    status: in-progress
+    status: built
     os: "Windows 11"
     os_type: "windows"
     packer_template: "windows-11.pkr.hcl"
@@ -339,7 +364,7 @@ template_registry:
 
   windows_10:
     id: 2035
-    status: in-progress
+    status: built
     os: "Windows 10"
     os_type: "windows"
     packer_template: "windows-10.pkr.hcl"
@@ -348,7 +373,7 @@ template_registry:
 
   "windows_8.1":
     id: 2028
-    status: in-progress
+    status: built
     os: "Windows 8.1"
     os_type: "windows"
     packer_template: "windows-8.1.pkr.hcl"
@@ -357,7 +382,7 @@ template_registry:
 
   windows_7:
     id: 2025
-    status: in-progress
+    status: built
     os: "Windows 7"
     os_type: "windows"
     packer_template: "windows-7.pkr.hcl"
@@ -376,7 +401,7 @@ template_registry:
 
   kali_purple:
     id: 2016
-    status: planned
+    status: in-progress
     os: "Kali Purple 2025.4"
     os_type: "linux"
     packer_template: "kali-purple-2025.4.pkr.hcl"
@@ -439,7 +464,7 @@ template_registry:
 
   centos_7_gnome:
     id: 2040
-    status: built
+    status: planned
     os: "CentOS 7 GNOME"
     os_type: "linux"
     packer_template: "centos-7.pkr.hcl"
@@ -458,7 +483,7 @@ template_registry:
   # ── Red Team ──────────────────────────────────────────────────────────────
   commando_vm:
     id: 2039
-    status: in-progress
+    status: built
     os: "Commando VM (Windows 10) — Mandiant"
     os_type: "windows"
     packer_template: "commando-vm.pkr.hcl"
@@ -467,21 +492,12 @@ template_registry:
 
   flare_vm:
     id: 2049
-    status: planned
+    status: built
     os: "FLARE VM (Windows) — Mandiant"
     os_type: "windows"
     packer_template: "flare-vm.pkr.hcl"
     packer_vars: "flare_vm.pkrvars.hcl"
     proxmox_name: "cdx-flarevm-base"
-
-  threat_pursuit_vm:
-    id: 2050
-    status: planned
-    os: "Threat Pursuit VM (Windows) — Mandiant"
-    os_type: "windows"
-    packer_template: "threat-pursuit-vm.pkr.hcl"
-    packer_vars: "threat_pursuit_vm.pkrvars.hcl"
-    proxmox_name: "cdx-threat-pursuit-base"
 
   cobalt_strike_c2:
     id: 2041

@@ -31,9 +31,20 @@ $RECYCLE.BIN/
 *.swo
 *~
 
-# Secrets — actual credentials file (use Secrets/credentials.yml as template)
-# Encrypt with: ansible-vault encrypt Secrets/credentials.yml
+# Secrets — actual credentials file (use secrets.example/credentials.yml as template)
+# Encrypt with: ansible-vault encrypt secrets/credentials.yml
+secrets/credentials.yml
 Secrets/credentials.yml
+
+# Terraform state files — contain sensitive IPs, VMIDs, and embedded API tokens
+EXERCISES/*/terraform/terraform.tfstate
+EXERCISES/*/terraform/*.tfstate.backup
+EXERCISES/*/terraform_red_team/terraform.tfstate
+EXERCISES/*/terraform_red_team/*.tfstate.backup
+EXERCISES/*/terraform_blue_team/terraform.tfstate
+EXERCISES/*/terraform_blue_team/*.tfstate.backup
+*.tfstate
+*.tfstate.backup
 
 # Generated dynamic inventory (written by inventory_refresh role)
 inventory/exercise_hosts.yml

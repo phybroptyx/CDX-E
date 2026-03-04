@@ -12,4 +12,5 @@ ansible_winrm_transport: ntlm
 ansible_winrm_server_cert_validation: ignore
 ansible_winrm_kerberos_delegation: false
 
-# ansible_password: set in secrets/credentials.yml as vault_cloud_init_password
+ansible_user:     cdxadmin
+ansible_password: "{{ vault_cloud_init_password }}"

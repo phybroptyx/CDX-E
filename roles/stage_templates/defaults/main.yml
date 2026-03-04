@@ -1,0 +1,21 @@
+---
+# =============================================================================
+# stage_templates — defaults
+# =============================================================================
+
+# Storage where RAID-staged template copies reside.
+# Inherits vm_clone_storage from all.yml; override here only if staging
+# should target a different pool than exercise VM deployment.
+stage_template_storage: "{{ vm_clone_storage | default('raid') }}"
+
+# Proxmox task polling — clone operations are slow (full copy of 30-60GB image)
+stage_template_clone_retries: 120   # × delay = up to 30 minutes per template
+stage_template_clone_delay: 15      # seconds between task status polls
+
+# Template conversion polling (fast — just flips a flag in Proxmox)
+stage_template_convert_retries: 20
+stage_template_convert_delay: 5
+
+# Config migration polling (config-only, no disk I/O — should complete in seconds)
+stage_template_migrate_retries: 20
+stage_template_migrate_delay: 3

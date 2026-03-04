@@ -20,7 +20,7 @@
   tags: [dhcp, services]
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   roles:
     - configure_vm

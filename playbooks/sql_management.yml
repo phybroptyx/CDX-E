@@ -9,7 +9,7 @@
 # Prerequisites:
 #   - Domain must be deployed (domain_management.yml) before this playbook.
 #   - SQL Server setup media pre-staged on target hosts (see sql_setup_path).
-#   - vault_sql_sa_password defined in Secrets/credentials.yml when
+#   - vault_sql_sa_password defined in secrets/credentials.yml when
 #     sql_auth_mode: Mixed (the default).
 #
 # Roles:
@@ -20,7 +20,7 @@
 # Usage:
 #   ansible-playbook playbooks/sql_management.yml \
 #     -e "exercise=OBSIDIAN_DAGGER" \
-#     -e "@Secrets/credentials.yml" --ask-vault-pass
+#     -e "@secrets/credentials.yml" --ask-vault-pass
 # =============================================================================
 
 # ----------------------------------------------------------------------------
@@ -43,7 +43,7 @@
   tags: [sql, services]
 
   vars_files:
-    - "{{ playbook_dir }}/Secrets/credentials.yml"
+    - "{{ playbook_dir }}/secrets/credentials.yml"
 
   pre_tasks:
     - name: Import exercise facts from controller

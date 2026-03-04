@@ -46,6 +46,12 @@
     net_action: "{{ action | default('deploy') }}"
 
   pre_tasks:
+    - name: "[preflight] Skip bridge-creation scope during destroy"
+      ansible.builtin.meta: end_play
+      when: >-
+        (action | default('deploy')) == 'destroy' and
+        (networking_scope | default('all')) == 'bridges'
+
     - name: "[preflight] Skip — networking phase disabled in scenario"
       ansible.builtin.meta: end_play
       when: not (scenario.phases.networking | default(true) | bool)

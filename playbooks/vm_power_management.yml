@@ -29,6 +29,10 @@
     - "{{ playbook_dir }}/secrets/credentials.yml"
 
   pre_tasks:
+    - name: "[preflight] Skip — destroy workflow, VMs are being torn down"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
     - name: "[preflight] Skip if terraform phase is disabled"
       ansible.builtin.meta: end_play
       when: not (scenario.phases.terraform | default(true) | bool)

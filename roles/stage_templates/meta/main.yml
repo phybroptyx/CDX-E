@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: stage_templates
+  author: CDX-E Pipeline
+  description: >-
+    Phase 1b — Copy QNAP master templates to per-node RAID storage as full
+    copies, enabling linked-clone VM deployment by Terraform. Templates flagged
+    qnap_direct are skipped and linked-cloned directly from the QNAP master.
+  min_ansible_version: "2.15"
+dependencies: []

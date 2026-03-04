@@ -1,0 +1,56 @@
+{
+  "_meta": {
+    "exerciseName": "DC_303",
+    "description": "DC303 / denhac community makerspace — single-site Windows Server 2016 AD environment",
+    "domain": "dc303.cdx.lab",
+    "version": "1.0",
+    "author": "CDX-E Team",
+    "created": "2026-02-27"
+  },
+
+  "sites": [
+    {
+      "name": "DC303-Primary",
+      "description": "DC303 Denver Hackerspace — Primary Site",
+      "subnet": {
+        "cidr": "68.27.129.0/24",
+        "location": "Denver, CO, USA"
+      }
+    }
+  ],
+
+  "siteLinks": [],
+
+  "organizationalStructure": {
+    "rootOU": "DC303",
+    "rootOUDescription": "DC303 domain root — all site and department OUs",
+
+    "siteMappings": {
+      "HQ": {
+        "siteName": "DC303-Primary",
+        "departments": [
+          "IT-Core",
+          "Operations",
+          "Engineering",
+          "Finance"
+        ]
+      }
+    },
+
+    "departmentSubOUs": [
+      "Workstations",
+      "Servers",
+      "Users",
+      "Groups",
+      "ServiceAccounts",
+      "Resources"
+    ]
+  },
+
+  "advancedOptions": {
+    "createSiteSubnets": true,
+    "createSiteLinks": false,
+    "protectOUsFromDeletion": false,
+    "ouNamingScheme": "hierarchical"
+  }
+}

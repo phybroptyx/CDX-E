@@ -47,12 +47,12 @@
     - _hostname_set.reboot_required | default(false)
 
 - name: Windows | Set timezone
-  community.windows.win_timezone:
+  ansible.windows.win_timezone:
     timezone: "{{ vm_timezone }}"
   when: ansible_os_type == 'windows'
 
 - name: Windows | Disable automatic updates (registry)
-  ansible.windows.win_registry:
+  ansible.windows.win_regedit:
     path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU
     name: "{{ item.name }}"
     data: "{{ item.data }}"

@@ -14,18 +14,42 @@
 # Usage:
 #   ansible-playbook playbooks/server_configuration.yml \
 #     -e "exercise=OBSIDIAN_DAGGER" \
-#     -e "@Secrets/credentials.yml" --ask-vault-pass
+#     -e "@secrets/credentials.yml" --ask-vault-pass
 # =============================================================================
 
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Main play: configure member servers
+# ----------------------------------------------------------------------------
 - name: General Server Configuration
   hosts: servers
   gather_facts: false
   tags: [servers, configuration]
 
   vars_files:
-    - "{{ playbook_dir }}/Secrets/credentials.yml"
+    - "{{ playbook_dir }}/secrets/credentials.yml"
 
   pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — destroy workflow, no configuration to run"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
     - name: "[preflight] Skip — servers phase disabled in scenario"
       ansible.builtin.meta: end_play
       when: not (scenario.phases.servers | default(true) | bool)

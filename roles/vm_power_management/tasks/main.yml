@@ -8,12 +8,18 @@
 # Readiness gates (in order):
 #   1. VM reaches 'running' state via proxmox_kvm (state: started)
 #   2. QEMU guest agent responds (Windows + Linux; skipped for VyOS)
-#   3. Port open: WinRM 5985 (Windows) or SSH 22 (Linux/VyOS)
-#      — only checked for VMs with a static cloud_init.ip
+#   3. QEMU guest agent network query — discovers actual management IP (Layer0 DHCP)
+#   4. Port open: WinRM 5985 (Windows) or SSH 22 (Linux/VyOS)
+#      — uses discovered management IP, NOT cloud_init.ip (which is the exercise-network IP)
 #
-# Expects facts set by read_exercise_config:
-#   virtual_machines — list of VM objects from vms.yaml
+# Expects facts set by read_exercise_config (and optionally read_apt_config/read_soc_layout):
+#   virtual_machines — scenario VM objects (used when target_tier is unset)
+#   apt_vms          — Red Team VM objects  (used when target_tier == 'red_team')
+#   soc_vms          — Blue Team VM objects (used when target_tier == 'blue_team')
 #   scenario         — parsed scenario.yml
+#
+# Optional role variable:
+#   target_tier      — 'red_team', 'blue_team', or unset (default: scenario VMs)
 #
 # Timing vars (inventory/group_vars/all.yml):
 #   guest_agent_initial_delay  — seconds to wait after power-on before polling
@@ -29,9 +35,32 @@
 - name: Assert required facts are present
   ansible.builtin.assert:
     that:
-      - virtual_machines is defined
       - scenario is defined
-    fail_msg: "Required facts not found. Ensure read_exercise_config runs first."
+      - (target_tier | default('') == 'red_team'  and apt_vms is defined)
+        or (target_tier | default('') == 'blue_team' and soc_vms is defined)
+        or (target_tier | default('') not in ['red_team', 'blue_team'] and virtual_machines is defined)
+    fail_msg: >-
+      Required facts not found for target_tier='{{ target_tier | default('scenario') }}'.
+      Ensure read_exercise_config (and read_apt_config/read_soc_layout when needed) runs first.
+
+# ----------------------------------------------------------------------------
+# Resolve effective VM list based on target_tier
+# ----------------------------------------------------------------------------
+# target_tier is set by the calling playbook:
+#   (unset)       → virtual_machines  (scenario VMs — default when called from vm_power_management.yml)
+#   'red_team'    → apt_vms           (APT adversary VMs from read_apt_config)
+#   'blue_team'   → soc_vms           (SOC layout VMs from read_soc_layout)
+
+- name: Resolve effective VM list for target tier
+  ansible.builtin.set_fact:
+    _effective_vms: >-
+      {%- if target_tier | default('') == 'red_team' -%}
+        {{ apt_vms }}
+      {%- elif target_tier | default('') == 'blue_team' -%}
+        {{ soc_vms }}
+      {%- else -%}
+        {{ virtual_machines }}
+      {%- endif -%}
 
 # ----------------------------------------------------------------------------
 # Categorize VMs by OS type
@@ -49,7 +78,7 @@
   ansible.builtin.set_fact:
     _vms_windows: "{{ _vms_windows + [item] }}"
   when: template_registry[item.template].os_type == 'windows'
-  loop: "{{ virtual_machines }}"
+  loop: "{{ _effective_vms }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -57,15 +86,15 @@
   ansible.builtin.set_fact:
     _vms_ssh: "{{ _vms_ssh + [item] }}"
   when: template_registry[item.template].os_type in ['linux', 'vyos']
-  loop: "{{ virtual_machines }}"
+  loop: "{{ _effective_vms }}"
   loop_control:
     label: "{{ item.name }}"
 
-- name: Categorize QEMU agent VMs (Windows + Linux; VyOS excluded)
+- name: Categorize QEMU agent VMs (Windows + Linux + VyOS)
   ansible.builtin.set_fact:
     _vms_agent_poll: "{{ _vms_agent_poll + [item] }}"
-  when: template_registry[item.template].os_type in ['windows', 'linux']
-  loop: "{{ virtual_machines }}"
+  when: template_registry[item.template].os_type in ['windows', 'linux', 'vyos']
+  loop: "{{ _effective_vms }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -74,36 +103,77 @@
     msg: |
       VM power-on plan:
         Exercise   : {{ scenario.exercise.name }}
-        Total VMs  : {{ virtual_machines | length }}
+        Tier       : {{ target_tier | default('scenario') }}
+        Total VMs  : {{ _effective_vms | length }}
         Windows    : {{ _vms_windows | length }}    (WinRM port 5985 + QEMU agent)
         Linux/VyOS : {{ _vms_ssh | length }}         (SSH port 22; QEMU agent where supported)
-        Agent poll : {{ _vms_agent_poll | length }}  (non-VyOS VMs — have QEMU guest agent)
+        Agent poll : {{ _vms_agent_poll | length }}  (all VMs with QEMU guest agent — Windows, Linux, VyOS)
+
+# ----------------------------------------------------------------------------
+# Query current VM power state (idempotency)
+# ----------------------------------------------------------------------------
+- name: Query current VM power state
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/status/current
+    method: GET
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  loop: "{{ _effective_vms }}"
+  loop_control:
+    label: "{{ item.name }} (vmid={{ item.vmid }})"
+  register: _vm_states
+  ignore_errors: true
+
+- name: Filter to VMs that need to be powered on (status != running)
+  ansible.builtin.set_fact:
+    _vms_to_start: >-
+      {{ _vm_states.results
+         | selectattr('json.data.status', 'defined')
+         | selectattr('json.data.status', 'ne', 'running')
+         | map(attribute='item') | list }}
+
+- name: Report already-running VMs (skipped)
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.item.name }} (vmid={{ item.item.vmid }}) is already running — skipping power-on.
+  loop: "{{ _vm_states.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item is not failed
+    - item.json.data.status | default('') == 'running'
 
 # ----------------------------------------------------------------------------
 # Power on VMs
 # ----------------------------------------------------------------------------
 - name: Power on VMs
-  community.general.proxmox_kvm:
-    api_host:         "{{ proxmox_api_host }}"
-    api_user:         "{{ proxmox_api_user }}"
-    api_token_id:     "{{ proxmox_api_token_id }}"
-    api_token_secret: "{{ proxmox_api_token_secret }}"
-    validate_certs:   "{{ proxmox_validate_certs }}"
-    node:             "{{ (item.proxmox | default({})).node | default(scenario.proxmox.node) }}"
-    vmid:             "{{ item.vmid }}"
-    state:            started
-  loop: "{{ virtual_machines }}"
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/status/start
+    method: POST
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  loop: "{{ _vms_to_start }}"
   loop_control:
     label: "{{ item.name }} (vmid={{ item.vmid }})"
   register: _power_on_results
-  ignore_errors: true   # 'started' is idempotent but we still want to catch real failures
+  ignore_errors: true   # network/auth errors still surfaced via warn task
 
 - name: Warn on any power-on failures
   ansible.builtin.debug:
     msg: >-
       WARNING: {{ item.item.name }} (vmid={{ item.item.vmid }})
-      failed to start: {{ item.msg | default('unknown error') }}
-  loop: "{{ _power_on_results.results }}"
+      failed to start: {{ item.msg | default('HTTP ' + (item.status | string)) }}
+  loop: "{{ _power_on_results.results | default([]) }}"
   loop_control:
     label: "{{ item.item.name }}"
   when: item is failed
@@ -114,6 +184,7 @@
 - name: Pause to allow VMs to begin booting before guest agent polling
   ansible.builtin.pause:
     seconds: "{{ guest_agent_initial_delay }}"
+  when: _vms_to_start | length > 0
 
 # ----------------------------------------------------------------------------
 # Poll QEMU guest agent (Windows + Linux VMs; VyOS skipped)
@@ -140,34 +211,148 @@
   until: _agent_poll is not failed
 
 # ----------------------------------------------------------------------------
-# Wait for management connectivity (static-IP VMs only)
+# Discover actual VM IPs via QEMU guest agent
 # ----------------------------------------------------------------------------
-# VMs without cloud_init.ip are DHCP-assigned — their IPs aren't known
-# until inventory_refresh resolves them. Skip the port wait for those.
+# Query the guest agent for actual assigned IPs before attempting port waits.
+# This surfaces cloud-init networking failures immediately rather than after
+# a 300-second blind timeout. If the discovered IP differs from cloud_init.ip,
+# a warning is emitted so the operator can investigate.
 
-- name: Wait for WinRM connectivity (Windows, static IP)
+# Cloud-init applies config on first boot and may trigger a reboot, causing
+# the guest agent to disappear briefly (Proxmox returns HTTP 500 "QEMU guest
+# agent is not running"). Rather than a fixed pause that may be too short,
+# this task retries until all agents respond with 200. Status 500 is accepted
+# (non-failure) so each attempt completes the full loop before the until check.
+
+- name: Query QEMU guest agent for actual VM IP addresses
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/agent/network-get-interfaces
+    method: GET
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 500]   # 500 = agent not running (cloud-init reboot in progress)
+  loop: "{{ _effective_vms }}"
+  loop_control:
+    label: "{{ item.name }} (vmid={{ item.vmid }})"
+  register: _agent_ip_results
+  retries: "{{ guest_agent_poll_retries }}"
+  delay:   "{{ guest_agent_poll_interval }}"
+  until: _agent_ip_results.status | default(0) == 200
+  ignore_errors: true   # VMs that cannot respond at all do not block the pipeline
+
+- name: Build discovered IP map (vmid → first non-loopback IPv4)
+  ansible.builtin.set_fact:
+    _discovered_ips: >-
+      {%- set ns = namespace(m={}) -%}
+      {%- for result in _agent_ip_results.results -%}
+        {%- if result is not failed and result.json is defined -%}
+          {%- for iface in result.json.data.result | default([]) -%}
+            {%- for addr in iface['ip-addresses'] | default([]) -%}
+              {%- if addr['ip-address-type'] == 'ipv4'
+                     and not addr['ip-address'].startswith('127.')
+                     and not addr['ip-address'].startswith('169.254.')
+                     and ns.m[result.item.vmid | string] is not defined -%}
+                {%- set _ = ns.m.update({result.item.vmid | string: addr['ip-address']}) -%}
+              {%- endif -%}
+            {%- endfor -%}
+          {%- endfor -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ ns.m }}
+
+- name: Show discovered VM IPs and flag cloud-init mismatches
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.name }} (vmid={{ item.vmid }}):
+      expected={{ item.cloud_init.ip | default('DHCP') }}
+      actual={{ _discovered_ips[item.vmid | string] | default('NOT FOUND') }}
+      {%- if (item.cloud_init.ip | default('')) | length > 0
+             and _discovered_ips[item.vmid | string] is defined
+             and _discovered_ips[item.vmid | string] != item.cloud_init.ip %}
+      *** IP MISMATCH — cloud-init may not have applied (CloudbaseInit installed?) ***
+      {%- endif %}
+  loop: "{{ _effective_vms }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# ----------------------------------------------------------------------------
+# Wait for management connectivity (discovered management IP via guest agent)
+# ----------------------------------------------------------------------------
+# cloud_init.ip is the EXERCISE-network static IP (e.g. the SDP segment).
+# The MANAGEMENT IP (on Layer0/vm_management_bridge) is DHCP-assigned and
+# discovered above via the QEMU guest agent. That is the IP the Ansible
+# controller uses to connect — use it here, not cloud_init.ip.
+# Skip VMs whose management IP could not be discovered (agent query failed).
+
+- name: Wait for WinRM connectivity (Windows, management IP from guest agent)
   ansible.builtin.wait_for:
-    host:    "{{ item.cloud_init.ip }}"
+    host:    "{{ _discovered_ips[item.vmid | string] }}"
     port:    5985
     timeout: "{{ vm_power_wait_timeout }}"
     sleep:   "{{ vm_power_wait_sleep }}"
   loop: "{{ _vms_windows }}"
   loop_control:
-    label: "{{ item.name }} → {{ item.cloud_init.ip }}"
+    label: "{{ item.name }} → {{ _discovered_ips[item.vmid | string] | default('IP unknown') }}"
   delegate_to: localhost
-  when: item.cloud_init is defined and (item.cloud_init.ip | default('')) | length > 0
+  when: _discovered_ips[item.vmid | string] is defined
 
-- name: Wait for SSH connectivity (Linux/VyOS, static IP)
+- name: Wait for SSH connectivity (Linux/VyOS, management IP from guest agent)
   ansible.builtin.wait_for:
-    host:    "{{ item.cloud_init.ip }}"
+    host:    "{{ _discovered_ips[item.vmid | string] }}"
     port:    22
     timeout: "{{ vm_power_wait_timeout }}"
     sleep:   "{{ vm_power_wait_sleep }}"
   loop: "{{ _vms_ssh }}"
   loop_control:
-    label: "{{ item.name }} → {{ item.cloud_init.ip }}"
+    label: "{{ item.name }} → {{ _discovered_ips[item.vmid | string] | default('IP unknown') }}"
   delegate_to: localhost
-  when: item.cloud_init is defined and (item.cloud_init.ip | default('')) | length > 0
+  when: _discovered_ips[item.vmid | string] is defined
+
+# ----------------------------------------------------------------------------
+# Populate inventory with discovered management IPs
+# ----------------------------------------------------------------------------
+# ansible_host must be the Layer0 management IP (DHCP), not cloud_init.ip
+# (the exercise-network static IP). Write per-host host_vars files so the
+# correct ansible_host persists for standalone playbook runs. Also call
+# add_host to update the current in-memory inventory for the pipeline run.
+
+- name: Build management IP map (vm name → management IP)
+  ansible.builtin.set_fact:
+    _management_ip_map: >-
+      {%- set m = {} -%}
+      {%- for vm in _effective_vms -%}
+        {%- if _discovered_ips[vm.vmid | string] is defined -%}
+          {%- set _ = m.update({vm.name: _discovered_ips[vm.vmid | string]}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ m }}
+
+- name: Update in-memory ansible_host with management IP (pipeline run)
+  ansible.builtin.add_host:
+    name: "{{ item.key }}"
+    ansible_host: "{{ item.value }}"
+  loop: "{{ _management_ip_map | dict2items }}"
+  loop_control:
+    label: "{{ item.key }} → {{ item.value }}"
+  when: _management_ip_map | length > 0
+
+- name: Persist management IP to host_vars (standalone run support)
+  ansible.builtin.copy:
+    content: |
+      # CDX-E management IP — auto-generated by vm_power_management
+      # Layer0 DHCP address discovered via QEMU guest agent for {{ item.key }}.
+      # Regenerated on each vm_power_management run. Do not edit manually.
+      ansible_host: "{{ item.value }}"
+    dest: "{{ playbook_dir }}/../inventory/host_vars/{{ item.key }}.yml"
+    mode: '0644'
+  loop: "{{ _management_ip_map | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}.yml → {{ item.value }}"
+  when: _management_ip_map | length > 0
 
 # ----------------------------------------------------------------------------
 # Summary
@@ -177,10 +362,11 @@
     msg: |
       VM power-on complete.
       Exercise      : {{ scenario.exercise.name }}
-      Total VMs     : {{ virtual_machines | length }}
+      Tier          : {{ target_tier | default('scenario') }}
+      Total VMs     : {{ _effective_vms | length }}
       Windows (WinRM): {{ _vms_windows | length }}
       Linux/VyOS (SSH): {{ _vms_ssh | length }}
-      DHCP VMs (no port wait):
-        {{ virtual_machines
-           | rejectattr('cloud_init', 'defined')
-           | map(attribute='name') | list | join(', ') | default('none') }}
+      Management IPs (Layer0, from guest agent):
+      {% for vm in _effective_vms %}
+        {{ vm.name }}: {{ _discovered_ips[vm.vmid | string] | default('NOT DISCOVERED') }}
+      {% endfor %}

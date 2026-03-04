@@ -17,7 +17,7 @@
 
 - name: Set exercise directory path
   ansible.builtin.set_fact:
-    exercise_dir: "{{ playbook_dir }}/EXERCISES/{{ exercise }}"
+    exercise_dir: "{{ exercises_base_dir }}/{{ exercise }}"
 
 - name: "[preflight] Assert exercise directory exists"
   ansible.builtin.stat:
@@ -54,7 +54,7 @@
     scenario: "{{ scenario }}"
     virtual_machines: "{{ exercise_vm_spec.virtual_machines }}"
     network_topology: "{{ exercise_vm_spec.network_topology | default({}) }}"
-  cacheable: true
+    cacheable: true
 
 - name: Display scenario summary
   ansible.builtin.debug:
@@ -63,5 +63,6 @@
       - "Description  : {{ scenario.exercise.description | default('N/A') }}"
       - "VM count     : {{ exercise_vm_spec.virtual_machines | length }}"
       - "Phases active: {{ scenario.phases | dict2items
+                           | rejectattr('value', 'mapping')
                            | selectattr('value', 'truthy')
                            | map(attribute='key') | list | join(', ') }}"

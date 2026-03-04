@@ -71,9 +71,12 @@
       - _apt_yaml.apt is defined
       - _apt_yaml.apt.name is defined
       - _apt_yaml.c2_platforms is defined
+      - _apt_yaml.c2_platforms | length > 0
+      - _apt_yaml.operator_vms is defined
+      - _apt_yaml.operator_vms | length > 0
     fail_msg: >-
-      APTs/{{ _resolved_apt }}/apt.yml is missing required keys.
-      Expected: apt.name, c2_platforms.
+      APTs/{{ _resolved_apt }}/apt.yml is missing required keys or has empty lists.
+      Required: apt.name, c2_platforms (≥1 entry), operator_vms (≥1 entry).
       See APTs/TEMPLATE/apt.yml for the schema.
 
 # ----------------------------------------------------------------------------
@@ -101,7 +104,7 @@
     apt_dir:    "{{ _apt_dir }}"
     apt_config: "{{ _apt_yaml }}"
     apt_vms:    "{{ _apt_vms_yaml.virtual_machines }}"
-  cacheable: true
+    cacheable: true
 
 # ----------------------------------------------------------------------------
 # Step 6 — Display APT profile summary

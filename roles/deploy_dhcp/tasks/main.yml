@@ -1,0 +1,202 @@
+---
+# =============================================================================
+# Role: deploy_dhcp
+# =============================================================================
+# Configures the Windows DHCP Server service on a domain-joined Windows host.
+# Creates and activates DHCP scopes defined in scenario.services.dhcp.scopes,
+# authorizes the server in Active Directory, and applies per-scope options
+# (router/option 3, DNS servers/option 6, domain name/option 15).
+#
+# Idempotent: existing scopes are detected by subnet address and skipped.
+# Scope options are always re-applied with -Force (set to same value = no-op).
+#
+# Prerequisites:
+#   - DHCP Windows feature installed by install_windowsfeature (dhcp_servers group)
+#   - Host is domain-joined (configure_active_directory complete)
+#   - Executing account is Domain Admin or DHCP Administrator
+#
+# Called from:
+#   playbooks/domain_services.yml → ansible_group: dhcp_servers
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Section 1 — Phase gate + preflight
+# ----------------------------------------------------------------------------
+- name: Skip — DHCP service phase disabled in scenario
+  ansible.builtin.debug:
+    msg: >-
+      deploy_dhcp: scenario.phases.services.dhcp is false for
+      {{ inventory_hostname }} — skipping.
+  when: not (scenario.phases.services.dhcp | default(false) | bool)
+
+- name: End host — DHCP phase disabled
+  ansible.builtin.meta: end_host
+  when: not (scenario.phases.services.dhcp | default(false) | bool)
+
+- name: Assert DHCP scopes are defined
+  ansible.builtin.assert:
+    that:
+      - dhcp_scopes is defined
+      - dhcp_scopes | length > 0
+    fail_msg: >-
+      deploy_dhcp: no DHCP scopes defined for {{ inventory_hostname }}.
+      Add a services.dhcp.scopes list to {{ exercise }}/scenario.yml.
+
+# ----------------------------------------------------------------------------
+# Section 2 — Ensure DHCP Server service is running
+# ----------------------------------------------------------------------------
+- name: Ensure DHCP Server service is started and set to automatic
+  ansible.windows.win_service:
+    name: DHCPServer
+    state: started
+    start_mode: auto
+
+# ----------------------------------------------------------------------------
+# Section 3 — Authorize DHCP server in Active Directory (run_once)
+# ----------------------------------------------------------------------------
+- name: Check if DHCP server is already authorized in AD
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Import-Module DHCPServer -ErrorAction Stop
+    # Use the exercise-network IP (cloud_init_ip) — not the management NIC.
+    # With two NICs present, auto-discovery via Get-NetIPAddress is ambiguous.
+    $exerciseIP = '{{ cloud_init_ip }}'
+    $authorized = Get-DhcpServerInDC -ErrorAction SilentlyContinue |
+        Where-Object { $_.IPAddress -eq $exerciseIP }
+    if ($authorized) { Write-Output "authorized" } else { Write-Output "not_authorized" }
+  register: _dhcp_ad_auth_check
+  changed_when: false
+  run_once: true
+
+- name: Authorize DHCP server in Active Directory
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Import-Module DHCPServer -ErrorAction Stop
+    $serverFQDN = [System.Net.Dns]::GetHostEntry('').HostName
+    Add-DhcpServerInDC -DnsName $serverFQDN -ErrorAction Stop
+    Write-Output "CHANGED: Authorized DHCP server '$serverFQDN' in AD"
+  register: _dhcp_ad_auth_result
+  run_once: true
+  when:
+    - dhcp_authorize_in_ad | bool
+    - (_dhcp_ad_auth_check.stdout | trim) == 'not_authorized'
+  changed_when: "'CHANGED:' in (_dhcp_ad_auth_result.stdout | default(''))"
+
+# ----------------------------------------------------------------------------
+# Section 4 — Detect existing scopes
+# ----------------------------------------------------------------------------
+- name: Retrieve existing DHCP scope subnet addresses
+  ansible.windows.win_shell: |
+    Import-Module DHCPServer -ErrorAction Stop
+    $scopes = Get-DhcpServerv4Scope -ErrorAction SilentlyContinue
+    if ($scopes) {
+        $scopes | ForEach-Object { $_.SubnetAddress.IPAddressToString }
+    }
+  register: _dhcp_existing_raw
+  changed_when: false
+
+- name: Build existing scope subnet list
+  ansible.builtin.set_fact:
+    _existing_scope_subnets: >-
+      {{ _dhcp_existing_raw.stdout_lines
+         | default([])
+         | map('trim')
+         | reject('equalto', '')
+         | list }}
+
+- name: Display scope detection results
+  ansible.builtin.debug:
+    msg: |
+      DHCP scope detection for {{ inventory_hostname }}:
+        Configured in scenario : {{ dhcp_scopes | map(attribute='subnet_address') | list | join(', ') }}
+        Already on server      : {{ _existing_scope_subnets | join(', ') | default('none') }}
+        Will create            : {{ dhcp_scopes | map(attribute='subnet_address') | list | difference(_existing_scope_subnets) | join(', ') | default('none (all exist)') }}
+
+# ----------------------------------------------------------------------------
+# Section 5 — Create missing DHCP scopes
+# ----------------------------------------------------------------------------
+- name: "Create DHCP scope — {{ item.name }}"
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Import-Module DHCPServer -ErrorAction Stop
+    $leaseHours = {{ item.lease_duration_hours | default(dhcp_default_lease_hours) }}
+    Add-DhcpServerv4Scope `
+        -Name '{{ item.name }}' `
+        -StartRange '{{ item.start_range }}' `
+        -EndRange '{{ item.end_range }}' `
+        -SubnetMask '{{ item.subnet_mask }}' `
+        -State Active `
+        -LeaseDuration ([TimeSpan]::FromHours($leaseHours)) `
+        -ErrorAction Stop | Out-Null
+    Write-Output "CHANGED: Created DHCP scope '{{ item.name }}' ({{ item.subnet_address }})"
+  register: _dhcp_scope_create
+  loop: "{{ dhcp_scopes }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.subnet_address }})"
+  when: item.subnet_address not in _existing_scope_subnets
+  changed_when: "'CHANGED:' in (_dhcp_scope_create.stdout | default(''))"
+
+# ----------------------------------------------------------------------------
+# Section 6 — Apply scope options (router, DNS, domain name)
+# Runs for all scopes — -Force ensures options converge on every run.
+# ----------------------------------------------------------------------------
+- name: "Set DHCP scope options — {{ item.name }}"
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Import-Module DHCPServer -ErrorAction Stop
+    $scopeId = '{{ item.subnet_address }}'
+
+    # Option 3: Router (default gateway)
+    Set-DhcpServerv4OptionValue -ScopeId $scopeId -OptionId 3 `
+        -Value @('{{ item.router }}') -Force -ErrorAction Stop
+
+    # Option 6: DNS Servers
+    Set-DhcpServerv4OptionValue -ScopeId $scopeId -OptionId 6 `
+        -Value @('{{ item.dns_servers | join("', '") }}') -Force -ErrorAction Stop
+
+    # Option 15: DNS Domain Name
+    Set-DhcpServerv4OptionValue -ScopeId $scopeId -OptionId 15 `
+        -Value '{{ item.domain_name }}' -Force -ErrorAction Stop
+
+    Write-Output "OK: Applied options for scope '{{ item.name }}'"
+  loop: "{{ dhcp_scopes }}"
+  loop_control:
+    label: "{{ item.name }}"
+  changed_when: false   # -Force overwrites regardless; options are always correct after this task
+
+# ----------------------------------------------------------------------------
+# Section 7 — Ensure all configured scopes are Active
+# ----------------------------------------------------------------------------
+- name: "Ensure scope is Active — {{ item.subnet_address }}"
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Import-Module DHCPServer -ErrorAction Stop
+    $scope = Get-DhcpServerv4Scope -ScopeId '{{ item.subnet_address }}' -ErrorAction SilentlyContinue
+    if (-not $scope) {
+        throw "Scope {{ item.subnet_address }} not found — creation may have failed"
+    }
+    if ($scope.State -ne 'Active') {
+        Set-DhcpServerv4Scope -ScopeId '{{ item.subnet_address }}' -State Active -ErrorAction Stop
+        Write-Output "CHANGED: Activated scope {{ item.subnet_address }}"
+    } else {
+        Write-Output "OK: Scope {{ item.subnet_address }} is already Active"
+    }
+  register: _dhcp_activate
+  loop: "{{ dhcp_scopes }}"
+  loop_control:
+    label: "{{ item.subnet_address }}"
+  changed_when: "'CHANGED:' in (_dhcp_activate.stdout | default(''))"
+
+# ----------------------------------------------------------------------------
+# Section 8 — Summary
+# ----------------------------------------------------------------------------
+- name: deploy_dhcp summary
+  ansible.builtin.debug:
+    msg: |
+      deploy_dhcp complete for {{ inventory_hostname }}.
+      Scopes configured : {{ dhcp_scopes | length }}
+      AD authorized     : {{ dhcp_authorize_in_ad }}
+      Scopes:
+      {% for s in dhcp_scopes %}
+        - {{ s.name }} ({{ s.subnet_address }}) {{ s.start_range }}–{{ s.end_range }}
+      {% endfor %}

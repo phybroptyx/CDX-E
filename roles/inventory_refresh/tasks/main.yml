@@ -8,9 +8,13 @@
 # Refreshes in-memory inventory so subsequent plays can target VMs by group.
 #
 # Expects facts set by read_exercise_config:
-#   virtual_machines — list of VM objects from vms.yaml
+#   virtual_machines — list of scenario VM objects from vms.yaml
 #   scenario         — parsed scenario.yml
 #   exercise_dir     — path to EXERCISES/<name>/
+#
+# Optional facts (from read_apt_config / read_soc_layout):
+#   apt_vms          — Red Team VMs; included only if terraform_red_team/ exists
+#   soc_vms          — Blue Team VMs; included only if terraform_blue_team/ exists
 #
 # State directories read:
 #   {{ exercise_dir }}/terraform/            — scenario VMs (required)
@@ -96,8 +100,7 @@
 # ----------------------------------------------------------------------------
 # Terraform vm_ips output format:
 #   { "vm_ips": { "value": { "VM-NAME": "x.x.x.x" } } }
-# Empty string for DHCP-assigned VMs; those IPs are resolved after boot
-# via a second inventory refresh (post vm_power_management, future feature).
+# Empty string for DHCP-assigned VMs.
 
 - name: Set base IP map from scenario Terraform outputs
   ansible.builtin.set_fact:
@@ -125,21 +128,47 @@
       DHCP (empty): {{ _vm_ip_map.values() | select('eq', '') | list | length }}.
 
 # ----------------------------------------------------------------------------
+# Build combined VM list from all deployed tiers
+# ----------------------------------------------------------------------------
+# apt_vms and soc_vms are only included if their Terraform states exist,
+# ensuring that team VMs which were never deployed are not added to inventory.
+- name: Build combined VM list (scenario + deployed teams)
+  ansible.builtin.set_fact:
+    _all_vms: >-
+      {{
+        virtual_machines +
+        (apt_vms  | default([]) if _tf_state_red_team.stat.exists  else []) +
+        (soc_vms  | default([]) if _tf_state_blue_team.stat.exists else [])
+      }}
+
+# ----------------------------------------------------------------------------
 # Build inventory data structures
 # ----------------------------------------------------------------------------
 - name: Initialize group membership map
   ansible.builtin.set_fact:
     _inventory_groups: {}
 
-- name: Build group membership map
+- name: Build group membership map (primary group)
   ansible.builtin.set_fact:
     _inventory_groups: >-
       {{ _inventory_groups | combine({
         item.ansible_group: (_inventory_groups[item.ansible_group] | default([])) + [item.name]
       }) }}
-  loop: "{{ virtual_machines }}"
+  loop: "{{ _all_vms }}"
   loop_control:
     label: "{{ item.name }} → {{ item.ansible_group }}"
+
+- name: Build group membership map (additional_groups)
+  ansible.builtin.set_fact:
+    _inventory_groups: >-
+      {{ _inventory_groups | combine({
+        extra_group: (_inventory_groups[extra_group] | default([])) + [item.0.name]
+      }) }}
+  loop: "{{ _all_vms | subelements('additional_groups', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.name }} → {{ item.1 }}"
+  vars:
+    extra_group: "{{ item.1 }}"
 
 # Build per-OS name lists used by the inventory template to populate
 # the windows_hosts, linux_hosts, and vyos_hosts parent groups.
@@ -153,15 +182,15 @@
   ansible.builtin.set_fact:
     _vms_windows: "{{ _vms_windows + [item.name] }}"
   when: template_registry[item.template].os_type == 'windows'
-  loop: "{{ virtual_machines }}"
+  loop: "{{ _all_vms }}"
   loop_control:
     label: "{{ item.name }}"
 
 - name: Build Linux VM name list
   ansible.builtin.set_fact:
     _vms_linux: "{{ _vms_linux + [item.name] }}"
-  when: template_registry[item.template].os_type == 'linux'
-  loop: "{{ virtual_machines }}"
+  when: template_registry[item.template].os_type in ['linux', 'opnsense']
+  loop: "{{ _all_vms }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -169,7 +198,7 @@
   ansible.builtin.set_fact:
     _vms_vyos: "{{ _vms_vyos + [item.name] }}"
   when: template_registry[item.template].os_type == 'vyos'
-  loop: "{{ virtual_machines }}"
+  loop: "{{ _all_vms }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -178,14 +207,14 @@
 # ----------------------------------------------------------------------------
 - name: Ensure inventory directory exists
   ansible.builtin.file:
-    path: "{{ playbook_dir }}/inventory"
+    path: "{{ playbook_dir }}/../inventory"
     state: directory
     mode: '0755'
 
 - name: Write dynamic exercise inventory
   ansible.builtin.template:
     src: exercise_inventory.yml.j2
-    dest: "{{ playbook_dir }}/inventory/exercise_hosts.yml"
+    dest: "{{ playbook_dir }}/../inventory/exercise_hosts.yml"
     mode: '0644'
 
 # ----------------------------------------------------------------------------
@@ -203,10 +232,11 @@
       Inventory refresh complete.
       Exercise     : {{ scenario.exercise.name }}
       Written to   : inventory/exercise_hosts.yml
-      Total VMs    : {{ virtual_machines | length }}
-      Windows      : {{ _vms_windows | length }}
-      Linux        : {{ _vms_linux | length }}
-      VyOS         : {{ _vms_vyos | length }}
+      Total VMs    : {{ _all_vms | length }}
+        Scenario   : {{ virtual_machines | length }}
+        Red Team   : {{ (apt_vms | default([]) if _tf_state_red_team.stat.exists else []) | length }}
+        Blue Team  : {{ (soc_vms | default([]) if _tf_state_blue_team.stat.exists else []) | length }}
+      OS types     : Windows={{ _vms_windows | length }}, Linux={{ _vms_linux | length }}, VyOS={{ _vms_vyos | length }}
       Groups       : {{ _inventory_groups.keys() | list | join(', ') }}
       DHCP VMs (IP pending):
         {{ _vm_ip_map | dict2items

@@ -14,8 +14,19 @@
 # Usage:
 #   ansible-playbook playbooks/domain_services.yml \
 #     -e "exercise=OBSIDIAN_DAGGER" \
-#     -e "@secrets/credentials.yml"
+#     -e "@secrets/credentials.yml" --ask-vault-pass
 # =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
 
 # --- DHCP ------------------------------------------------------------------ #
 - name: "Domain Services: DHCP"
@@ -27,6 +38,16 @@
     - "{{ playbook_dir }}/secrets/credentials.yml"
 
   pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — destroy workflow, no configuration to run"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
     - name: "[preflight] Skip DHCP - not required by scenario"
       ansible.builtin.meta: end_play
       when: not (scenario.phases.services.dhcp | default(false) | bool)
@@ -39,6 +60,7 @@
   roles:
     - configure_vm
     - install_windowsfeature
+    - deploy_dhcp
 
 # --- SQL Server ------------------------------------------------------------ #
 - name: "Domain Services: SQL Server"
@@ -50,6 +72,16 @@
     - "{{ playbook_dir }}/secrets/credentials.yml"
 
   pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — destroy workflow, no configuration to run"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
     - name: "[preflight] Skip SQL - not required by scenario"
       ansible.builtin.meta: end_play
       when: not (scenario.phases.services.sql | default(false) | bool)
@@ -74,6 +106,16 @@
     - "{{ playbook_dir }}/secrets/credentials.yml"
 
   pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — destroy workflow, no configuration to run"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
     - name: "[preflight] Skip Exchange - not required by scenario"
       ansible.builtin.meta: end_play
       when: not (scenario.phases.services.exchange | default(false) | bool)
@@ -103,6 +145,16 @@
     - "{{ playbook_dir }}/secrets/credentials.yml"
 
   pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — destroy workflow, no configuration to run"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
     - name: "[preflight] Skip SCCM - not required by scenario"
       ansible.builtin.meta: end_play
       when: not (scenario.phases.services.sccm | default(false) | bool)
@@ -132,6 +184,16 @@
     - "{{ playbook_dir }}/secrets/credentials.yml"
 
   pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — destroy workflow, no configuration to run"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
     - name: "[preflight] Skip IIS - not required by scenario"
       ansible.builtin.meta: end_play
       when: not (scenario.phases.services.iis | default(false) | bool)

@@ -22,10 +22,7 @@
   tags: [always, initiation]
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
-
-  vars:
-    exercise_dir: "{{ playbook_dir }}/EXERCISES/{{ exercise }}"
+    - "../secrets/credentials.yml"
 
   roles:
     - read_exercise_config

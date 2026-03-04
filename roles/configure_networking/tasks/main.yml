@@ -175,6 +175,13 @@
 # ===========================================================================
 
 # ----------------------------------------------------------------------------
+# Scope guard — skip Part 2 when networking_scope == 'bridges'
+# ----------------------------------------------------------------------------
+- name: Skip VyOS configuration — bridges-only scope
+  ansible.builtin.meta: end_play
+  when: networking_scope | default('all') == 'bridges'
+
+# ----------------------------------------------------------------------------
 # Identify VyOS VMs
 # ----------------------------------------------------------------------------
 - name: Initialize VyOS VM list
@@ -193,6 +200,63 @@
   ansible.builtin.debug:
     msg: "No VyOS VMs defined in exercise. Skipping VyOS configuration."
   when: _vyos_vms | length == 0
+
+# ----------------------------------------------------------------------------
+# Discover management IPs for VyOS VMs via Proxmox QEMU guest agent
+# ----------------------------------------------------------------------------
+# VyOS VMs receive management IPs via Layer0 DHCP (CDX-GTW). The IP is not
+# known in advance. Query the Proxmox QEMU guest agent after VM boot to get
+# the current interface list, then inject the discovered IP into in-memory
+# inventory via add_host so that the subsequent delegate_to can reach the router.
+# Skipped for VMs that already have ansible_host set (e.g. static assignment).
+
+- name: Query Proxmox guest agent — VyOS management IP
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{
+        (item.proxmox | default({})).node | default(scenario.proxmox.node)
+      }}/qemu/{{ item.vmid }}/agent/network-get-interfaces
+    method: GET
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  loop: "{{ _vyos_vms }}"
+  loop_control:
+    label: "{{ item.name }} (vmid={{ item.vmid }})"
+  register: _vyos_agent_responses
+  ignore_errors: true   # VM may be stopped (bridges run before power-on); warn task handles no-IP case
+  when: hostvars[item.name].ansible_host | default('') | length == 0
+
+- name: Build VyOS IP map from guest agent responses
+  ansible.builtin.set_fact:
+    _vyos_discovered_ips: >-
+      {%- set ips = {} -%}
+      {%- for result in _vyos_agent_responses.results | default([]) -%}
+        {%- if result is not skipped and result is not failed and result.json is defined -%}
+          {%- set vm_name = result.item.name -%}
+          {%- for iface in result.json.data.result | default([]) -%}
+            {%- if iface.name != 'lo' and vm_name not in ips -%}
+              {%- for addr in iface['ip-addresses'] | default([]) -%}
+                {%- if addr['ip-address-type'] == 'ipv4' and vm_name not in ips -%}
+                  {%- set _ = ips.update({vm_name: addr['ip-address']}) -%}
+                {%- endif -%}
+              {%- endfor -%}
+            {%- endif -%}
+          {%- endfor -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ ips }}
+
+- name: Update VyOS ansible_host from guest agent IP discovery
+  ansible.builtin.add_host:
+    name: "{{ item.key }}"
+    ansible_host: "{{ item.value }}"
+  loop: "{{ _vyos_discovered_ips | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }} → {{ item.value }}"
+  when: _vyos_discovered_ips | default({}) | length > 0
 
 # ----------------------------------------------------------------------------
 # Locate per-VM config files at EXERCISES/<name>/VyOS/<vm-name>.conf
@@ -223,7 +287,9 @@
     - hostvars[item.item.name].ansible_host | default('') | length > 0
 
 - name: Apply VyOS configuration
-  ansible.builtin.shell: "vbash -l -s < /tmp/vyos-{{ item.item.name }}.conf"
+  ansible.builtin.shell: >-
+    vbash -c "source /opt/vyatta/etc/functions/script-template &&
+    source /tmp/vyos-{{ item.item.name }}.conf"
   delegate_to: "{{ item.item.name }}"
   loop: "{{ _vyos_conf_stats.results | default([]) }}"
   loop_control:
@@ -247,12 +313,13 @@
     label: "{{ item.item.name }}"
   when: not item.stat.exists
 
-- name: Warn — VyOS host has no ansible_host IP
+- name: Warn — VyOS host has no resolvable management IP
   ansible.builtin.debug:
     msg: >-
-      WARNING: {{ item.item.name }} has no ansible_host IP in inventory.
-      Cannot push VyOS config. Ensure vm_power_management has resolved the IP
-      or set a static cloud_init.ip in vms.yaml.
+      WARNING: {{ item.item.name }} — no management IP resolved
+      (not in inventory and guest agent discovery failed or returned no IPv4).
+      Cannot push VyOS config. Ensure the VM is powered on with QEMU guest
+      agent running before Phase 3.
   loop: "{{ _vyos_conf_stats.results | default([]) }}"
   loop_control:
     label: "{{ item.item.name }}"
@@ -270,6 +337,7 @@
       Exercise          : {{ scenario.exercise.name }}
       Proxmox nodes     : {{ _affected_nodes | length }}
       VyOS routers      : {{ _vyos_vms | length }}
+      IPs discovered    : {{ _vyos_discovered_ips | default({}) | length }}
       Configs applied   : {{ _vyos_conf_stats.results | default([])
                              | selectattr('stat.exists')
                              | map(attribute='item.name') | list

@@ -17,7 +17,7 @@
 # Usage:
 #   ansible-playbook playbooks/domain_management.yml \
 #     -e "exercise=OBSIDIAN_DAGGER" \
-#     -e "@Secrets/credentials.yml" --ask-vault-pass
+#     -e "@secrets/credentials.yml" --ask-vault-pass
 # =============================================================================
 
 # ----------------------------------------------------------------------------
@@ -41,7 +41,7 @@
   serial: 1  # One DC at a time — prevents replication conflicts during promotion
 
   vars_files:
-    - "{{ playbook_dir }}/Secrets/credentials.yml"
+    - "{{ playbook_dir }}/secrets/credentials.yml"
 
   pre_tasks:
     # Import exercise facts from controller (read_exercise_config ran on localhost)
@@ -50,6 +50,10 @@
         scenario:         "{{ hostvars['localhost'].scenario }}"
         exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
         virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — destroy workflow, no configuration to run"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
 
     - name: "[preflight] Skip — domain phase disabled in scenario"
       ansible.builtin.meta: end_play

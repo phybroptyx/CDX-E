@@ -144,7 +144,8 @@ network:
 # Individual VMs in vms.yaml can override these under proxmox: { node:, storage: }.
 proxmox:
   node: cdx-pve-01            # REQUIRED — default target Proxmox node
-  storage: QNAP               # REQUIRED — default storage pool for VM disks
+  storage: raid               # REQUIRED — destination storage pool for Terraform VM clones
+                              # Note: Packer template builds target QNAP (see packer_template_storage in all.yml)
 
 # -----------------------------------------------------------------------------
 # Red Team Configuration

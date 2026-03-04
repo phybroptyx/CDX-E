@@ -100,7 +100,7 @@
     soc_layout_dir:  "{{ _layout_dir }}"
     soc_layout:      "{{ _layout_yaml }}"
     soc_vms:         "{{ _layout_vms_yaml.virtual_machines }}"
-  cacheable: true
+    cacheable: true
 
 # ----------------------------------------------------------------------------
 # Step 6 — Display SOC layout summary

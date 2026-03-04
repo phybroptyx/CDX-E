@@ -40,7 +40,7 @@ sql_features: 'SQLENGINE'
 sql_auth_mode: 'Mixed'
 
 # SA account password — required when sql_auth_mode: Mixed.
-# Load from Ansible Vault: vault_sql_sa_password in Secrets/credentials.yml
+# Load from Ansible Vault: vault_sql_sa_password in secrets/credentials.yml
 sql_sa_password: "{{ vault_sql_sa_password | default('') }}"
 
 # ── Service accounts ─────────────────────────────────────────────────────────

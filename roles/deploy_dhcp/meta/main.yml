@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: CDX
+  description: "Configures Windows DHCP Server for a CDX exercise scope"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

@@ -1,0 +1,128 @@
+---
+# =============================================================================
+# CDX-E Scenario: DC_303
+# =============================================================================
+# Demonstration exercise — Windows Server 2016 AD environment.
+# Two DCs, four member servers (FS/DB/EX/BU), five Windows 10 clients.
+# No Red/Blue team phases — infrastructure and domain validation only.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Exercise Identity
+# -----------------------------------------------------------------------------
+exercise:
+  name: DC_303
+  codename: "Operation Criterion 303"
+  description: >-
+    Demonstration scenario. Windows Server 2016 Active Directory domain with
+    file, database, and Exchange services. Used for pipeline validation and
+    White Cell operator familiarization.
+  classification: UNCLASSIFIED
+
+  teams:
+    white_cell:  true
+    red_team:    false
+    blue_team:   false
+    purple_team: false
+
+  vm_id_ranges:
+    scenario:  { start: 5000, end: 5999, description: "Servers"      }
+    scenario2: { start: 6000, end: 6999, description: "Workstations"  }
+    red_team:  { start: 3000, end: 3099, description: "Red Team / APT" }
+    blue_team: { start: 1000, end: 1099, description: "Blue Team / SOC" }
+
+# -----------------------------------------------------------------------------
+# Active Directory / Domain Settings
+# -----------------------------------------------------------------------------
+domain:
+  name: dc303.cdx.lab
+  netbios: DC303
+  functional_level: Win2016
+  admin_password: "{{ vault_domain_admin_password }}"
+
+  sites:
+    - name: New_York_City
+      subnets:
+        - 68.27.129.0/24
+
+# -----------------------------------------------------------------------------
+# Phase Execution Control
+# -----------------------------------------------------------------------------
+phases:
+
+  packer: true            # VyOS template (VMID 2017) requires initial Packer build
+
+  terraform: true
+
+  networking: true
+
+  domain: true
+
+  servers: true
+
+  services:
+    dhcp:     true        # DC-01 hosts DHCP for client subnet
+    sql:      true        # Required by Exchange (303-DB-01)
+    exchange: true        # 303-EX-01
+    sccm:     false
+    iis:      false
+
+  workstations: true
+
+  vulnerabilities: false
+
+  red_team:  false
+  blue_team: false
+  endpoint_agents: false
+
+# -----------------------------------------------------------------------------
+# Service Configuration
+# -----------------------------------------------------------------------------
+services:
+
+  dhcp:
+    scopes:
+      - name: "DC303 Client Scope"
+        subnet_address: "68.27.129.0"
+        subnet_mask: "255.255.255.0"
+        start_range: "68.27.129.100"
+        end_range: "68.27.129.200"
+        router: "68.27.129.1"
+        dns_servers:
+          - "68.27.129.71"
+          - "68.27.129.72"
+        domain_name: "dc303.cdx.lab"
+        lease_duration_hours: 8
+
+# -----------------------------------------------------------------------------
+# Network Configuration
+# -----------------------------------------------------------------------------
+network:
+  management_vlan: 100
+  exercise_vlans: []
+
+  dns_servers:
+    - 192.168.1.1             # CDX-I DNS upstream
+    - 68.27.129.71            # 303-DC-01 (active after Phase 4)
+    - 68.27.129.72            # 303-DC-02 (active after Phase 4)
+
+# -----------------------------------------------------------------------------
+# Proxmox Defaults
+# -----------------------------------------------------------------------------
+proxmox:
+  node: cdx-pve-01
+  storage: raid           # Clone destination — per-node RAID array
+  pool: CDX_DEMO_DC303    # Proxmox resource pool override (default would be EX_DC_303)
+
+# -----------------------------------------------------------------------------
+# Red Team Configuration (inactive for this scenario)
+# -----------------------------------------------------------------------------
+red_team:
+  apt: GENERIC_RED
+
+# -----------------------------------------------------------------------------
+# Blue Team Configuration (inactive for this scenario)
+# -----------------------------------------------------------------------------
+blue_team:
+  layout: malcolm_basic
+  endpoint_agent_platform: wazuh

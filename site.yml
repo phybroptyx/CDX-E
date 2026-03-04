@@ -29,9 +29,9 @@
 #   always          - Exercise initiation (always runs)
 #   packer          - Phase 1:  Template deployment
 #   terraform       - Phase 2:  VM deploy/destroy + Phase 2a/2b
+#   network,sdn     - Phase 2.5: Bridge creation (before power-on) + Phase 3 (VyOS, after power-on)
 #   inventory       - Phase 2a: Inventory refresh
 #   power           - Phase 2b: VM power-on + connectivity wait
-#   network,sdn     - Phase 3:  Network/SDN configuration
 #   domain          - Phase 4:  Active Directory deployment
 #   servers         - Phase 5:  General server configuration
 #   services        - Phase 6:  Domain services (conditional per scenario)
@@ -64,6 +64,15 @@
 # Gates on: scenario.phases.terraform
 - import_playbook: playbooks/vm_management.yml
 
+# ── Phase 2.5: Bridge Creation ───────────────────────────────────────────────
+# Creates exercise OVS bridges on Proxmox nodes before VMs are powered on.
+# Proxmox refuses to start a VM whose configured bridge does not exist.
+# networking_scope=bridges skips the VyOS config section — VMs not yet running.
+# Gates on: scenario.phases.networking
+- import_playbook: playbooks/network_management.yml
+  vars:
+    networking_scope: bridges
+
 # ── Phase 2a: Inventory Refresh ──────────────────────────────────────────────
 # Reads Terraform outputs + vms.yaml to write dynamic inventory.
 # Must run before vm_power_management. Does not require VMs to be online.
@@ -72,13 +81,13 @@
 
 # ── Phase 2b: VM Power Management ────────────────────────────────────────────
 # Powers on all scenario VMs and waits for WinRM/SSH connectivity.
-# Must run after inventory_refresh (needs IPs). Must run before all
-# configuration phases.
+# Must run after bridge creation (Phase 2.5) and inventory_refresh.
 # Gates on: scenario.phases.terraform
 - import_playbook: playbooks/vm_power_management.yml
 
 # ── Phase 3: Network Management ──────────────────────────────────────────────
-# Configures SDN, firewall rules, and routing infrastructure.
+# Full scope: bridge creation is idempotent; primary purpose here is VyOS
+# router configuration (VMs now running after Phase 2b).
 # Gates on: scenario.phases.networking
 - import_playbook: playbooks/network_management.yml
 

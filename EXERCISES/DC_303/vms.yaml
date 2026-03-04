@@ -1,0 +1,285 @@
+---
+# =============================================================================
+# DC_303 — VM Specification
+# =============================================================================
+# Demonstration exercise VM fleet.
+# Two DCs, four member servers, five Windows 10 clients.
+# All servers have static IPs on 68.27.129.0/24; clients use DHCP.
+# =============================================================================
+
+exercise:
+  name: "DC_303"
+  description: "Demonstration — Windows Server 2016 AD with file, DB, Exchange, and workstations"
+
+ssh:
+  user: root
+  auth: key
+
+cloud_init_defaults:
+  username: cdxadmin
+  password: "{{ vault_cloud_init_password }}"
+  ssh_public_key: "{{ vault_ssh_public_key }}"
+
+# =============================================================================
+# Network Topology
+# =============================================================================
+network_topology:
+  common_bridges:
+    - name: "SOC"
+      description: "SOC Network Bridge (pre-created by configure_proxmox_nodes)"
+      nodes:
+        - "cdx-pve-01"
+
+  sites:
+    - name: "dc303"
+      label: "DC_303 Primary Site"
+      node: "cdx-pve-01"
+      bridges:
+        - name: "ex_dc303_in"
+          description: "DC_303 Internal LAN"
+        - name: "ex_dc303_bd"
+          description: "DC_303 Boundary / DMZ"
+
+# =============================================================================
+# Virtual Machine Specifications
+# =============================================================================
+virtual_machines:
+
+  # ---------------------------------------------------------------------------
+  # SDP Router
+  # ---------------------------------------------------------------------------
+  - vmid: 5000
+    name: "SDP-DEN-1"
+    template: "vyos"
+    ansible_group: "routers"
+    monitor: false
+    resources:
+      memory_mb: 2048
+      cores: 2
+      sockets: 1
+    network:
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "ex_dc303_in"   # eth1 — Internal LAN (68.27.129.1/24)
+          firewall: false
+        - nic_id: 2
+          model: "virtio"
+          bridge: "EQIX4"         # eth2 — CDX-I uplink (SDN VNet EQIX4, zone CDXI; 68.27.5.249/16 → EQIX-4 GW: 68.27.0.112)
+          firewall: false
+        - nic_id: 3
+          model: "virtio"
+          bridge: "SOC"           # eth3 — SOC connection (10.30.3.1/24)
+          firewall: false
+
+  # ---------------------------------------------------------------------------
+  # Domain Controllers
+  # ---------------------------------------------------------------------------
+  - vmid: 5001
+    name: "DEN-DC-01"
+    template: "server_2016"
+    ansible_group: "domain_controllers"
+    additional_groups:
+      - "dhcp_servers"
+    monitor: true
+    resources:
+      memory_mb: 8192
+      cores: 4
+      sockets: 1
+    cloud_init:
+      ip: "68.27.129.71"
+      cidr: 24
+      gateway: "68.27.129.1"
+      nameserver: "68.27.129.71"
+    network:
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "ex_dc303_in"
+          firewall: false
+
+  - vmid: 5002
+    name: "DEN-DC-02"
+    template: "server_2016"
+    ansible_group: "domain_controllers"
+    monitor: true
+    resources:
+      memory_mb: 8192
+      cores: 4
+      sockets: 1
+    cloud_init:
+      ip: "68.27.129.72"
+      cidr: 24
+      gateway: "68.27.129.1"
+      nameserver: "68.27.129.71"
+    network:
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "ex_dc303_in"
+          firewall: false
+
+  # ---------------------------------------------------------------------------
+  # Member Servers
+  # ---------------------------------------------------------------------------
+  - vmid: 5010
+    name: "DEN-FS-01"
+    template: "server_2016"
+    ansible_group: "servers"
+    monitor: true
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    cloud_init:
+      ip: "68.27.129.80"
+      cidr: 24
+      gateway: "68.27.129.1"
+      nameserver: "68.27.129.71"
+    network:
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "ex_dc303_in"
+          firewall: false
+
+  - vmid: 5011
+    name: "DEN-DB-01"
+    template: "server_2016"
+    ansible_group: "sql_servers"
+    monitor: true
+    resources:
+      memory_mb: 16384
+      cores: 4
+      sockets: 1
+    cloud_init:
+      ip: "68.27.129.81"
+      cidr: 24
+      gateway: "68.27.129.1"
+      nameserver: "68.27.129.71"
+    network:
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "ex_dc303_in"
+          firewall: false
+
+  - vmid: 5012
+    name: "DEN-EX-01"
+    template: "server_2016"
+    ansible_group: "exchange_servers"
+    monitor: true
+    resources:
+      memory_mb: 32768
+      cores: 8
+      sockets: 1
+    cloud_init:
+      ip: "68.27.129.82"
+      cidr: 24
+      gateway: "68.27.129.1"
+      nameserver: "68.27.129.71"
+    network:
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "ex_dc303_in"
+          firewall: false
+
+  - vmid: 5013
+    name: "DEN-BU-01"
+    template: "server_2012r2"
+    ansible_group: "servers"
+    monitor: true
+    resources:
+      memory_mb: 8192
+      cores: 2
+      sockets: 1
+    cloud_init:
+      ip: "68.27.129.83"
+      cidr: 24
+      gateway: "68.27.129.1"
+      nameserver: "68.27.129.71"
+    network:
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "ex_dc303_in"
+          firewall: false
+
+  # ---------------------------------------------------------------------------
+  # Workstations / Clients
+  # ---------------------------------------------------------------------------
+  - vmid: 6001
+    name: "DEN-CLI-01"
+    template: "windows_10"
+    ansible_group: "workstations"
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+    network:
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "ex_dc303_in"
+          firewall: false
+
+  - vmid: 6002
+    name: "DEN-CLI-02"
+    template: "windows_10"
+    ansible_group: "workstations"
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+    network:
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "ex_dc303_in"
+          firewall: false
+
+  - vmid: 6003
+    name: "DEN-CLI-03"
+    template: "windows_10"
+    ansible_group: "workstations"
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+    network:
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "ex_dc303_in"
+          firewall: false
+
+  - vmid: 6004
+    name: "DEN-CLI-04"
+    template: "windows_10"
+    ansible_group: "workstations"
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+    network:
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "ex_dc303_in"
+          firewall: false
+
+  - vmid: 6005
+    name: "DEN-CLI-05"
+    template: "windows_10"
+    ansible_group: "workstations"
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+    network:
+      additional_nics:
+        - nic_id: 1
+          model: "virtio"
+          bridge: "ex_dc303_in"
+          firewall: false

@@ -94,7 +94,7 @@
     $ErrorActionPreference = 'Stop'
     Import-Module ActiveDirectory
 
-    $gpoJson = (Get-Content '{{ gpo_temp_path }}\gpo.json' -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
+    $gpoJson = (Get-Content "$env:GPO_TEMP_PATH\gpo.json" -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
     $gpoData = $gpoJson | ConvertFrom-Json
     $changes = @()
 
@@ -128,6 +128,8 @@
 
     if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
     else { Write-Output "OK: No GPO security group changes required" }
+  environment:
+    GPO_TEMP_PATH: "{{ gpo_temp_path }}"
   register: _gpo_groups_result
   run_once: true
   changed_when: "'CHANGED:' in (_gpo_groups_result.stdout | default(''))"
@@ -145,7 +147,7 @@
     $ErrorActionPreference = 'Stop'
     Import-Module GroupPolicy
 
-    $gpoJson = (Get-Content '{{ gpo_temp_path }}\gpo.json' -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
+    $gpoJson = (Get-Content "$env:GPO_TEMP_PATH\gpo.json" -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
     $gpoData = $gpoJson | ConvertFrom-Json
     $changes = @()
 
@@ -201,6 +203,8 @@
 
     if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
     else { Write-Output "OK: No GPO creation changes required" }
+  environment:
+    GPO_TEMP_PATH: "{{ gpo_temp_path }}"
   register: _gpo_create_result
   run_once: true
   changed_when: "'CHANGED:' in (_gpo_create_result.stdout | default(''))"
@@ -222,7 +226,7 @@
     Import-Module ActiveDirectory
     Import-Module GroupPolicy
 
-    $gpoJson = (Get-Content '{{ gpo_temp_path }}\gpo.json' -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
+    $gpoJson = (Get-Content "$env:GPO_TEMP_PATH\gpo.json" -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
     $gpoData = $gpoJson | ConvertFrom-Json
     $domainDN = (Get-ADDomain).DistinguishedName
     $changes  = @()
@@ -285,6 +289,8 @@
 
     if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
     else { Write-Output "OK: No GPO link changes required" }
+  environment:
+    GPO_TEMP_PATH: "{{ gpo_temp_path }}"
   register: _gpo_links_result
   run_once: true
   changed_when: "'CHANGED:' in (_gpo_links_result.stdout | default(''))"
@@ -305,7 +311,7 @@
     $ErrorActionPreference = 'Stop'
     Import-Module GroupPolicy
 
-    $gpoJson = (Get-Content '{{ gpo_temp_path }}\gpo.json' -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
+    $gpoJson = (Get-Content "$env:GPO_TEMP_PATH\gpo.json" -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
     $gpoData = $gpoJson | ConvertFrom-Json
     $changes = @()
 
@@ -348,6 +354,8 @@
 
     if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
     else { Write-Output "OK: No security filtering changes required" }
+  environment:
+    GPO_TEMP_PATH: "{{ gpo_temp_path }}"
   register: _gpo_filter_result
   run_once: true
   changed_when: "'CHANGED:' in (_gpo_filter_result.stdout | default(''))"
@@ -367,7 +375,7 @@
     $ErrorActionPreference = 'Stop'
     Import-Module GroupPolicy
 
-    $gpoJson = (Get-Content '{{ gpo_temp_path }}\gpo.json' -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
+    $gpoJson = (Get-Content "$env:GPO_TEMP_PATH\gpo.json" -Raw) -replace '__DOMAIN__', (Get-ADDomain).DNSRoot
     $gpoData = $gpoJson | ConvertFrom-Json
     $changes = @()
 
@@ -379,9 +387,9 @@
     $domainFQDN  = (Get-ADDomain).DNSRoot
     $netlogonUNC = "\\$domainFQDN\NETLOGON"
     $imagesUNC   = "$netlogonUNC\Images"
-    $stagingPath = '{{ gpo_temp_path }}\images'
+    $stagingPath = "$env:GPO_TEMP_PATH\images"
 
-    # Create Images subdirectory under NETLOGON if it doesn't exist
+    # Create Images subdirectory under NETLOGON if not present
     if (-not (Test-Path $imagesUNC)) {
         New-Item -ItemType Directory -Path $imagesUNC -Force | Out-Null
         $changes += "CHANGED: Created NETLOGON\Images directory"
@@ -405,6 +413,8 @@
 
     if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
     else { Write-Output "OK: All branding images already present in NETLOGON\Images" }
+  environment:
+    GPO_TEMP_PATH: "{{ gpo_temp_path }}"
   register: _gpo_images_result
   run_once: true
   when: _domain_files_stat.stat.exists | default(false)

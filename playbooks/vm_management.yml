@@ -14,14 +14,28 @@
 #   # Deploy
 #   ansible-playbook playbooks/vm_management.yml \
 #     -e "exercise=OBSIDIAN_DAGGER action=deploy" \
-#     -e "@secrets/credentials.yml"
+#     -e "@secrets/credentials.yml" --ask-vault-pass
 #
 #   # Destroy
 #   ansible-playbook playbooks/vm_management.yml \
 #     -e "exercise=OBSIDIAN_DAGGER action=destroy" \
-#     -e "@secrets/credentials.yml"
+#     -e "@secrets/credentials.yml" --ask-vault-pass
 # =============================================================================
 
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Main play: deploy or destroy scenario VMs
+# ----------------------------------------------------------------------------
 - name: Virtual Machine Management
   hosts: localhost
   connection: local
@@ -35,14 +49,15 @@
     vm_action: "{{ action | default('deploy') }}"
 
   pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
     - name: "[preflight] Skip - terraform phase disabled in scenario"
       ansible.builtin.meta: end_play
       when: not (scenario.phases.terraform | default(true) | bool)
-
-    - name: "[preflight] Assert virtual_machines fact is loaded"
-      ansible.builtin.assert:
-        that: virtual_machines is defined
-        fail_msg: "virtual_machines fact not found. Run exercise_initiation first."
 
   roles:
     - role: deploy_scenario
