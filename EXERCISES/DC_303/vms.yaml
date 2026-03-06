@@ -57,19 +57,27 @@ virtual_machines:
       memory_mb: 2048
       cores: 2
       sockets: 1
+    # Bootstrap: configure the internal LAN interface immediately after boot so
+    # the CDX-RELAY (on ex_dc303_in) can reach this VM and Ansible can SSH in.
+    # vm_power_management pushes this config via QEMU guest-exec (vbash CLI).
+    # No gateway at bootstrap — full routing is set by configure_networking.
+    network_bootstrap:
+      interface: "eth0"           # net0 → ex_dc303_in (first NIC in additional_nics order)
+      ip: "68.27.129.1"
+      cidr: 24
     network:
       additional_nics:
         - nic_id: 1
           model: "virtio"
-          bridge: "ex_dc303_in"   # eth1 — Internal LAN (68.27.129.1/24)
+          bridge: "ex_dc303_in"   # eth0 — Internal LAN (68.27.129.1/24); relay-reachable bootstrap interface
           firewall: false
         - nic_id: 2
           model: "virtio"
-          bridge: "EQIX4"         # eth2 — CDX-I uplink (SDN VNet EQIX4, zone CDXI; 68.27.5.249/16 → EQIX-4 GW: 68.27.0.112)
+          bridge: "EQIX4"         # eth1 — CDX-I uplink (68.27.5.249/16, configured via VyOS full config)
           firewall: false
         - nic_id: 3
           model: "virtio"
-          bridge: "SOC"           # eth3 — SOC connection (10.30.3.1/24)
+          bridge: "SOC"           # eth2 — SOC connection (10.30.3.1/24, configured via VyOS full config)
           firewall: false
 
   # ---------------------------------------------------------------------------
@@ -79,8 +87,6 @@ virtual_machines:
     name: "DEN-DC-01"
     template: "server_2016"
     ansible_group: "domain_controllers"
-    additional_groups:
-      - "dhcp_servers"
     monitor: true
     resources:
       memory_mb: 8192
@@ -102,6 +108,8 @@ virtual_machines:
     name: "DEN-DC-02"
     template: "server_2016"
     ansible_group: "domain_controllers"
+    additional_groups:
+      - "dhcp_servers"
     monitor: true
     resources:
       memory_mb: 8192

@@ -1,0 +1,87 @@
+---
+# =============================================================================
+# configure_relay: release_nics
+# =============================================================================
+# Removes exercise routes, deconfigures IPs, and detaches exercise NICs
+# from the relay VM via Proxmox API.
+#
+# Called at exercise teardown (before Terraform destroy).
+# failed_when: false on ip commands — partial cleanup is acceptable.
+# =============================================================================
+
+- name: Assert relay_nic_assignments is not empty
+  ansible.builtin.assert:
+    that:
+      - relay_nic_assignments | length > 0
+    fail_msg: "relay_nic_assignments must be provided for relay_action=release_nics"
+
+# --- Remove exercise routes ---
+- name: Remove exercise segment routes
+  ansible.builtin.command: ip route del {{ item.net }}
+  loop: "{{ relay_routes }}"
+  loop_control:
+    label: "{{ item.net }}"
+  register: _route_del
+  changed_when: _route_del.rc == 0
+  failed_when: false
+  when: relay_routes | length > 0
+
+# --- Deconfigure NIC addresses ---
+- name: Flush IPs from exercise NICs
+  ansible.builtin.command: ip addr flush dev eth{{ item.slot }}
+  loop: "{{ relay_nic_assignments }}"
+  loop_control:
+    label: "eth{{ item.slot }}"
+  changed_when: true
+  failed_when: false
+
+- name: Bring down exercise NIC links
+  ansible.builtin.command: ip link set dev eth{{ item.slot }} down
+  loop: "{{ relay_nic_assignments }}"
+  loop_control:
+    label: "eth{{ item.slot }}"
+  register: _link_down
+  changed_when: _link_down.rc == 0
+  failed_when: false
+
+# --- Detach exercise NICs via Proxmox API ---
+- name: Build NIC delete string (net2,net3,net4)
+  ansible.builtin.set_fact:
+    _nics_to_delete: >-
+      {{ relay_nic_assignments
+         | map(attribute='slot')
+         | map('regex_replace', '^(.*)$', 'net\1')
+         | join(',') }}
+
+- name: Detach exercise NICs from relay VM (Proxmox API)
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ relay_proxmox_node }}/qemu/{{ relay_vmid }}/config"
+    method: PUT
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    body_format: form-urlencoded
+    body: "delete={{ _nics_to_delete }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  delegate_to: localhost
+
+# --- Restore base nftables ruleset (no exercise NIC rules) ---
+- name: Redeploy nftables base ruleset (exercise NICs removed)
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: '0640'
+  vars:
+    relay_nic_assignments: []   # override to empty — produces base ruleset only
+
+- name: Reload nftables
+  ansible.builtin.systemd:
+    name: nftables
+    state: reloaded
+
+- name: Report released NICs
+  ansible.builtin.debug:
+    msg: "Released relay NICs: {{ _nics_to_delete }}"

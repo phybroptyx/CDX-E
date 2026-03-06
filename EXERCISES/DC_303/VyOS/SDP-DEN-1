@@ -1,0 +1,84 @@
+configure
+
+########################################
+# System Identity / Base Services
+########################################
+
+set system host-name 'SDP-DEN-1'
+set system domain-name 'dc303.denhac.org'
+set system time-zone 'America/Denver'
+
+set service ntp server '46.244.164.88'
+set service ssh port '22'
+
+########################################
+# Interfaces
+# eth0: Management (pre-configured, do NOT modify here)
+########################################
+
+# eth1: Internal - DC303 Internal LAN (68.27.129.0/24)
+set interfaces ethernet eth1 description 'Internal'
+set interfaces ethernet eth1 address '68.27.129.1/24'
+
+# eth2: External / Upstream toward Tier-1 (EQIX-4)
+set interfaces ethernet eth2 description 'to ISP'
+set interfaces ethernet eth2 address '68.27.5.249/16'
+
+# eth3: SOC Connection
+set interfaces ethernet eth3 description 'to SOC'
+set interfaces ethernet eth3 address '10.30.3.1/24'
+
+########################################
+# Static Routing
+########################################
+
+# Default route to the upstream Tier-1 router (EQIX-4 T1 Gateway)
+set protocols static route 0.0.0.0/0 next-hop '68.27.0.112'
+
+########################################
+# OSPF – "Public Internet" View Only
+# - OSPF only on internal segment (Area 4, matches EQIX-4 T1)
+# - Redistribute ONLY the DC303 public /24 summary into OSPF
+# - No RFC1918 (10.30.3.0/24) leaked into the Internet LSDB
+########################################
+
+# Use external IP as OSPF router-id for clarity
+set protocols ospf parameters router-id '68.27.5.249'
+
+# Enable OSPF on the internal segment in Area 4
+# (Tier-1 EQIX-4 already has "area 4 network 68.27.0.0/16")
+set protocols ospf area 4 network '68.27.129.0/24'
+
+# Policy: only advertise the DC303 internal /24 summary into OSPF
+
+# Prefix-list for DC303 internal public space
+set policy prefix-list DEN-INTERNAL rule 10 action 'permit'
+set policy prefix-list DEN-INTERNAL rule 10 prefix '68.27.129.0/24'
+
+# Explicit deny-any to avoid leaking other statics
+set policy prefix-list DEN-INTERNAL rule 100 action 'deny'
+set policy prefix-list DEN-INTERNAL rule 100 prefix '0.0.0.0/0'
+
+# Route-map to control redistribution of static routes into OSPF
+set policy route-map OSPF-REDIST-STATIC-DEN rule 10 action 'permit'
+set policy route-map OSPF-REDIST-STATIC-DEN rule 10 match ip address prefix-list 'DEN-INTERNAL'
+
+# Hard stop: deny everything else
+set policy route-map OSPF-REDIST-STATIC-DEN rule 100 action 'deny'
+
+# Redistribute static routes into OSPF using the route-map
+set protocols ospf redistribute static route-map 'OSPF-REDIST-STATIC-DEN'
+
+########################################
+# NAT
+# (None – this SDP is purely routed, no translation)
+########################################
+# (Intentionally no "set nat ..." statements)
+
+########################################
+# Commit & Save
+########################################
+
+commit
+save
+exit

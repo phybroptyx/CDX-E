@@ -17,12 +17,12 @@
 #   # Apply network config
 #   ansible-playbook playbooks/network_management.yml \
 #     -e "exercise=OBSIDIAN_DAGGER action=deploy" \
-#     -e "@secrets/credentials.yml"
+#     -e "@../secrets/credentials.yml"
 #
 #   # Revert network config (full teardown)
 #   ansible-playbook playbooks/network_management.yml \
 #     -e "exercise=OBSIDIAN_DAGGER action=destroy" \
-#     -e "@secrets/credentials.yml"
+#     -e "@../secrets/credentials.yml"
 # =============================================================================
 
 - name: Load exercise configuration
@@ -30,7 +30,7 @@
   gather_facts: false
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   roles:
     - role: read_exercise_config
@@ -40,7 +40,7 @@
   gather_facts: false
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   vars:
     net_action: "{{ action | default('deploy') }}"

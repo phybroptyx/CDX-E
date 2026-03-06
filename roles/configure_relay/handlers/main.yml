@@ -1,0 +1,24 @@
+---
+# =============================================================================
+# Role: configure_relay — Handlers
+# =============================================================================
+
+- name: restart networking
+  ansible.builtin.systemd:
+    name: networking
+    state: restarted
+
+- name: restart danted
+  ansible.builtin.systemd:
+    name: danted
+    state: restarted
+
+- name: reload nftables
+  ansible.builtin.systemd:
+    name: nftables
+    state: reloaded
+
+- name: restart sshd
+  ansible.builtin.systemd:
+    name: ssh
+    state: restarted

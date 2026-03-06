@@ -1,36 +1,19 @@
 # =============================================================================
-# CDX-E Packer — Common Variables
+# Common Packer Variables
 # =============================================================================
-# Shared by all template builds. Override individual values in the
-# per-template .pkrvars.hcl file.
-#
-# Proxmox credentials (proxmox_api_token_id, proxmox_api_token_secret)
-# are NOT defined here — they are injected at build time by the
-# deploy_packer_template Ansible role via:
-#   -var "proxmox_api_token_id=..."   (command-line arg)
-#   PKR_VAR_proxmox_api_token_secret  (environment variable — keeps secret
-#                                      out of process list and Ansible logs)
+# Shared across all template builds. Override per-template in <os>.pkrvars.hcl.
+# Secrets should be passed via environment variables or a separate vault file.
 # =============================================================================
 
-# Proxmox API endpoint
-proxmox_api_url = "https://cdx-pve-01:8006/api2/json"
+proxmox_api_url  = "https://cdx-pve-01:8006/api2/json"
+proxmox_node     = "cdx-pve-01"
 
-# Target Proxmox node for the build VM
-proxmox_node = "cdx-pve-01"
+# Storage pool for template disks
+# proxmox_storage_pool = "QNAP"
+proxmox_storage_pool = "QNAP"
 
-# Proxmox storage pool where ISOs are staged (shared across all nodes)
-iso_storage_pool = "QNAP"
-
-# Proxmox storage pool where finished templates are registered
-# All Packer-built templates land on QNAP; per-node RAID copies are
-# staged separately (qm clone → convert template).
-template_storage = "QNAP"
-
-# Disk format for all template builds
-disk_type = "qcow2"
-
-# Disk cache mode — writeback gives best build performance
-disk_cache_mode = "writeback"
-
-# Proxmox resource pool all built templates are assigned to
-pool = "CDX_TEMPLATES"
+# VirtIO-Win driver ISO (shared by all Windows builds)
+# virtio_iso_file = "QNAP:iso/virtio-win.iso"
+virtio_iso_file = "QNAP:iso/virtio-win.iso"
+virtio_iso_file_81_2012r2 = "QNAP:iso/virtio-win-0.1.185.iso"
+virtio_iso_file_7_2008r2 = "QNAP:iso/virtio-win-0.1.160.iso"

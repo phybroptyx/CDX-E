@@ -5,3 +5,9 @@
 # vm_power_wait_timeout and vm_power_wait_sleep have moved to:
 #   inventory/group_vars/all.yml
 # =============================================================================
+
+# Groups to exclude from power-on and bootstrap processing.
+# Override at the call site when a subset of VMs should be skipped.
+# Phase 2b sets this to ['workstations'] — clients are powered on by
+# workstation_configuration (Phase 7) after the DHCP scope is active.
+vm_skip_groups: []

@@ -1,0 +1,158 @@
+---
+# =============================================================================
+# Playbook: provision_relay.yml
+# =============================================================================
+# One-time provisioning playbook for the CDX-RELAY VM (VMID 102).
+# Safe to re-run — Play 2 (Terraform) is skipped if VMID 102 already exists.
+#
+# The relay is persistent infrastructure and is NOT managed by per-exercise
+# Terraform workspaces. It must be provisioned once before any exercises run.
+#
+# Architecture:
+#   VMID 102  — cdx-relay, Debian 13.3.0, cloned from VMID 2039 template
+#   eth0      — Layer0 static 10.0.0.10/22 (ACN management)
+#   eth1      — CDX-I EQIX4 uplink
+#   eth2-4    — Exercise bridges (managed by configure_relay, not Terraform)
+#
+# Usage:
+#   ansible-playbook playbooks/provision_relay.yml \
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
+#
+# Prerequisites:
+#   - Debian 13 base template (VMID 2039, cdx-debian133-base) must exist in Proxmox.
+#     If not: build it first with packer build debian-13.pkr.hcl
+#   - Ansible controller SSH key must be available for cdxadmin on the relay.
+#
+# Plays:
+#   1. Preflight — verify template exists, check relay state
+#   2. Provision — Terraform apply (skipped if VMID 102 already exists)
+#   3. Configure — configure_relay role (action=provision)
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Play 1 — Preflight
+# ----------------------------------------------------------------------------
+- name: Preflight — verify prerequisites and relay state
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  tasks:
+    - name: Query Proxmox cluster for existing VMs
+      ansible.builtin.uri:
+        url: "{{ proxmox_api_url }}/cluster/resources?type=vm"
+        method: GET
+        headers:
+          Authorization: >-
+            PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+        validate_certs: "{{ proxmox_validate_certs }}"
+        status_code: [200]
+      register: _proxmox_vms
+
+    - name: Check for Debian 13 base template (VMID 2039)
+      ansible.builtin.set_fact:
+        _template_exists: >-
+          {{ _proxmox_vms.json.data
+             | selectattr('vmid', 'equalto', 2039)
+             | list | length > 0 }}
+
+    - name: Fail if Debian 13 base template is not available
+      ansible.builtin.fail:
+        msg: >-
+          Debian 13 base template (VMID 2039, cdx-debian133-base) was not found
+          in Proxmox. Build it first:
+            cd INFRASTRUCTURE/packer/templates
+            packer build \
+              -var-file=../vars/common.pkrvars.hcl \
+              -var-file=../vars/debian_13.pkrvars.hcl \
+              debian-13.pkr.hcl
+      when: not _template_exists
+
+    - name: Check for existing relay VM (VMID 102)
+      ansible.builtin.set_fact:
+        _relay_exists: >-
+          {{ _proxmox_vms.json.data
+             | selectattr('vmid', 'equalto', 102)
+             | list | length > 0 }}
+
+    - name: Report relay state
+      ansible.builtin.debug:
+        msg: >-
+          CDX-RELAY (VMID 102):
+          {% if _relay_exists %}
+          already exists — Terraform provisioning will be skipped.
+          {% else %}
+          not found — will be provisioned by Terraform.
+          {% endif %}
+
+# ----------------------------------------------------------------------------
+# Play 2 — Provision (Terraform apply, conditional)
+# ----------------------------------------------------------------------------
+- name: Provision — Terraform apply for CDX-RELAY
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  tasks:
+    - name: Skip if relay already exists
+      ansible.builtin.debug:
+        msg: "CDX-RELAY (VMID 102) already exists. Skipping Terraform provisioning."
+      when: hostvars['localhost']['_relay_exists']
+
+    - name: Terraform init (relay)
+      ansible.builtin.command:
+        cmd: terraform init
+        chdir: "{{ playbook_dir }}/../INFRASTRUCTURE/terraform/relay"
+      when: not hostvars['localhost']['_relay_exists']
+      changed_when: true
+
+    - name: Terraform apply (relay)
+      ansible.builtin.command:
+        cmd: >-
+          terraform apply -auto-approve
+          -var "proxmox_api_url={{ proxmox_api_url }}"
+          -var "proxmox_api_token_id={{ proxmox_api_user }}!{{ proxmox_api_token_id }}"
+          -var "proxmox_api_token_secret={{ proxmox_api_token_secret }}"
+        chdir: "{{ playbook_dir }}/../INFRASTRUCTURE/terraform/relay"
+      when: not hostvars['localhost']['_relay_exists']
+      register: _tf_apply
+      changed_when: "'Apply complete' in (_tf_apply.stdout | default(''))"
+
+    - name: Register relay in in-memory inventory (post-provision)
+      ansible.builtin.add_host:
+        name: cdx-relay
+        groups: relay
+        ansible_host: "10.0.0.10"
+        ansible_user: cdxadmin
+        ansible_ssh_private_key_file: "~/.ssh/id_ed25519"
+      when: not hostvars['localhost']['_relay_exists']
+
+    - name: Wait for relay SSH to become available
+      ansible.builtin.wait_for:
+        host: "10.0.0.10"
+        port: 22
+        timeout: 300
+        sleep: 5
+      when: not hostvars['localhost']['_relay_exists']
+
+# ----------------------------------------------------------------------------
+# Play 3 — Configure (configure_relay role, action=provision)
+# ----------------------------------------------------------------------------
+- name: Configure — initial CDX-RELAY OS configuration
+  hosts: relay
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  roles:
+    - role: configure_relay
+      vars:
+        relay_action: provision

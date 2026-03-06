@@ -18,12 +18,12 @@
 # Usage:
 #   ansible-playbook playbooks/red_team_deployment.yml \
 #     -e "exercise=OBSIDIAN_DAGGER action=deploy" \
-#     -e "@secrets/credentials.yml" --ask-vault-pass
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
 #
 #   # Override APT profile at runtime:
 #   ansible-playbook playbooks/red_team_deployment.yml \
 #     -e "exercise=OBSIDIAN_DAGGER action=deploy apt=APT29" \
-#     -e "@secrets/credentials.yml" --ask-vault-pass
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
 #
 # Tags: red_team
 # =============================================================================
@@ -58,7 +58,7 @@
   tags: [red_team]
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   vars:
     red_team_action: "{{ action | default('deploy') }}"
@@ -91,7 +91,7 @@
   tags: [red_team]
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   pre_tasks:
     - name: Import facts from controller

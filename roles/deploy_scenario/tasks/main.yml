@@ -165,7 +165,27 @@
     msg: "{{ (_tf_init.stdout_lines | default([])) + (_tf_init_online.stdout_lines | default([])) }}"
 
 # ----------------------------------------------------------------------------
-# Terraform apply
+# Terraform plan (idempotency check)
+# ----------------------------------------------------------------------------
+# Exit codes: 0 = no changes (already deployed), 1 = error, 2 = changes needed.
+# This avoids a redundant apply when all VMs already match the desired state.
+- name: Terraform plan (check if apply is needed)
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} plan -detailed-exitcode -input=false"
+    chdir: "{{ exercise_dir }}/terraform"
+  register: _tf_plan
+  changed_when: false
+  failed_when: _tf_plan.rc == 1
+
+- name: Report — all VMs already deployed (skipping apply)
+  ansible.builtin.debug:
+    msg: >-
+      Terraform state is up-to-date — all {{ _tf_vms | length }} VMs already deployed.
+      Skipping terraform apply.
+  when: _tf_plan.rc == 0
+
+# ----------------------------------------------------------------------------
+# Terraform apply (only when plan detects drift or new resources)
 # ----------------------------------------------------------------------------
 - name: Terraform apply
   ansible.builtin.command:
@@ -175,10 +195,12 @@
   changed_when: >-
     'Apply complete!' in _tf_apply.stdout and
     '0 added, 0 changed, 0 destroyed' not in _tf_apply.stdout
+  when: _tf_plan.rc == 2
 
 - name: Show Terraform apply output
   ansible.builtin.debug:
     msg: "{{ _tf_apply.stdout_lines }}"
+  when: _tf_plan.rc == 2
 
 # ----------------------------------------------------------------------------
 # Summary

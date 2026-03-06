@@ -36,38 +36,38 @@ resource "proxmox_virtual_environment_vm" "{{ vm.name | lower | regex_replace('[
   memory {
     dedicated = {{ vm.resources.memory_mb }}
   }
-{% if vm.cloud_init is defined %}
+{% if vm.ansible_group == 'workstations' %}
 
-  # Cloud-init: static IP assignment via Proxmox cloud-init drive.
-  # Consumed by Cloudbase-Init (Windows) or cloud-init (Linux) on first boot.
-  initialization {
-    ip_config {
-      ipv4 {
-        address = "{{ vm.cloud_init.ip }}/{{ vm.cloud_init.cidr }}"
-        gateway = "{{ vm.cloud_init.gateway }}"
-      }
-    }
-{% if vm.cloud_init.nameserver is defined %}
-    dns {
-      servers = ["{{ vm.cloud_init.nameserver }}"]
-    }
-{% endif %}
-  }
-{% endif %}
-{% if vm.network is defined and vm.network.additional_nics | default([]) | length > 0 %}
-
-  # NIC layout: net0 = management (Proxmox access / Ansible); net1+ = exercise bridges.
-  # All network_device blocks must be specified when any are defined — bpg/proxmox
-  # replaces the full NIC list rather than merging with the template's NICs.
+  # Workstations: net0 directly on exercise bridge — no Layer0 bootstrap.
+  # Clients receive IP from the domain DHCP server (active after Phase 6).
+  # No NIC migration required; lifecycle does NOT ignore network_device.
   network_device {
-    # net0 — management NIC (inherits template config, re-declared to allow adding net1+)
-    bridge   = "{{ vm_management_bridge }}"
+    # net0 — {{ vm.network.additional_nics[0].bridge }} (exercise bridge; DHCP from domain)
+    bridge   = "{{ vm.network.additional_nics[0].bridge }}"
+    model    = "{{ vm.network.additional_nics[0].model | default('virtio') }}"
+    firewall = false
+  }
+
+{% elif template_registry[vm.template].os_type in ['windows', 'linux'] %}
+
+  # Bootstrap NIC on Layer0 — VM receives DHCP IP for initial WinRM/SSH access.
+  # Ansible configures the static exercise IP via WinRM, then migrates this NIC
+  # to the exercise bridge via Proxmox API. lifecycle.ignore_changes prevents
+  # Terraform from reverting Ansible's NIC migration on subsequent applies.
+  network_device {
+    # net0 — Layer0 bootstrap (Ansible migrates to {{ vm.network.additional_nics[0].bridge | default('exercise bridge') }})
+    bridge   = "{{ proxmox_layer0_bridge }}"
     model    = "virtio"
     firewall = false
   }
+
+{% elif vm.network is defined and vm.network.additional_nics | default([]) | length > 0 %}
+
+  # VyOS / multi-NIC VMs: all exercise NICs specified directly.
+  # Bootstrap is via QEMU guest-exec (vbash/iproute2) — no Layer0 NIC needed.
 {% for nic in vm.network.additional_nics %}
   network_device {
-    # net{{ nic.nic_id }} — {{ nic.bridge }}
+    # net{{ loop.index0 }} — {{ nic.bridge }}
     bridge   = "{{ nic.bridge }}"
     model    = "{{ nic.model | default('virtio') }}"
     firewall = {{ 'true' if nic.firewall | default(false) | bool else 'false' }}
@@ -75,9 +75,16 @@ resource "proxmox_virtual_environment_vm" "{{ vm.name | lower | regex_replace('[
 {% endfor %}
 {% endif %}
 
-  # VMs are left powered-off after deployment.
-  # The vm_power_management role handles power-on after inventory_refresh.
+{% if vm.ansible_group == 'workstations' %}
+  # Workstations: remain powered off at clone time.
+  # Powered on by workstation_configuration (Phase 7) after DHCP scope is active.
   started = false
+{% else %}
+  # All other VMs: power on immediately — exercise bridges exist at clone time
+  # (Phase 1.5 creates them before Terraform). VyOS and Windows/Linux servers
+  # all boot immediately; vm_power_management (Phase 2b) waits for connectivity.
+  started = true
+{% endif %}
 
   # Use standard VGA display — avoids inheriting SPICE/QXL from the Packer template.
   vga {
@@ -85,7 +92,9 @@ resource "proxmox_virtual_environment_vm" "{{ vm.name | lower | regex_replace('[
   }
 
   lifecycle {
-    ignore_changes = [started]
+    # Windows/Linux servers: ignore network_device — Ansible migrates net0 to exercise bridge.
+    # Workstations and VyOS: NIC config is fixed at clone time, no migration needed.
+    ignore_changes = [started{% if template_registry[vm.template].os_type in ['windows', 'linux'] and vm.ansible_group != 'workstations' %}, network_device{% endif %}]
   }
 }
 {% endfor %}

@@ -14,12 +14,12 @@
 #   # Deploy
 #   ansible-playbook playbooks/vm_management.yml \
 #     -e "exercise=OBSIDIAN_DAGGER action=deploy" \
-#     -e "@secrets/credentials.yml" --ask-vault-pass
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
 #
 #   # Destroy
 #   ansible-playbook playbooks/vm_management.yml \
 #     -e "exercise=OBSIDIAN_DAGGER action=destroy" \
-#     -e "@secrets/credentials.yml" --ask-vault-pass
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
 # =============================================================================
 
 # ----------------------------------------------------------------------------
@@ -43,7 +43,7 @@
   tags: [terraform, vms]
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   vars:
     vm_action: "{{ action | default('deploy') }}"

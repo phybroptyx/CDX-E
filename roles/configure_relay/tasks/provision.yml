@@ -1,0 +1,113 @@
+---
+# =============================================================================
+# configure_relay: provision
+# =============================================================================
+# First-time OS configuration for CDX-RELAY (Debian 13).
+# Idempotent — safe to re-run.
+#
+# Actions:
+#   - Set hostname to cdx-relay
+#   - Deploy /etc/network/interfaces (eth0 static + eth1 static)
+#   - Enable ip_forward via sysctl.d
+#   - Install and configure dante-server (SOCKS5 proxy on port 1080)
+#   - Deploy nftables base ruleset (inter-segment isolation)
+#   - Harden SSH (disable password auth, enable pubkey)
+# =============================================================================
+
+# --- Hostname ---
+- name: Set relay hostname
+  ansible.builtin.hostname:
+    name: cdx-relay
+
+- name: Update /etc/hosts with relay FQDN
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1'
+    line: "127.0.1.1  cdx-relay  cdx-relay.cdx.lab"
+
+# --- Static networking ---
+- name: Deploy /etc/network/interfaces (eth0 + eth1)
+  ansible.builtin.template:
+    src: interfaces.j2
+    dest: /etc/network/interfaces
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart networking
+
+# --- ip_forward ---
+- name: Deploy ip_forward sysctl configuration
+  ansible.builtin.template:
+    src: sysctl-relay.conf.j2
+    dest: /etc/sysctl.d/99-cdx-relay.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Apply sysctl settings immediately
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/99-cdx-relay.conf
+  changed_when: false
+
+# --- SOCKS5 proxy (dante-server) ---
+- name: Install dante-server
+  ansible.builtin.apt:
+    name: dante-server
+    state: present
+    update_cache: true
+
+- name: Deploy danted.conf (SOCKS5 configuration)
+  ansible.builtin.template:
+    src: danted.conf.j2
+    dest: /etc/danted.conf
+    owner: root
+    group: root
+    mode: '0640'
+  notify: restart danted
+
+- name: Enable and start danted
+  ansible.builtin.systemd:
+    name: danted
+    state: started
+    enabled: true
+
+# --- nftables ---
+- name: Deploy nftables base ruleset
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: '0640'
+  notify: reload nftables
+
+- name: Enable and start nftables
+  ansible.builtin.systemd:
+    name: nftables
+    state: started
+    enabled: true
+
+# --- SSH hardening ---
+- name: Disable SSH password authentication
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PasswordAuthentication'
+    line: 'PasswordAuthentication no'
+  notify: restart sshd
+
+- name: Enable SSH public key authentication
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PubkeyAuthentication'
+    line: 'PubkeyAuthentication yes'
+  notify: restart sshd
+
+# --- Flush handlers before verifying ---
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify relay SSH is reachable post-configuration
+  ansible.builtin.wait_for:
+    host: "{{ relay_management_ip }}"
+    port: 22
+    timeout: 60
+  delegate_to: localhost

@@ -6,11 +6,18 @@
 # connectivity before returning control to the pipeline.
 #
 # Readiness gates (in order):
-#   1. VM reaches 'running' state via proxmox_kvm (state: started)
-#   2. QEMU guest agent responds (Windows + Linux; skipped for VyOS)
-#   3. QEMU guest agent network query — discovers actual management IP (Layer0 DHCP)
-#   4. Port open: WinRM 5985 (Windows) or SSH 22 (Linux/VyOS)
-#      — uses discovered management IP, NOT cloud_init.ip (which is the exercise-network IP)
+#   1. VM reaches 'running' state via Proxmox API (status/start)
+#   2. QEMU guest agent responds (all VMs; confirms OS has booted)
+#   3. Port open: WinRM 5985 (Windows) or SSH 22 (Linux/VyOS)
+#      — uses cloud_init.ip (exercise-network static IP) as ansible_host.
+#      — relay SSH ProxyJump / SOCKS5 proxy routes these connections.
+#
+# Management connectivity model (post relay-cutover):
+#   Exercise VMs have NO Layer0 management NIC. The Ansible controller (ACN)
+#   reaches them via the CDX-RELAY at 10.0.0.10:
+#     Linux/VyOS : SSH ProxyJump through relay
+#     Windows    : WinRM via relay SOCKS5 proxy (port 1080)
+#   ansible_host is set to cloud_init.ip — the exercise-network static IP.
 #
 # Expects facts set by read_exercise_config (and optionally read_apt_config/read_soc_layout):
 #   virtual_machines — scenario VM objects (used when target_tier is unset)
@@ -46,11 +53,6 @@
 # ----------------------------------------------------------------------------
 # Resolve effective VM list based on target_tier
 # ----------------------------------------------------------------------------
-# target_tier is set by the calling playbook:
-#   (unset)       → virtual_machines  (scenario VMs — default when called from vm_power_management.yml)
-#   'red_team'    → apt_vms           (APT adversary VMs from read_apt_config)
-#   'blue_team'   → soc_vms           (SOC layout VMs from read_soc_layout)
-
 - name: Resolve effective VM list for target tier
   ansible.builtin.set_fact:
     _effective_vms: >-
@@ -62,17 +64,21 @@
         {{ virtual_machines }}
       {%- endif -%}
 
+# Exclude groups listed in vm_skip_groups (e.g. workstations in Phase 2b).
+- name: Apply vm_skip_groups filter to effective VM list
+  ansible.builtin.set_fact:
+    _effective_vms: >-
+      {{ _effective_vms | rejectattr('ansible_group', 'in', vm_skip_groups) | list }}
+  when: vm_skip_groups | length > 0
+
 # ----------------------------------------------------------------------------
 # Categorize VMs by OS type
 # ----------------------------------------------------------------------------
-# Build three lists from template_registry so we don't rely on hostvars
-# (which may not be populated until after inventory_refresh runs).
-
 - name: Initialize VM category lists
   ansible.builtin.set_fact:
-    _vms_windows:    []   # Windows — WinRM + QEMU agent
-    _vms_ssh:        []   # Linux + VyOS — SSH port wait
-    _vms_agent_poll: []   # QEMU agent capable — Windows + Linux (not VyOS)
+    _vms_windows:    []   # Windows — WinRM port wait via SOCKS5
+    _vms_ssh:        []   # Linux + VyOS — SSH port wait via ProxyJump
+    _vms_agent_poll: []   # QEMU agent capable — Windows + Linux + VyOS
 
 - name: Categorize Windows VMs
   ansible.builtin.set_fact:
@@ -105,9 +111,9 @@
         Exercise   : {{ scenario.exercise.name }}
         Tier       : {{ target_tier | default('scenario') }}
         Total VMs  : {{ _effective_vms | length }}
-        Windows    : {{ _vms_windows | length }}    (WinRM port 5985 + QEMU agent)
-        Linux/VyOS : {{ _vms_ssh | length }}         (SSH port 22; QEMU agent where supported)
-        Agent poll : {{ _vms_agent_poll | length }}  (all VMs with QEMU guest agent — Windows, Linux, VyOS)
+        Windows    : {{ _vms_windows | length }}    (WinRM port 5985 via relay SOCKS5)
+        Linux/VyOS : {{ _vms_ssh | length }}         (SSH port 22 via relay ProxyJump)
+        Agent poll : {{ _vms_agent_poll | length }}  (QEMU guest agent boot confirmation)
 
 # ----------------------------------------------------------------------------
 # Query current VM power state (idempotency)
@@ -166,7 +172,7 @@
   loop_control:
     label: "{{ item.name }} (vmid={{ item.vmid }})"
   register: _power_on_results
-  ignore_errors: true   # network/auth errors still surfaced via warn task
+  ignore_errors: true
 
 - name: Warn on any power-on failures
   ansible.builtin.debug:
@@ -187,10 +193,12 @@
   when: _vms_to_start | length > 0
 
 # ----------------------------------------------------------------------------
-# Poll QEMU guest agent (Windows + Linux VMs; VyOS skipped)
+# Poll QEMU guest agent (confirms OS has booted — all VM types)
 # ----------------------------------------------------------------------------
 # POST /agent/ping returns 200 once the guest agent is responsive.
-# Indicates the OS has booted far enough for management to begin.
+# This is the boot-complete signal for exercise VMs. Since VMs no longer have
+# a Layer0 management NIC, the guest agent (via virtio-serial) is the only
+# reliable boot indicator available before exercise network routes are up.
 - name: Poll QEMU guest agent readiness
   ansible.builtin.uri:
     url: >-
@@ -211,20 +219,112 @@
   until: _agent_poll is not failed
 
 # ----------------------------------------------------------------------------
-# Discover actual VM IPs via QEMU guest agent
+# Network bootstrap
 # ----------------------------------------------------------------------------
-# Query the guest agent for actual assigned IPs before attempting port waits.
-# This surfaces cloud-init networking failures immediately rather than after
-# a 300-second blind timeout. If the discovered IP differs from cloud_init.ip,
-# a warning is emitted so the operator can investigate.
+# Windows VMs start with net0 on Layer0 (DHCP). Bootstrap flow:
+#   1. Poll agent/network-get-interfaces until DHCP IP appears
+#   2. add_host with DHCP IP — direct WinRM from ACN (no SOCKS5 proxy)
+#   3. wait_for WinRM:5985 on Layer0
+#   4. Configure static exercise IP via win_powershell (delegate_to VM)
+#      — Static IP added BEFORE DHCP IP removed; WinRM drop is expected.
+#   5. Proxmox API: migrate net0 from Layer0 → exercise bridge
+#   6. Relay wait_for + inventory refresh (handled in post-migrate section)
+#
+# Linux: guest-exec iproute2 (unchanged — Layer0 bootstrap not yet implemented)
+# VyOS:  guest-exec vbash    (unchanged — multi-NIC VM, all NICs set in Terraform)
+# ----------------------------------------------------------------------------
 
-# Cloud-init applies config on first boot and may trigger a reboot, causing
-# the guest agent to disappear briefly (Proxmox returns HTTP 500 "QEMU guest
-# agent is not running"). Rather than a fixed pause that may be too short,
-# this task retries until all agents respond with 200. Status 500 is accepted
-# (non-failure) so each attempt completes the full loop before the until check.
+- name: Initialize network bootstrap category lists
+  ansible.builtin.set_fact:
+    _vms_win_static:          []   # Windows with cloud_init.ip — DHCP→WinRM→static→migrate
+    _vms_win_legacy_static:   []   # Windows 2008R2/Win7 with cloud_init.ip — WMI path
+    _vms_win_no_ip:           []   # Windows without cloud_init.ip — NIC migrate only
+    _vms_linux_gx:            []   # Linux with static IP — guest-exec iproute2
+    _vms_vyos_gx:             []   # VyOS — guest-exec vbash CLI bootstrap
 
-- name: Query QEMU guest agent for actual VM IP addresses
+- name: Categorize — modern Windows with static IP (DHCP bootstrap)
+  ansible.builtin.set_fact:
+    _vms_win_static: "{{ _vms_win_static + [item] }}"
+  when:
+    - template_registry[item.template].os_type == 'windows'
+    - item.template not in ['server_2008r2', 'server_2008r2_core', 'windows_7']
+    - (item.cloud_init | default({})).ip | default('') | length > 0
+  loop: "{{ _effective_vms }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Categorize — legacy Windows with static IP (DHCP bootstrap)
+  ansible.builtin.set_fact:
+    _vms_win_legacy_static: "{{ _vms_win_legacy_static + [item] }}"
+  when:
+    - template_registry[item.template].os_type == 'windows'
+    - item.template in ['server_2008r2', 'server_2008r2_core', 'windows_7']
+    - (item.cloud_init | default({})).ip | default('') | length > 0
+  loop: "{{ _effective_vms }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Categorize — Windows without static IP (NIC migrate only)
+  ansible.builtin.set_fact:
+    _vms_win_no_ip: "{{ _vms_win_no_ip + [item] }}"
+  when:
+    - template_registry[item.template].os_type == 'windows'
+    - (item.cloud_init | default({})).ip | default('') | length == 0
+  loop: "{{ _effective_vms }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Categorize — Linux with static IP (guest-exec)
+  ansible.builtin.set_fact:
+    _vms_linux_gx: "{{ _vms_linux_gx + [item] }}"
+  when:
+    - template_registry[item.template].os_type == 'linux'
+    - (item.cloud_init | default({})).ip | default('') | length > 0
+  loop: "{{ _effective_vms }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Categorize — VyOS with network_bootstrap (guest-exec)
+  ansible.builtin.set_fact:
+    _vms_vyos_gx: "{{ _vms_vyos_gx + [item] }}"
+  when:
+    - template_registry[item.template].os_type == 'vyos'
+    - item.network_bootstrap is defined
+  loop: "{{ _effective_vms }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Show network bootstrap plan
+  ansible.builtin.debug:
+    msg: >-
+      Network bootstrap:
+        Win modern (DHCP→static) : {{ _vms_win_static | length }} VM(s)
+        Win legacy (DHCP→static) : {{ _vms_win_legacy_static | length }} VM(s)
+        Win no-IP  (migrate only): {{ _vms_win_no_ip | length }} VM(s)
+        Linux      (guest-exec)  : {{ _vms_linux_gx | length }} VM(s)
+        VyOS       (guest-exec)  : {{ _vms_vyos_gx | length }} VM(s)
+
+# ── Windows: Layer0 DHCP discovery → WinRM static IP → NIC migration ─────────
+
+# Sysprep settle: the QEMU guest agent responds during the first Sysprep boot
+# pass (Specialize), but the system then reboots into its final state.  Waiting
+# here ensures the DHCP poll and WinRM tasks run against the stable post-Sysprep
+# system rather than the transient first-boot environment.
+# Only runs when Windows VMs were actually powered on (not pre-running).
+- name: Sysprep settle delay (allow Windows VMs to complete initial reboot)
+  ansible.builtin.pause:
+    seconds: "{{ windows_sysprep_settle_delay }}"
+  when: >-
+    _vms_windows | length > 0 and
+    (_vms_to_start | selectattr('name', 'in', _vms_windows | map(attribute='name') | list) | list | length > 0)
+
+- name: Initialize DHCP IP registry
+  ansible.builtin.set_fact:
+    _vm_dhcp_ips: {}
+
+# Poll agent/network-get-interfaces (read-only QEMU GA call) until a valid
+# DHCP address (non-loopback, non-APIPA) appears on any interface.
+- name: Poll Layer0 DHCP address — all Windows VMs
   ansible.builtin.uri:
     url: >-
       {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
@@ -234,125 +334,331 @@
       Authorization: >-
         PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
     validate_certs: "{{ proxmox_validate_certs }}"
-    status_code: [200, 500]   # 500 = agent not running (cloud-init reboot in progress)
-  loop: "{{ _effective_vms }}"
-  loop_control:
-    label: "{{ item.name }} (vmid={{ item.vmid }})"
-  register: _agent_ip_results
-  retries: "{{ guest_agent_poll_retries }}"
-  delay:   "{{ guest_agent_poll_interval }}"
-  until: _agent_ip_results.status | default(0) == 200
-  ignore_errors: true   # VMs that cannot respond at all do not block the pipeline
-
-- name: Build discovered IP map (vmid → first non-loopback IPv4)
-  ansible.builtin.set_fact:
-    _discovered_ips: >-
-      {%- set ns = namespace(m={}) -%}
-      {%- for result in _agent_ip_results.results -%}
-        {%- if result is not failed and result.json is defined -%}
-          {%- for iface in result.json.data.result | default([]) -%}
-            {%- for addr in iface['ip-addresses'] | default([]) -%}
-              {%- if addr['ip-address-type'] == 'ipv4'
-                     and not addr['ip-address'].startswith('127.')
-                     and not addr['ip-address'].startswith('169.254.')
-                     and ns.m[result.item.vmid | string] is not defined -%}
-                {%- set _ = ns.m.update({result.item.vmid | string: addr['ip-address']}) -%}
-              {%- endif -%}
-            {%- endfor -%}
-          {%- endfor -%}
-        {%- endif -%}
-      {%- endfor -%}
-      {{ ns.m }}
-
-- name: Show discovered VM IPs and flag cloud-init mismatches
-  ansible.builtin.debug:
-    msg: >-
-      {{ item.name }} (vmid={{ item.vmid }}):
-      expected={{ item.cloud_init.ip | default('DHCP') }}
-      actual={{ _discovered_ips[item.vmid | string] | default('NOT FOUND') }}
-      {%- if (item.cloud_init.ip | default('')) | length > 0
-             and _discovered_ips[item.vmid | string] is defined
-             and _discovered_ips[item.vmid | string] != item.cloud_init.ip %}
-      *** IP MISMATCH — cloud-init may not have applied (CloudbaseInit installed?) ***
-      {%- endif %}
-  loop: "{{ _effective_vms }}"
+    status_code: [200]
+  loop: "{{ _vms_win_static + _vms_win_legacy_static + _vms_win_no_ip }}"
   loop_control:
     label: "{{ item.name }}"
+  register: _dhcp_poll
+  retries: "{{ dhcp_discovery_retries }}"
+  delay:   "{{ dhcp_discovery_delay }}"
+  until: >-
+    _dhcp_poll.status == 200 and
+    (_dhcp_poll.json.data.result | default([])
+      | selectattr('ip-addresses', 'defined')
+      | map(attribute='ip-addresses') | flatten
+      | selectattr('ip-address-type', 'equalto', 'ipv4')
+      | rejectattr('ip-address', 'match', '^127\\.')
+      | rejectattr('ip-address', 'match', '^169\\.254\\.')
+      | list | length > 0)
+  when: (_vms_win_static + _vms_win_legacy_static + _vms_win_no_ip) | length > 0
 
-# ----------------------------------------------------------------------------
-# Wait for management connectivity (discovered management IP via guest agent)
-# ----------------------------------------------------------------------------
-# cloud_init.ip is the EXERCISE-network static IP (e.g. the SDP segment).
-# The MANAGEMENT IP (on Layer0/vm_management_bridge) is DHCP-assigned and
-# discovered above via the QEMU guest agent. That is the IP the Ansible
-# controller uses to connect — use it here, not cloud_init.ip.
-# Skip VMs whose management IP could not be discovered (agent query failed).
+- name: Extract DHCP IPs into registry
+  ansible.builtin.set_fact:
+    _vm_dhcp_ips: >-
+      {{ _vm_dhcp_ips | combine({item.item.name: (
+          item.json.data.result
+          | selectattr('ip-addresses', 'defined')
+          | map(attribute='ip-addresses') | flatten
+          | selectattr('ip-address-type', 'equalto', 'ipv4')
+          | rejectattr('ip-address', 'match', '^127\\.')
+          | rejectattr('ip-address', 'match', '^169\\.254\\.')
+          | map(attribute='ip-address') | first
+        )}) }}
+  when: not item.failed | default(false)
+  loop: "{{ _dhcp_poll.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name | default('?') }}"
 
-- name: Wait for WinRM connectivity (Windows, management IP from guest agent)
+- name: Report discovered Layer0 DHCP IPs
+  ansible.builtin.debug:
+    msg: "{{ item.key }} → {{ item.value }}"
+  loop: "{{ _vm_dhcp_ips | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Pause 5 seconds after DHCP IP discovery
+  ansible.builtin.pause:
+    seconds: 5
+  when: _vm_dhcp_ips | length > 0
+
+# Register bootstrap hosts: direct WinRM from ACN (no SOCKS5 proxy).
+# ansible_winrm_proxy_url: "" overrides the group_vars value for this phase.
+- name: Add Windows VMs to bootstrap inventory (Layer0 DHCP — direct WinRM)
+  ansible.builtin.add_host:
+    name: "{{ item.item.name }}"
+    ansible_host:            "{{ _vm_dhcp_ips[item.item.name] }}"
+    ansible_connection:      winrm
+    ansible_winrm_scheme:    http
+    ansible_port:            5985
+    ansible_user:            "{{ cloud_init_username | default('cdxadmin') }}"
+    ansible_password:        "{{ vault_cloud_init_password }}"
+    ansible_winrm_transport: ntlm
+    ansible_winrm_proxy_url: ""
+    groups:
+      - win_bootstrap
+  when:
+    - not item.failed | default(false)
+    - _vm_dhcp_ips[item.item.name] is defined
+  loop: "{{ _dhcp_poll.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name | default('?') }}"
+
+# ACN is on Layer0; wait_for runs locally — no delegate_to needed.
+- name: Wait for WinRM on Layer0 (Windows VMs with static IP)
   ansible.builtin.wait_for:
-    host:    "{{ _discovered_ips[item.vmid | string] }}"
+    host:    "{{ _vm_dhcp_ips[item.name] }}"
+    port:    5985
+    timeout: "{{ layer0_port_wait_timeout }}"
+    sleep:   "{{ layer0_port_wait_sleep }}"
+  loop: "{{ _vms_win_static + _vms_win_legacy_static }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: _vm_dhcp_ips is defined and item.name in _vm_dhcp_ips
+
+# Add static IP first — WinRM connection stays on the DHCP IP throughout.
+# The NIC migration (next task) detaches Layer0 after this task completes.
+#
+# NOTE: delegate_to is intentionally NOT used here. The task vars (ansible_host,
+# ansible_connection, etc.) direct the connection to the Windows VM's DHCP IP
+# from the ACN (localhost) context, keeping _vm_dhcp_ips in scope.
+# Using delegate_to: item.name causes task vars to be evaluated in the delegated
+# host's variable scope where _vm_dhcp_ips is undefined.
+- name: Configure static exercise IP — modern Windows (win_powershell / WinRM)
+  ansible.windows.win_powershell:
+    script: |
+      $a = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1
+      New-NetIPAddress -InterfaceAlias $a.Name `
+        -IPAddress '{{ item.cloud_init.ip }}' `
+        -PrefixLength {{ item.cloud_init.cidr }} `
+        -DefaultGateway '{{ item.cloud_init.gateway }}' `
+        -ErrorAction SilentlyContinue
+      {% if item.cloud_init.nameserver is defined -%}
+      Set-DnsClientServerAddress -InterfaceAlias $a.Name `
+        -ServerAddresses '{{ item.cloud_init.nameserver }}'
+      {% endif -%}
+  loop: "{{ _vms_win_static }}"
+  loop_control:
+    label: "{{ item.name }} → {{ item.cloud_init.ip }}/{{ item.cloud_init.cidr }}"
+  vars:
+    ansible_host:            "{{ _vm_dhcp_ips[item.name] }}"
+    ansible_connection:      winrm
+    ansible_winrm_scheme:    http
+    ansible_port:            5985
+    ansible_user:            "{{ cloud_init_username | default('cdxadmin') }}"
+    ansible_password:        "{{ vault_cloud_init_password }}"
+    ansible_winrm_transport: ntlm
+    ansible_winrm_proxy_url: ""
+  when: _vm_dhcp_ips is defined and item.name in _vm_dhcp_ips
+  ignore_errors: true
+
+# EnableStatic() atomically replaces the DHCP IP with the static IP.
+# WinRM (on DHCP IP) drops during this call — expected, ignore_errors handles it.
+- name: Configure static exercise IP — legacy Windows (WMI / WinRM)
+  ansible.windows.win_powershell:
+    script: |
+      $a = Get-WmiObject Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled } | Select-Object -First 1
+      $null = $a.EnableStatic(@('{{ item.cloud_init.ip }}'), @('{{ _mask }}'))
+      $null = $a.SetGateways(@('{{ item.cloud_init.gateway }}'), @(1))
+  loop: "{{ _vms_win_legacy_static }}"
+  loop_control:
+    label: "{{ item.name }} → {{ item.cloud_init.ip }}/{{ item.cloud_init.cidr }}"
+  vars:
+    ansible_host:            "{{ _vm_dhcp_ips[item.name] }}"
+    ansible_connection:      winrm
+    ansible_winrm_scheme:    http
+    ansible_port:            5985
+    ansible_user:            "{{ cloud_init_username | default('cdxadmin') }}"
+    ansible_password:        "{{ vault_cloud_init_password }}"
+    ansible_winrm_transport: ntlm
+    ansible_winrm_proxy_url: ""
+    _mask_map:
+      '8':  '255.0.0.0'
+      '16': '255.255.0.0'
+      '24': '255.255.255.0'
+      '25': '255.255.255.128'
+      '26': '255.255.255.192'
+      '28': '255.255.255.240'
+      '30': '255.255.255.252'
+    _mask: "{{ _mask_map[item.cloud_init.cidr | string] | default('255.255.255.0') }}"
+  when: _vm_dhcp_ips is defined and item.name in _vm_dhcp_ips
+  ignore_errors: true
+
+# Brief pause for static IP to stabilise before NIC hot-migration.
+- name: Pause for static IP stabilisation
+  ansible.builtin.pause:
+    seconds: 5
+  when: (_vms_win_static + _vms_win_legacy_static) | length > 0
+
+# Migrate net0 from Layer0 (bootstrap) to the exercise bridge.
+# lifecycle.ignore_changes in Terraform prevents reverting this on next apply.
+- name: Migrate net0 — Layer0 → exercise bridge (all Windows VMs)
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/config
+    method: PUT
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    body_format: form-urlencoded
+    body:
+      net0: "virtio,bridge={{ item.network.additional_nics[0].bridge }},firewall=0"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  loop: "{{ _vms_win_static + _vms_win_legacy_static + _vms_win_no_ip }}"
+  loop_control:
+    label: "{{ item.name }} → {{ item.network.additional_nics[0].bridge | default('?') }}"
+  when: item.network.additional_nics | default([]) | length > 0
+
+# ── Linux: guest-exec iproute2 ────────────────────────────────────────────────
+- name: Guest-exec — configure static IP (Linux — iproute2)
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/agent/exec
+    method: POST
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    body_format: json
+    body:
+      command:
+        - "/bin/sh"
+        - "-c"
+        - "{{ _sh_cmd }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  vars:
+    _sh_cmd: |-
+      IFACE=$(ls /sys/class/net | grep -v '^lo$' | head -1); ip link set up dev $IFACE; ip addr flush dev $IFACE; ip addr add {{ item.cloud_init.ip }}/{{ item.cloud_init.cidr }} dev $IFACE; ip route replace default via {{ item.cloud_init.gateway }} 2>/dev/null; true
+  loop: "{{ _vms_linux_gx }}"
+  loop_control:
+    label: "{{ item.name }} → {{ item.cloud_init.ip }}/{{ item.cloud_init.cidr }}"
+  register: _gx_linux
+  ignore_errors: true
+
+- name: Guest-exec — bootstrap network interface (VyOS — vbash CLI)
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/agent/exec
+    method: POST
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    body_format: json
+    body:
+      command:
+        - "vbash"
+        - "-c"
+        - "{{ _vyos_cmd }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  vars:
+    _vyos_cmd: |-
+      source /opt/vyatta/etc/functions/script-template; configure; set interfaces ethernet {{ item.network_bootstrap.interface }} address {{ item.network_bootstrap.ip }}/{{ item.network_bootstrap.cidr }}{% if item.network_bootstrap.gateway is defined %}; set protocols static route 0.0.0.0/0 next-hop {{ item.network_bootstrap.gateway }}{% endif %}; commit; save; exit
+  loop: "{{ _vms_vyos_gx }}"
+  loop_control:
+    label: "{{ item.name }} → {{ item.network_bootstrap.ip }}/{{ item.network_bootstrap.cidr }}"
+  register: _gx_vyos
+  ignore_errors: true
+
+# Collect PIDs from Linux and VyOS exec calls only.
+# Windows bootstrap no longer uses guest-exec — DHCP+WinRM+NIC-migrate instead.
+- name: Initialize exec PID collection
+  ansible.builtin.set_fact:
+    _gx_pids: []
+
+- name: Collect exec PIDs — Linux
+  ansible.builtin.set_fact:
+    _gx_pids: >-
+      {{ _gx_pids + [{'name': item.item.name, 'vmid': item.item.vmid,
+         'node': (item.item.proxmox | default({})).node | default(scenario.proxmox.node),
+         'pid': item.json.data.pid}] }}
+  when: not item.failed | default(false) and item.json.data.pid is defined
+  loop: "{{ _gx_linux.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name | default('?') }}"
+
+- name: Collect exec PIDs — VyOS
+  ansible.builtin.set_fact:
+    _gx_pids: >-
+      {{ _gx_pids + [{'name': item.item.name, 'vmid': item.item.vmid,
+         'node': (item.item.proxmox | default({})).node | default(scenario.proxmox.node),
+         'pid': item.json.data.pid}] }}
+  when: not item.failed | default(false) and item.json.data.pid is defined
+  loop: "{{ _gx_vyos.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name | default('?') }}"
+
+# Poll GET /agent/exec-status?pid=N until exited=1 (Linux + VyOS only).
+# Accept 500 "does not exist" as terminal success — fast-exiting processes
+# are cleaned from the GA tracking table before the first poll arrives.
+- name: Poll guest-exec completion (Linux + VyOS)
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ item.node }}/qemu/{{ item.vmid }}/agent/exec-status?pid={{ item.pid }}
+    method: GET
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 500]
+  loop: "{{ _gx_pids }}"
+  loop_control:
+    label: "{{ item.name }} (pid={{ item.pid }})"
+  register: _gx_poll
+  until: >-
+    (_gx_poll.status == 200 and _gx_poll.json.data.exited | default(0) | int == 1)
+    or (_gx_poll.status == 500 and 'does not exist' in (_gx_poll.json.message | default('')))
+  retries: 30
+  delay: 2
+  when: _gx_pids | length > 0
+
+# ----------------------------------------------------------------------------
+# Populate inventory with cloud_init.ip as ansible_host
+# ----------------------------------------------------------------------------
+# cloud_init.ip is the exercise-network static IP defined in vms.yaml.
+# This is the IP the Ansible controller uses to reach each VM:
+#   Linux/VyOS: SSH through relay ProxyJump (ansible_ssh_common_args set in group_vars)
+#   Windows:    WinRM through relay SOCKS5 proxy (ansible_winrm_proxy_* set in group_vars)
+- name: Update in-memory ansible_host with cloud_init.ip (exercise network IP)
+  ansible.builtin.add_host:
+    name: "{{ item.name }}"
+    ansible_host: "{{ item.cloud_init.ip }}"
+  loop: "{{ _effective_vms }}"
+  loop_control:
+    label: "{{ item.name }} → {{ item.cloud_init.ip | default('NO IP') }}"
+  when: item.cloud_init.ip is defined and item.cloud_init.ip | length > 0
+
+# ----------------------------------------------------------------------------
+# Wait for management connectivity via relay
+# ----------------------------------------------------------------------------
+# Port checks are delegated to the relay (not localhost/ACN) because ACN has
+# no exercise network routes. The relay has routes to all exercise segments.
+- name: Wait for WinRM connectivity (Windows VMs — via relay)
+  ansible.builtin.wait_for:
+    host:    "{{ item.cloud_init.ip }}"
     port:    5985
     timeout: "{{ vm_power_wait_timeout }}"
     sleep:   "{{ vm_power_wait_sleep }}"
   loop: "{{ _vms_windows }}"
   loop_control:
-    label: "{{ item.name }} → {{ _discovered_ips[item.vmid | string] | default('IP unknown') }}"
-  delegate_to: localhost
-  when: _discovered_ips[item.vmid | string] is defined
+    label: "{{ item.name }} → {{ item.cloud_init.ip | default('NO IP') }}"
+  delegate_to: cdx-relay
+  when: item.cloud_init.ip is defined and item.cloud_init.ip | length > 0
 
-- name: Wait for SSH connectivity (Linux/VyOS, management IP from guest agent)
+- name: Wait for SSH connectivity (Linux/VyOS VMs — via relay)
   ansible.builtin.wait_for:
-    host:    "{{ _discovered_ips[item.vmid | string] }}"
+    host:    "{{ item.cloud_init.ip }}"
     port:    22
     timeout: "{{ vm_power_wait_timeout }}"
     sleep:   "{{ vm_power_wait_sleep }}"
   loop: "{{ _vms_ssh }}"
   loop_control:
-    label: "{{ item.name }} → {{ _discovered_ips[item.vmid | string] | default('IP unknown') }}"
-  delegate_to: localhost
-  when: _discovered_ips[item.vmid | string] is defined
-
-# ----------------------------------------------------------------------------
-# Populate inventory with discovered management IPs
-# ----------------------------------------------------------------------------
-# ansible_host must be the Layer0 management IP (DHCP), not cloud_init.ip
-# (the exercise-network static IP). Write per-host host_vars files so the
-# correct ansible_host persists for standalone playbook runs. Also call
-# add_host to update the current in-memory inventory for the pipeline run.
-
-- name: Build management IP map (vm name → management IP)
-  ansible.builtin.set_fact:
-    _management_ip_map: >-
-      {%- set m = {} -%}
-      {%- for vm in _effective_vms -%}
-        {%- if _discovered_ips[vm.vmid | string] is defined -%}
-          {%- set _ = m.update({vm.name: _discovered_ips[vm.vmid | string]}) -%}
-        {%- endif -%}
-      {%- endfor -%}
-      {{ m }}
-
-- name: Update in-memory ansible_host with management IP (pipeline run)
-  ansible.builtin.add_host:
-    name: "{{ item.key }}"
-    ansible_host: "{{ item.value }}"
-  loop: "{{ _management_ip_map | dict2items }}"
-  loop_control:
-    label: "{{ item.key }} → {{ item.value }}"
-  when: _management_ip_map | length > 0
-
-- name: Persist management IP to host_vars (standalone run support)
-  ansible.builtin.copy:
-    content: |
-      # CDX-E management IP — auto-generated by vm_power_management
-      # Layer0 DHCP address discovered via QEMU guest agent for {{ item.key }}.
-      # Regenerated on each vm_power_management run. Do not edit manually.
-      ansible_host: "{{ item.value }}"
-    dest: "{{ playbook_dir }}/../inventory/host_vars/{{ item.key }}.yml"
-    mode: '0644'
-  loop: "{{ _management_ip_map | dict2items }}"
-  loop_control:
-    label: "{{ item.key }}.yml → {{ item.value }}"
-  when: _management_ip_map | length > 0
+    label: "{{ item.name }} → {{ item.cloud_init.ip | default('NO IP') }}"
+  delegate_to: cdx-relay
+  when: item.cloud_init.ip is defined and item.cloud_init.ip | length > 0
 
 # ----------------------------------------------------------------------------
 # Summary
@@ -361,12 +667,12 @@
   ansible.builtin.debug:
     msg: |
       VM power-on complete.
-      Exercise      : {{ scenario.exercise.name }}
-      Tier          : {{ target_tier | default('scenario') }}
-      Total VMs     : {{ _effective_vms | length }}
+      Exercise       : {{ scenario.exercise.name }}
+      Tier           : {{ target_tier | default('scenario') }}
+      Total VMs      : {{ _effective_vms | length }}
       Windows (WinRM): {{ _vms_windows | length }}
       Linux/VyOS (SSH): {{ _vms_ssh | length }}
-      Management IPs (Layer0, from guest agent):
+      Exercise IPs (cloud_init, routed via relay):
       {% for vm in _effective_vms %}
-        {{ vm.name }}: {{ _discovered_ips[vm.vmid | string] | default('NOT DISCOVERED') }}
+        {{ vm.name }}: {{ vm.cloud_init.ip | default('NO STATIC IP') }}
       {% endfor %}

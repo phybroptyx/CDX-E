@@ -16,7 +16,7 @@
 # Usage:
 #   ansible-playbook playbooks/vm_power_management.yml \
 #     -e "exercise=OBSIDIAN_DAGGER" \
-#     -e "@secrets/credentials.yml"
+#     -e "@../secrets/credentials.yml"
 # =============================================================================
 
 - name: VM Power Management
@@ -26,7 +26,7 @@
   tags: [power, vms]
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   pre_tasks:
     - name: "[preflight] Skip — destroy workflow, VMs are being torn down"

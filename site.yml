@@ -29,7 +29,7 @@
 #   always          - Exercise initiation (always runs)
 #   packer          - Phase 1:  Template deployment
 #   terraform       - Phase 2:  VM deploy/destroy + Phase 2a/2b
-#   network,sdn     - Phase 2.5: Bridge creation (before power-on) + Phase 3 (VyOS, after power-on)
+#   network,sdn     - Phase 1.5: Bridge creation + relay NICs (before VM deploy) + Phase 3 (VyOS config, after power-on)
 #   inventory       - Phase 2a: Inventory refresh
 #   power           - Phase 2b: VM power-on + connectivity wait
 #   domain          - Phase 4:  Active Directory deployment
@@ -59,19 +59,24 @@
 # Gates on: scenario.phases.packer
 - import_playbook: playbooks/template_deployment.yml
 
-# ── Phase 2: Virtual Machine Management (Terraform) ──────────────────────────
-# Deploys or destroys scenario VMs. VMs left powered off after deploy.
-# Gates on: scenario.phases.terraform
-- import_playbook: playbooks/vm_management.yml
-
-# ── Phase 2.5: Bridge Creation ───────────────────────────────────────────────
-# Creates exercise OVS bridges on Proxmox nodes before VMs are powered on.
-# Proxmox refuses to start a VM whose configured bridge does not exist.
-# networking_scope=bridges skips the VyOS config section — VMs not yet running.
+# ── Phase 1.5: Pre-deployment Networking ─────────────────────────────────────
+# Creates exercise OVS bridges and assigns relay NICs BEFORE VMs are deployed.
+# Proxmox validates all NIC bridges at VM start time — every bridge referenced
+# by any exercise VM must exist before terraform apply runs with started=true.
+# Relay NIC assignment (Play 3 in network_management.yml) also runs here so
+# the relay is fully configured before the first exercise VM comes online.
+# networking_scope=bridges skips the VyOS config section (VMs not yet deployed).
 # Gates on: scenario.phases.networking
 - import_playbook: playbooks/network_management.yml
   vars:
     networking_scope: bridges
+
+# ── Phase 2: Virtual Machine Management (Terraform) ──────────────────────────
+# Deploys or destroys scenario VMs. Bridges and relay NICs exist at this point,
+# so Windows/Linux VMs can boot immediately (started=true in the Terraform
+# template). VyOS VMs remain powered off (started=false) until Phase 2b.
+# Gates on: scenario.phases.terraform
+- import_playbook: playbooks/vm_management.yml
 
 # ── Phase 2a: Inventory Refresh ──────────────────────────────────────────────
 # Reads Terraform outputs + vms.yaml to write dynamic inventory.
@@ -80,10 +85,14 @@
 - import_playbook: playbooks/inventory_refresh.yml
 
 # ── Phase 2b: VM Power Management ────────────────────────────────────────────
-# Powers on all scenario VMs and waits for WinRM/SSH connectivity.
-# Must run after bridge creation (Phase 2.5) and inventory_refresh.
+# Powers on VyOS VMs (Windows/Linux already running from started=true) and
+# waits for WinRM/SSH connectivity. Bridges exist from Phase 1.5.
+# Workstations are excluded here — powered on by Phase 7 after the domain
+# DHCP scope is active and the enterprise network is fully reachable.
 # Gates on: scenario.phases.terraform
 - import_playbook: playbooks/vm_power_management.yml
+  vars:
+    vm_skip_groups: ['workstations']
 
 # ── Phase 3: Network Management ──────────────────────────────────────────────
 # Full scope: bridge creation is idempotent; primary purpose here is VyOS

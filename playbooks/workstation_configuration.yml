@@ -12,7 +12,7 @@
 # Usage:
 #   ansible-playbook playbooks/workstation_configuration.yml \
 #     -e "exercise=OBSIDIAN_DAGGER" \
-#     -e "@secrets/credentials.yml" --ask-vault-pass
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
 # =============================================================================
 
 # ----------------------------------------------------------------------------
@@ -35,7 +35,7 @@
   tags: [workstations, endpoints]
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   pre_tasks:
     - name: Import exercise facts from pre-play

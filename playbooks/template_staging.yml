@@ -14,13 +14,13 @@
 #   # Stage templates for a specific exercise (uses scenario.proxmox.node)
 #   ansible-playbook playbooks/template_staging.yml \
 #     -e "exercise=DC_303" \
-#     -e "@secrets/credentials.yml" --ask-vault-pass
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
 #
 #   # Stage to a specific node regardless of scenario default
 #   ansible-playbook playbooks/template_staging.yml \
 #     -e "exercise=DC_303" \
 #     -e "proxmox_node_override=cdx-pve-02" \
-#     -e "@secrets/credentials.yml" --ask-vault-pass
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
 # =============================================================================
 
 # ----------------------------------------------------------------------------
@@ -44,7 +44,7 @@
   tags: [staging, templates]
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   pre_tasks:
     - name: Import exercise facts from controller

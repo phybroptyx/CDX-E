@@ -102,7 +102,6 @@ network:
   exercise_vlans: []
 
   dns_servers:
-    - 192.168.1.1             # CDX-I DNS upstream
     - 68.27.129.71            # 303-DC-01 (active after Phase 4)
     - 68.27.129.72            # 303-DC-02 (active after Phase 4)
 
@@ -113,6 +112,20 @@ proxmox:
   node: cdx-pve-01
   storage: raid           # Clone destination — per-node RAID array
   pool: CDX_DEMO_DC303    # Proxmox resource pool override (default would be EX_DC_303)
+
+# -----------------------------------------------------------------------------
+# Relay NIC Assignment
+# -----------------------------------------------------------------------------
+# The relay receives one NIC on the enterprise bridge for this exercise.
+# This provides post-NIC-migration WinRM/SSH reachability to exercise VMs
+# without requiring Layer0 (which is detached from the NIC after bootstrap).
+relay:
+  nic_assignments:
+    - slot:   2
+      bridge: ex_dc303_in
+      ip:     "68.27.129.254"
+      cidr:   "24"
+  routes: []   # enterprise subnet is directly connected — no static routes needed
 
 # -----------------------------------------------------------------------------
 # Red Team Configuration (inactive for this scenario)

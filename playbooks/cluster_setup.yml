@@ -20,7 +20,7 @@
 #
 # Usage:
 #   ansible-playbook playbooks/cluster_setup.yml \
-#     -e "@secrets/credentials.yml" --ask-vault-pass
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
 # =============================================================================
 
 - name: Configure Proxmox Cluster Nodes
@@ -29,7 +29,7 @@
   gather_facts: false
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   roles:
     - configure_proxmox_nodes

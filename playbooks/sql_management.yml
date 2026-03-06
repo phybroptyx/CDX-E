@@ -20,7 +20,7 @@
 # Usage:
 #   ansible-playbook playbooks/sql_management.yml \
 #     -e "exercise=OBSIDIAN_DAGGER" \
-#     -e "@secrets/credentials.yml" --ask-vault-pass
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
 # =============================================================================
 
 # ----------------------------------------------------------------------------
@@ -43,7 +43,7 @@
   tags: [sql, services]
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   pre_tasks:
     - name: Import exercise facts from controller

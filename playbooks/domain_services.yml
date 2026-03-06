@@ -14,7 +14,7 @@
 # Usage:
 #   ansible-playbook playbooks/domain_services.yml \
 #     -e "exercise=OBSIDIAN_DAGGER" \
-#     -e "@secrets/credentials.yml" --ask-vault-pass
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
 # =============================================================================
 
 # ----------------------------------------------------------------------------
@@ -35,7 +35,7 @@
   tags: [services, dhcp]
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   pre_tasks:
     - name: Import exercise facts from pre-play
@@ -69,7 +69,7 @@
   tags: [services, sql]
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   pre_tasks:
     - name: Import exercise facts from pre-play
@@ -103,7 +103,7 @@
   tags: [services, exchange]
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   pre_tasks:
     - name: Import exercise facts from pre-play
@@ -142,7 +142,7 @@
   tags: [services, sccm]
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   pre_tasks:
     - name: Import exercise facts from pre-play
@@ -181,7 +181,7 @@
   tags: [services, iis]
 
   vars_files:
-    - "{{ playbook_dir }}/secrets/credentials.yml"
+    - "../secrets/credentials.yml"
 
   pre_tasks:
     - name: Import exercise facts from pre-play

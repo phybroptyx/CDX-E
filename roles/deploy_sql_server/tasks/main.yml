@@ -166,7 +166,7 @@
 # Section 7 — Windows Firewall rules
 # ----------------------------------------------------------------------------
 - name: Allow SQL Server TCP port through Windows Firewall
-  ansible.windows.win_firewall_rule:
+  community.windows.win_firewall_rule:
     name: "SQL Server - CDX-E (TCP {{ sql_port }})"
     localport: "{{ sql_port }}"
     action: allow
@@ -176,7 +176,7 @@
     enabled: true
 
 - name: Allow SQL Server Browser through Windows Firewall (UDP 1434)
-  ansible.windows.win_firewall_rule:
+  community.windows.win_firewall_rule:
     name: "SQL Server Browser - CDX-E (UDP 1434)"
     localport: 1434
     action: allow

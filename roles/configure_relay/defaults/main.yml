@@ -1,0 +1,59 @@
+---
+# =============================================================================
+# Role: configure_relay — Defaults
+# =============================================================================
+
+# Relay identity
+relay_vmid:            102
+relay_management_ip:   "10.0.0.10"
+relay_management_cidr: "22"
+relay_management_gw:   "10.0.0.1"
+
+# CDX-I uplink (eth1)
+relay_cdxi_iface:  "eth1"
+relay_cdxi_ip:     "10.1.1.2"
+relay_cdxi_cidr:   "30"
+
+# SOCKS5 proxy (dante-server)
+socks5_port:     1080
+socks5_bind_ip:  "0.0.0.0"
+
+# Dispatch variable — set by calling play.
+# Valid values: provision | assign_nics | release_nics | verify
+relay_action: provision
+
+# Proxmox node (resolved from scenario facts when called mid-pipeline)
+relay_proxmox_node: "{{ scenario.proxmox.node | default('cdx-pve-01') }}"
+
+# NIC assignment — list of exercise NICs to hot-attach.
+# Set by calling play (e.g. exercise_initiation.yml).
+# Each entry:
+#   slot:   Proxmox net slot number (2, 3, or 4 — net2/eth2, net3/eth3, net4/eth4)
+#   bridge: Proxmox bridge name for this exercise segment
+#   ip:     IP address to assign on the relay side of this segment
+#   cidr:   Prefix length (e.g. 24)
+#
+# Example:
+#   relay_nic_assignments:
+#     - slot: 2
+#       bridge: "Enterprise"
+#       ip: "192.168.10.1"
+#       cidr: "24"
+#     - slot: 3
+#       bridge: "SOC"
+#       ip: "192.168.20.1"
+#       cidr: "24"
+relay_nic_assignments: []
+
+# Routes to add when assigning NICs.
+# Each entry:
+#   net: destination network in CIDR notation
+#   via: outbound interface name (e.g. eth2)
+#
+# Example:
+#   relay_routes:
+#     - net: "192.168.10.0/24"
+#       via: "eth2"
+#     - net: "192.168.20.0/24"
+#       via: "eth3"
+relay_routes: []

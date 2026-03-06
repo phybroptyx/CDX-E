@@ -31,12 +31,34 @@
     path: "{{ exercise_dir }}/terraform/terraform.tfstate"
   register: _tf_state_stat
 
-- name: Warn if no Terraform state found
+- name: Report — no Terraform state (skipping destroy)
   ansible.builtin.debug:
     msg: >-
       No Terraform state found at {{ exercise_dir }}/terraform/terraform.tfstate.
       Skipping terraform destroy — VMs may need manual removal.
   when: not _tf_state_stat.stat.exists
+
+# Parse state to check whether any resources actually exist.
+# Terraform state may exist but contain zero resources (e.g. after a previous
+# destroy that removed all resources but left the state file in place).
+- name: Read Terraform state content
+  ansible.builtin.slurp:
+    src: "{{ exercise_dir }}/terraform/terraform.tfstate"
+  register: _tf_state_raw
+  when: _tf_state_stat.stat.exists
+
+- name: Check Terraform state has resources
+  ansible.builtin.set_fact:
+    _tf_has_resources: >-
+      {{ ((_tf_state_raw.content | b64decode | from_json).resources | default([])) | length > 0 }}
+  when: _tf_state_stat.stat.exists
+
+- name: Report — state empty (skipping destroy)
+  ansible.builtin.debug:
+    msg: >-
+      Terraform state exists but contains no resources — all VMs already removed.
+      Skipping terraform destroy.
+  when: _tf_state_stat.stat.exists and not (_tf_has_resources | default(false) | bool)
 
 # ----------------------------------------------------------------------------
 # Power off VMs — Proxmox requires VMs to be stopped before deletion
@@ -56,7 +78,9 @@
   loop_control:
     label: "{{ item.name }} (vmid={{ item.vmid }})"
   ignore_errors: true   # VM may not exist or already be stopped
-  when: _tf_state_stat.stat.exists
+  when:
+    - _tf_state_stat.stat.exists
+    - _tf_has_resources | default(false) | bool
 
 - name: Wait for VMs to reach stopped state
   ansible.builtin.uri:
@@ -79,7 +103,9 @@
     _vm_status.status == 500 or
     _vm_status.json.data.status | default('stopped') == 'stopped'
   ignore_errors: true
-  when: _tf_state_stat.stat.exists
+  when:
+    - _tf_state_stat.stat.exists
+    - _tf_has_resources | default(false) | bool
 
 # ----------------------------------------------------------------------------
 # Terraform destroy
@@ -92,12 +118,16 @@
   changed_when: >-
     'Destroy complete!' in _tf_destroy.stdout and
     '0 destroyed' not in _tf_destroy.stdout
-  when: _tf_state_stat.stat.exists
+  when:
+    - _tf_state_stat.stat.exists
+    - _tf_has_resources | default(false) | bool
 
 - name: Show Terraform destroy output
   ansible.builtin.debug:
     msg: "{{ _tf_destroy.stdout_lines }}"
-  when: _tf_state_stat.stat.exists
+  when:
+    - _tf_state_stat.stat.exists
+    - _tf_has_resources | default(false) | bool
 
 # ----------------------------------------------------------------------------
 # Resource pool cleanup — after VMs are gone

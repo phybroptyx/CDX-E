@@ -57,18 +57,12 @@ resource "proxmox_virtual_environment_vm" "{{ vm.name | lower | regex_replace('[
 {% endif %}
 {% if vm.network is defined and vm.network.additional_nics | default([]) | length > 0 %}
 
-  # NIC layout: net0 = management (Proxmox access / Ansible); net1+ = exercise bridges.
+  # NIC layout: net0+ = exercise bridges (no management NIC — Ansible connects via CDX-RELAY).
   # All network_device blocks must be specified when any are defined — bpg/proxmox
   # replaces the full NIC list rather than merging with the template's NICs.
-  network_device {
-    # net0 — management NIC (inherits template config, re-declared to allow adding net1+)
-    bridge   = "{{ vm_management_bridge }}"
-    model    = "virtio"
-    firewall = false
-  }
 {% for nic in vm.network.additional_nics %}
   network_device {
-    # net{{ nic.nic_id }} — {{ nic.bridge }}
+    # net{{ loop.index0 }} — {{ nic.bridge }}
     bridge   = "{{ nic.bridge }}"
     model    = "{{ nic.model | default('virtio') }}"
     firewall = {{ 'true' if nic.firewall | default(false) | bool else 'false' }}

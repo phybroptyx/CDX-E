@@ -1,0 +1,99 @@
+---
+# =============================================================================
+# configure_relay: assign_nics
+# =============================================================================
+# Hot-attaches exercise NICs (net2-4) to the relay VM via Proxmox API and
+# brings up the interfaces with assigned IPs and exercise routes.
+#
+# Called at the start of each exercise deployment (before configure_networking).
+#
+# Required vars:
+#   relay_nic_assignments  — list of {slot, bridge, ip, cidr}
+#   relay_routes           — list of {net, via}
+# =============================================================================
+
+- name: Assert relay_nic_assignments is not empty
+  ansible.builtin.assert:
+    that:
+      - relay_nic_assignments | length > 0
+    fail_msg: "relay_nic_assignments must be provided for relay_action=assign_nics"
+
+# --- Attach exercise NICs via Proxmox API ---
+- name: Attach exercise NICs to relay VM (Proxmox API)
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ relay_proxmox_node }}/qemu/{{ relay_vmid }}/config"
+    method: PUT
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    body_format: form-urlencoded
+    body: "net{{ item.slot }}=virtio,bridge={{ item.bridge }},firewall=0"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  loop: "{{ relay_nic_assignments }}"
+  loop_control:
+    label: "net{{ item.slot }} → bridge={{ item.bridge }}"
+  delegate_to: localhost
+
+# Brief pause to allow Proxmox to hot-plug the virtual NIC
+- name: Wait for NIC hot-plug to settle
+  ansible.builtin.pause:
+    seconds: 3
+
+# --- Bring up interfaces with assigned IPs ---
+- name: Bring up exercise NIC links
+  ansible.builtin.command: ip link set dev eth{{ item.slot }} up
+  loop: "{{ relay_nic_assignments }}"
+  loop_control:
+    label: "eth{{ item.slot }}"
+  changed_when: true
+
+- name: Assign IPs to exercise NICs
+  ansible.builtin.command: >-
+    ip addr add {{ item.ip }}/{{ item.cidr }} dev eth{{ item.slot }}
+  loop: "{{ relay_nic_assignments }}"
+  loop_control:
+    label: "eth{{ item.slot }} {{ item.ip }}/{{ item.cidr }}"
+  register: _addr_result
+  changed_when: _addr_result.rc == 0
+  failed_when: >-
+    _addr_result.rc != 0
+    and 'RTNETLINK answers: File exists' not in (_addr_result.stderr | default(''))
+
+# --- Add exercise routes ---
+- name: Add exercise segment routes
+  ansible.builtin.command: ip route add {{ item.net }} dev {{ item.via }}
+  loop: "{{ relay_routes }}"
+  loop_control:
+    label: "{{ item.net }} via {{ item.via }}"
+  register: _route_result
+  changed_when: _route_result.rc == 0
+  failed_when: >-
+    _route_result.rc != 0
+    and 'RTNETLINK answers: File exists' not in (_route_result.stderr | default(''))
+  when: relay_routes | length > 0
+
+# --- Refresh nftables to include new interfaces ---
+# Redeploy the template with current relay_nic_assignments so the
+# inter-segment isolation rules cover the newly attached NICs.
+- name: Redeploy nftables ruleset with exercise NIC isolation rules
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: '0640'
+
+- name: Reload nftables
+  ansible.builtin.systemd:
+    name: nftables
+    state: reloaded
+
+- name: Show assigned relay NICs
+  ansible.builtin.debug:
+    msg: >-
+      Relay NIC assigned: eth{{ item.slot }}
+      bridge={{ item.bridge }}  ip={{ item.ip }}/{{ item.cidr }}
+  loop: "{{ relay_nic_assignments }}"
+  loop_control:
+    label: "eth{{ item.slot }}"
