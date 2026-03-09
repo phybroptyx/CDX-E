@@ -27,18 +27,31 @@
 #
 # Tags reference:
 #   always          - Exercise initiation (always runs)
-#   packer          - Phase 1:  Template deployment
-#   terraform       - Phase 2:  VM deploy/destroy + Phase 2a/2b
-#   network,sdn     - Phase 1.5: Bridge creation + relay NICs (before VM deploy) + Phase 3 (VyOS config, after power-on)
-#   inventory       - Phase 2a: Inventory refresh
-#   power           - Phase 2b: VM power-on + connectivity wait
-#   domain          - Phase 4:  Active Directory deployment
-#   servers         - Phase 5:  General server configuration
-#   services        - Phase 6:  Domain services (conditional per scenario)
-#   workstations    - Phase 7:  Endpoint configuration
-#   vulnerabilities - Phase 8:  Vulnerability deployment
-#   red_team        - Phase 9:  Red Team deployment + configuration (automated)
-#   blue_team,soc   - Phase 10: Blue Team SOC deployment + configuration
+#   packer          - Phase 1:   Template deployment
+#   network,sdn     - Phase 1.5: Bridge creation + relay NICs (before VM deploy) + Phase 3 (VyOS config)
+#   terraform       - Phase 2:   VM deploy/destroy
+#   inventory       - Phase 2a:  Inventory refresh
+#   power           - Phase 2b-r: router power-on; Phase 2b: DC power-on; Phase 4.5: server power-on; Phase 6.5: workstation power-on
+#   domain          - Phase 4:   Active Directory deployment
+#   dhcp            - Phase 4.7: DHCP configuration (before member server boot; idempotent in Phase 6)
+#   servers         - Phase 5:   General server configuration
+#   services        - Phase 6:   Domain services (conditional per scenario; DHCP idempotent re-run)
+#   workstations    - Phase 7:   Endpoint configuration
+#   vulnerabilities - Phase 8:   Vulnerability deployment
+#   red_team        - Phase 9:   Red Team deployment + configuration (automated)
+#   blue_team,soc   - Phase 10:  Blue Team SOC deployment + configuration
+#
+# Staged power-on model:
+#   All VMs clone powered off (Terraform is a pure provisioner). Ansible drives power-on
+#   in dependency order so each tier is reachable before the next is started:
+#     Phase 2b-r — routers only: first VMs up; no other VMs started yet
+#     Phase 3    — VyOS router configuration: router exercise-ready before DCs boot
+#     Phase 2b   — domain_controllers: started after router is exercise-ready
+#     Phase 4.7  — DHCP configured: scopes active before member servers boot
+#     Phase 4.5  — member servers: AD is built, DHCP is active, domain join is available
+#     Phase 6.5  — workstations: domain DHCP scope is active, clients can get IPs
+#   NOTE: Multi-subnet exercises may require relay NIC reassignment between phases.
+#         Insert playbooks/assign_nics.yml calls before Phase 4.5 / Phase 6.5 as needed.
 #
 # Standalone (not in pipeline):
 #   environment_check.yml — run manually by White Cell before exercise start
@@ -61,8 +74,8 @@
 
 # ── Phase 1.5: Pre-deployment Networking ─────────────────────────────────────
 # Creates exercise OVS bridges and assigns relay NICs BEFORE VMs are deployed.
-# Proxmox validates all NIC bridges at VM start time — every bridge referenced
-# by any exercise VM must exist before terraform apply runs with started=true.
+# Proxmox validates all NIC bridges at VM clone time — every bridge referenced
+# by any exercise VM must exist before terraform apply runs.
 # Relay NIC assignment (Play 3 in network_management.yml) also runs here so
 # the relay is fully configured before the first exercise VM comes online.
 # networking_scope=bridges skips the VyOS config section (VMs not yet deployed).
@@ -72,9 +85,8 @@
     networking_scope: bridges
 
 # ── Phase 2: Virtual Machine Management (Terraform) ──────────────────────────
-# Deploys or destroys scenario VMs. Bridges and relay NICs exist at this point,
-# so Windows/Linux VMs can boot immediately (started=true in the Terraform
-# template). VyOS VMs remain powered off (started=false) until Phase 2b.
+# Deploys or destroys scenario VMs. All VMs clone powered off (started=false).
+# Ansible drives power-on in dependency order via vm_power_management phases.
 # Gates on: scenario.phases.terraform
 - import_playbook: playbooks/vm_management.yml
 
@@ -84,21 +96,37 @@
 # Gates on: scenario.phases.terraform
 - import_playbook: playbooks/inventory_refresh.yml
 
-# ── Phase 2b: VM Power Management ────────────────────────────────────────────
-# Powers on VyOS VMs (Windows/Linux already running from started=true) and
-# waits for WinRM/SSH connectivity. Bridges exist from Phase 1.5.
-# Workstations are excluded here — powered on by Phase 7 after the domain
-# DHCP scope is active and the enterprise network is fully reachable.
+# ── Phase 2b-r: VM Power Management — Routers Only ───────────────────────────
+# Powers on routers and waits for SSH readiness. Routers are the first VMs
+# started; no other exercise VMs are up at this point. Must complete before
+# Phase 3 (VyOS configuration) runs.
 # Gates on: scenario.phases.terraform
 - import_playbook: playbooks/vm_power_management.yml
   vars:
-    vm_skip_groups: ['workstations']
+    vm_include_groups: ['routers']
 
-# ── Phase 3: Network Management ──────────────────────────────────────────────
+# ── Phase 3: Network Management (Router Configuration) ───────────────────────
 # Full scope: bridge creation is idempotent; primary purpose here is VyOS
-# router configuration (VMs now running after Phase 2b).
+# router configuration. Routers are running from Phase 2b-r and are exercise-
+# ready before domain controllers are powered on.
 # Gates on: scenario.phases.networking
 - import_playbook: playbooks/network_management.yml
+
+# ── Phase 2b: VM Power Management — Domain Controllers ────────────────────────
+# Starts domain controllers now that the SDP router is exercise-ready (Phase 3).
+# DHCP→guest-exec static-IP→NIC-migrate bootstrap runs here for DCs.
+# Member servers and workstations remain powered off until their dependency phases.
+# Gates on: scenario.phases.terraform
+- import_playbook: playbooks/vm_power_management.yml
+  vars:
+    vm_include_groups: ['domain_controllers']
+
+# ── Phase 3.5: Inventory Refresh (post-DC bootstrap) ─────────────────────────
+# Re-writes exercise_hosts.yml and calls meta: refresh_inventory so that
+# host_vars/<name>.yml (updated with exercise IPs by Phase 2b) takes effect
+# before Domain Management connects to Windows VMs.
+# Gates on: scenario.phases.terraform
+- import_playbook: playbooks/inventory_refresh.yml
 
 # ── Phase 4: Domain Management ───────────────────────────────────────────────
 # Promotes first DC, deploys AD domain, additional DCs, GPOs.
@@ -106,19 +134,60 @@
 # Gates on: scenario.phases.domain
 - import_playbook: playbooks/domain_management.yml
 
+# ── Phase 4.7: DHCP Configuration (pre-server-boot) ──────────────────────────
+# Member servers boot directly on the exercise bridge (ex_dc303_in) and must
+# receive a DHCP address before Ansible can reach them. DHCP is therefore
+# configured HERE — before Phase 4.5 powers on member servers — rather than
+# waiting until Phase 6 (domain_services). The deploy_dhcp role is fully
+# idempotent (existing scopes are detected and skipped), so Phase 6 imports
+# domain_services.yml again safely; the DHCP play will no-op on scopes that
+# already exist. Non-DHCP service plays in domain_services.yml self-gate via
+# meta: end_play if their scenario.phases.services.* flag is false, so only
+# the DHCP play runs at this phase.
+# Gates on: scenario.phases.services.dhcp (self-gated inside domain_services.yml)
+- import_playbook: playbooks/domain_services.yml
+
+# ── Phase 4.5: Member Server Power-On ────────────────────────────────────────
+# Powers on all member servers now that the AD domain is built, domain join
+# is available, and DHCP is active on the exercise bridge (Phase 4.7).
+# Member servers boot directly on the exercise bridge (no Layer0, no NIC
+# migration). They receive DHCP from the domain DHCP server and have static
+# IPs set via guest-exec only.
+# NOTE: For multi-subnet exercises insert assign_nics.yml before this phase
+#       to give the relay routes into new network segments.
+# Gates on: scenario.phases.terraform (servers phase gate applied in Phase 5)
+- import_playbook: playbooks/vm_power_management.yml
+  vars:
+    vm_include_groups: ['servers', 'sql_servers', 'exchange_servers', 'sccm_servers']
+
 # ── Phase 5: General Server Configuration ────────────────────────────────────
-# Applies base config to windows_servers (non-DC, non-service hosts).
+# Applies base config to member servers (domain join, features, baseline).
+# Servers are online from Phase 4.5.
 # Gates on: scenario.phases.servers
 - import_playbook: playbooks/server_configuration.yml
 
 # ── Phase 6: Domain Services ─────────────────────────────────────────────────
 # Conditional multi-service orchestrator. Each service play self-gates on
 # scenario.phases.services.<service>. Dependencies enforced inline
-# (Exchange and SCCM require SQL).
+# (Exchange and SCCM require SQL). DHCP was configured in Phase 4.7; the DHCP
+# play runs again here idempotently (existing scopes are skipped). All other
+# services (SQL, Exchange, SCCM, IIS) are configured for the first time here.
 - import_playbook: playbooks/domain_services.yml
 
+# ── Phase 6.5: Workstation Power-On ──────────────────────────────────────────
+# Powers on workstations now that the domain DHCP scope is active and clients
+# can receive IPs from the enterprise network. Workstations have no cloud_init.ip
+# — they are discovered via domain DHCP. QEMU agent confirms boot.
+# NOTE: For multi-subnet exercises insert assign_nics.yml before this phase
+#       if the workstation subnet requires a new relay NIC.
+# Gates on: scenario.phases.workstations (workstation phase gate applied in Phase 7)
+- import_playbook: playbooks/vm_power_management.yml
+  vars:
+    vm_include_groups: ['workstations']
+
 # ── Phase 7: Workstation Configuration ───────────────────────────────────────
-# Configures workstation endpoints (Win 7 / 10 / 11).
+# Configures workstation endpoints (Win 7 / 10 / 11). Workstations are online
+# from Phase 6.5.
 # Gates on: scenario.phases.workstations
 - import_playbook: playbooks/workstation_configuration.yml
 

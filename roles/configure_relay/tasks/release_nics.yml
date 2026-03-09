@@ -15,6 +15,114 @@
       - relay_nic_assignments | length > 0
     fail_msg: "relay_nic_assignments must be provided for relay_action=release_nics"
 
+# --- Discover actual interface names (same MAC-based approach as assign_nics) ---
+- name: Query relay VM config to get MAC addresses for exercise NICs
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ relay_proxmox_node }}/qemu/{{ relay_vmid }}/config"
+    method: GET
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  register: _relay_vm_config
+  delegate_to: localhost
+  become: false
+
+# Filter to slots that are still attached — on teardown re-runs net2/etc.
+# may already be absent from the Proxmox config, which would crash the
+# dict-key lookup below.
+- name: Initialize NIC assignment working lists
+  ansible.builtin.set_fact:
+    _present_assignments:          []
+    relay_nic_assignments_resolved: []
+
+- name: Filter to NIC slots currently present in relay VM config
+  ansible.builtin.set_fact:
+    _present_assignments: "{{ _present_assignments + [item] }}"
+  loop: "{{ relay_nic_assignments }}"
+  when: ('net' ~ (item.slot | string)) in _relay_vm_config.json.data
+  loop_control:
+    label: "net{{ item.slot }} ({{ 'present' if ('net' ~ (item.slot | string)) in _relay_vm_config.json.data else 'already detached' }})"
+
+- name: Extract MAC addresses for each assigned NIC slot
+  ansible.builtin.set_fact:
+    _slot_macs: >-
+      {{ _slot_macs | default({}) | combine({
+           item.slot | string: (
+             _relay_vm_config.json.data['net' ~ item.slot]
+             | regex_findall('[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}')
+             | first | lower
+           )
+         }) }}
+  loop: "{{ _present_assignments }}"
+  loop_control:
+    label: "net{{ item.slot }}"
+
+- name: Discover interface name for each NIC slot (by MAC)
+  ansible.builtin.shell:
+    cmd: >-
+      grep -rl "{{ _slot_macs[item.slot | string] }}"
+      /sys/class/net/*/address 2>/dev/null
+      | head -1
+      | sed 's|/sys/class/net/||; s|/address||'
+  register: _iface_discovery
+  loop: "{{ _present_assignments }}"
+  loop_control:
+    label: "net{{ item.slot }} (MAC {{ _slot_macs[item.slot | string] | default('?') }})"
+  changed_when: false
+  failed_when: false   # interface may already be removed; be tolerant
+
+- name: Build resolved NIC list with iface names
+  ansible.builtin.set_fact:
+    relay_nic_assignments_resolved: >-
+      {{ relay_nic_assignments_resolved | default([]) + [
+           item.item | combine({'iface': item.stdout | trim})
+         ] }}
+  loop: "{{ _iface_discovery.results }}"
+  loop_control:
+    label: "net{{ item.item.slot }} → {{ item.stdout | trim }}"
+
+# --- Discover management (net0) and CDX-I (net1) interface names by MAC ---
+# Same reason as assign_nics.yml: gather_facts: false means defaults (eth0/eth1)
+# would be used, producing an invalid nftables config on Debian 12.
+- name: Extract MACs for management (net0) and CDX-I (net1) NICs
+  ansible.builtin.set_fact:
+    _net0_mac: >-
+      {{ _relay_vm_config.json.data['net0']
+         | regex_findall('[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}')
+         | first | lower }}
+    _net1_mac: >-
+      {{ _relay_vm_config.json.data['net1']
+         | regex_findall('[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}')
+         | first | lower }}
+
+- name: Discover management interface name (net0, by MAC)
+  ansible.builtin.shell:
+    cmd: >-
+      grep -rl "{{ _net0_mac }}" /sys/class/net/*/address 2>/dev/null
+      | head -1 | sed 's|/sys/class/net/||; s|/address||'
+  register: _mgmt_iface_disc
+  changed_when: false
+  failed_when: false   # tolerant — relay may be mid-teardown
+
+- name: Discover CDX-I interface name (net1, by MAC)
+  ansible.builtin.shell:
+    cmd: >-
+      grep -rl "{{ _net1_mac }}" /sys/class/net/*/address 2>/dev/null
+      | head -1 | sed 's|/sys/class/net/||; s|/address||'
+  register: _cdxi_iface_disc
+  changed_when: false
+  failed_when: false   # tolerant
+
+- name: Set relay_mgmt_iface and relay_cdxi_iface from discovered names
+  ansible.builtin.set_fact:
+    relay_mgmt_iface: "{{ _mgmt_iface_disc.stdout | trim }}"
+    relay_cdxi_iface: "{{ _cdxi_iface_disc.stdout | trim }}"
+  when:
+    - _mgmt_iface_disc.stdout | trim != ''
+    - _cdxi_iface_disc.stdout | trim != ''
+
 # --- Remove exercise routes ---
 - name: Remove exercise segment routes
   ansible.builtin.command: ip route del {{ item.net }}
@@ -28,27 +136,27 @@
 
 # --- Deconfigure NIC addresses ---
 - name: Flush IPs from exercise NICs
-  ansible.builtin.command: ip addr flush dev eth{{ item.slot }}
-  loop: "{{ relay_nic_assignments }}"
+  ansible.builtin.command: ip addr flush dev {{ item.iface }}
+  loop: "{{ relay_nic_assignments_resolved }}"
   loop_control:
-    label: "eth{{ item.slot }}"
+    label: "{{ item.iface }}"
   changed_when: true
   failed_when: false
 
 - name: Bring down exercise NIC links
-  ansible.builtin.command: ip link set dev eth{{ item.slot }} down
-  loop: "{{ relay_nic_assignments }}"
+  ansible.builtin.command: ip link set dev {{ item.iface }} down
+  loop: "{{ relay_nic_assignments_resolved }}"
   loop_control:
-    label: "eth{{ item.slot }}"
+    label: "{{ item.iface }}"
   register: _link_down
   changed_when: _link_down.rc == 0
   failed_when: false
 
 # --- Detach exercise NICs via Proxmox API ---
-- name: Build NIC delete string (net2,net3,net4)
+- name: Build NIC delete string (only slots still present in Proxmox config)
   ansible.builtin.set_fact:
     _nics_to_delete: >-
-      {{ relay_nic_assignments
+      {{ _present_assignments
          | map(attribute='slot')
          | map('regex_replace', '^(.*)$', 'net\1')
          | join(',') }}
@@ -65,6 +173,8 @@
     validate_certs: "{{ proxmox_validate_certs }}"
     status_code: [200]
   delegate_to: localhost
+  become: false
+  when: _present_assignments | length > 0
 
 # --- Restore base nftables ruleset (no exercise NIC rules) ---
 - name: Redeploy nftables base ruleset (exercise NICs removed)

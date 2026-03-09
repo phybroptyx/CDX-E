@@ -8,8 +8,9 @@
 #   - OpenSSH server (key-based access only after first boot)
 #   - No desktop environment, no GUI packages
 #
-# Primary use: General-purpose minimal Debian infrastructure nodes
-# (C2 servers, sensors, legacy-compatibility targets, etc.).
+# Primary use: CDX-RELAY VM base (VMID 102, 10.0.0.10/22).
+#   The relay is provisioned from this template by provision_relay.yml
+#   and provides SSH ProxyJump + SOCKS5 routing for all exercise segments.
 #
 # Post-build template state:
 #   - Debian 12 minimal install (no GUI)
@@ -68,6 +69,12 @@ variable "proxmox_storage_pool" {
   default = "QNAP"
 }
 
+variable "http_interface" {
+  type        = string
+  default     = "eth1"
+  description = "ACN interface connected to Layer0 (used to bind the Packer HTTP preseed server)"
+}
+
 # =============================================================================
 # Variables — ISO
 # =============================================================================
@@ -99,6 +106,7 @@ source "proxmox-iso" "debian-12" {
   token                    = var.proxmox_api_token_secret
   insecure_skip_tls_verify = true
   node                     = var.proxmox_node
+  pool                     = "CDX_TEMPLATES"
 
   # VM identification
   vm_id         = var.template_vm_id
@@ -137,13 +145,14 @@ source "proxmox-iso" "debian-12" {
   # QEMU Guest Agent — installed via preseed late_command
   qemu_agent = true
 
-  # Preseed via Packer HTTP server
-  # The Packer HTTP server serves INFRASTRUCTURE/packer/http/ during the build.
-  # The Debian installer fetches preseed.cfg from the URL passed in boot_command.
-  http_directory = "../http"
+  # Preseed via Packer HTTP server — bind to Layer0 interface so the build VM
+  # (on Layer0) can reach the preseed URL. Override with -var http_interface=<iface>.
+  http_directory  = "../http"
+  http_interface  = var.http_interface
 
-  # Boot command — Debian 12 netinst BIOS boot
-  # Escapes to command line, passes preseed URL and suppresses interactive prompts.
+  # Boot command — Debian 12 DVD BIOS boot
+  # netcfg/get_nameservers= must be passed on the kernel cmdline (not just preseed)
+  # because netcfg runs before the preseed file is fetched and applied.
   boot_wait = "5s"
   boot_command = [
     "<esc><wait>",
@@ -151,6 +160,7 @@ source "proxmox-iso" "debian-12" {
     "initrd=/install.amd/initrd.gz ",
     "auto=true ",
     "priority=critical ",
+    "netcfg/get_nameservers= ",
     "preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/preseed/debian-12/preseed.cfg ",
     "locale=en_US.UTF-8 ",
     "keymap=us ",
@@ -174,15 +184,38 @@ source "proxmox-iso" "debian-12" {
 build {
   sources = ["source.proxmox-iso.debian-12"]
 
-  # Install QEMU guest agent and perform template cleanup
+  # Clean up apt sources and ensure QEMU agent is enabled.
+  # qemu-guest-agent is installed by the preseed from DVD; the shared
+  # install-qemu-guest-agent.sh script is skipped here because:
+  #   - It runs apt-get update, which fails on the ejected DVD cdrom:// source
+  #   - spice-vdagent is a desktop agent, not needed on a server/relay template
   provisioner "shell" {
-    script          = "../scripts/linux/install-qemu-guest-agent.sh"
     execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    inline = [
+      "sed -i '/^deb cdrom/d' /etc/apt/sources.list",
+      "systemctl enable qemu-guest-agent",
+      "systemctl start qemu-guest-agent || true"
+    ]
   }
 
+  # Server-specific cleanup (inline, not cleanup.sh — cloud-init is not
+  # installed on this minimal server template so the shared script would abort).
   provisioner "shell" {
-    script          = "../scripts/linux/cleanup.sh"
     execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    inline = [
+      "apt-get autoremove -y",
+      "apt-get clean",
+      "rm -f /etc/ssh/ssh_host_*",
+      "printf '[Unit]\\nDescription=Regenerate SSH host keys on first boot\\nBefore=ssh.service\\nConditionPathExists=!/etc/ssh/ssh_host_rsa_key\\n\\n[Service]\\nType=oneshot\\nExecStart=/usr/bin/ssh-keygen -A\\nRemainAfterExit=yes\\n\\n[Install]\\nWantedBy=multi-user.target\\n' > /etc/systemd/system/ssh-host-keygen.service",
+      "systemctl enable ssh-host-keygen.service",
+      "truncate -s 0 /etc/machine-id",
+      "rm -f /var/lib/dbus/machine-id",
+      "rm -rf /tmp/* /var/tmp/*",
+      "rm -f /root/.bash_history /home/*/.bash_history",
+      "dd if=/dev/zero of=/EMPTY bs=1M 2>/dev/null || true",
+      "rm -f /EMPTY",
+      "sync"
+    ]
   }
   # ── Strip management NICs (shell-local: runs on Packer build host) ─────────
   # Removes all net* devices from the build VM via the Proxmox API before
@@ -195,6 +228,6 @@ build {
       "PROXMOX_NODE=${var.proxmox_node}",
       "TEMPLATE_VMID=${var.template_vm_id}",
     ]
-    script = "../scripts/common/strip-nics.sh"
+    inline = ["bash ../scripts/common/strip-nics.sh"]
   }
 }

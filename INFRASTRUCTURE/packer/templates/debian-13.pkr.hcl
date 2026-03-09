@@ -65,6 +65,12 @@ variable "proxmox_node" {
   default = "cdx-pve-01"
 }
 
+variable "http_interface" {
+  type        = string
+  default     = "eth1"
+  description = "ACN interface connected to Layer0 (used to bind the Packer HTTP preseed server)"
+}
+
 variable "proxmox_storage_pool" {
   type    = string
   default = "QNAP"
@@ -101,6 +107,7 @@ source "proxmox-iso" "debian-13" {
   token                    = var.proxmox_api_token_secret
   insecure_skip_tls_verify = true
   node                     = var.proxmox_node
+  pool                     = "CDX_TEMPLATES"
 
   # VM identification
   vm_id         = var.template_vm_id
@@ -139,8 +146,10 @@ source "proxmox-iso" "debian-13" {
   # QEMU Guest Agent — installed via preseed late_command
   qemu_agent = true
 
-  # Preseed via Packer HTTP server
-  http_directory = "../http"
+  # Preseed via Packer HTTP server — bind to Layer0 interface so the build VM
+  # (on Layer0) can reach the preseed URL. Override with -var http_interface=<iface>.
+  http_directory  = "../http"
+  http_interface  = var.http_interface
 
   # Boot command — Debian 13 netinst BIOS boot
   boot_wait = "5s"
@@ -150,6 +159,7 @@ source "proxmox-iso" "debian-13" {
     "initrd=/install.amd/initrd.gz ",
     "auto=true ",
     "priority=critical ",
+    "netcfg/get_nameservers= ",
     "preseed/url=http://{{ .HTTPIP }}:{{ .HTTPPort }}/preseed/debian-13/preseed.cfg ",
     "locale=en_US.UTF-8 ",
     "keymap=us ",
@@ -192,6 +202,6 @@ build {
       "PROXMOX_NODE=${var.proxmox_node}",
       "TEMPLATE_VMID=${var.template_vm_id}",
     ]
-    script = "../scripts/common/strip-nics.sh"
+    inline = ["bash ../scripts/common/strip-nics.sh"]
   }
 }

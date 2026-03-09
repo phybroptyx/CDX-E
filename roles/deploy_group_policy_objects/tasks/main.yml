@@ -62,13 +62,13 @@
   ansible.windows.win_file:
     path: "{{ gpo_temp_path }}"
     state: directory
-  run_once: true
+  when: not (_domain_exists | default(false) | bool)
 
 - name: Stage gpo.json on DC
   ansible.windows.win_copy:
     src: "{{ exercise_dir }}/gpo.json"
     dest: "{{ gpo_temp_path }}\\gpo.json"
-  run_once: true
+  when: not (_domain_exists | default(false) | bool)
 
 - name: Check for Domain Files directory on controller
   ansible.builtin.stat:
@@ -81,8 +81,9 @@
   ansible.windows.win_copy:
     src: "{{ exercise_dir }}/Domain Files/"
     dest: "{{ gpo_temp_path }}\\images\\"
-  when: _domain_files_stat.stat.exists | default(false)
-  run_once: true
+  when:
+    - _domain_files_stat.stat.exists | default(false)
+    - not (_domain_exists | default(false) | bool)
 
 # ----------------------------------------------------------------------------
 # Section 3 — GPO-specific security groups
@@ -131,13 +132,13 @@
   environment:
     GPO_TEMP_PATH: "{{ gpo_temp_path }}"
   register: _gpo_groups_result
-  run_once: true
+  when: not (_domain_exists | default(false) | bool)
   changed_when: "'CHANGED:' in (_gpo_groups_result.stdout | default(''))"
 
 - name: Display GPO security groups result
   ansible.builtin.debug:
-    msg: "{{ _gpo_groups_result.stdout_lines }}"
-  run_once: true
+    msg: "{{ _gpo_groups_result.stdout_lines | default(['skipped — additional DC']) }}"
+  when: not (_domain_exists | default(false) | bool)
 
 # ----------------------------------------------------------------------------
 # Section 4 — Create GPOs and apply registry settings
@@ -206,13 +207,13 @@
   environment:
     GPO_TEMP_PATH: "{{ gpo_temp_path }}"
   register: _gpo_create_result
-  run_once: true
+  when: not (_domain_exists | default(false) | bool)
   changed_when: "'CHANGED:' in (_gpo_create_result.stdout | default(''))"
 
 - name: Display GPO creation result
   ansible.builtin.debug:
-    msg: "{{ _gpo_create_result.stdout_lines }}"
-  run_once: true
+    msg: "{{ _gpo_create_result.stdout_lines | default(['skipped — additional DC']) }}"
+  when: not (_domain_exists | default(false) | bool)
 
 # ----------------------------------------------------------------------------
 # Section 5 — Link GPOs to OUs
@@ -292,13 +293,13 @@
   environment:
     GPO_TEMP_PATH: "{{ gpo_temp_path }}"
   register: _gpo_links_result
-  run_once: true
+  when: not (_domain_exists | default(false) | bool)
   changed_when: "'CHANGED:' in (_gpo_links_result.stdout | default(''))"
 
 - name: Display GPO links result
   ansible.builtin.debug:
-    msg: "{{ _gpo_links_result.stdout_lines }}"
-  run_once: true
+    msg: "{{ _gpo_links_result.stdout_lines | default(['skipped — additional DC']) }}"
+  when: not (_domain_exists | default(false) | bool)
 
 # ----------------------------------------------------------------------------
 # Section 6 — Security filtering
@@ -357,13 +358,13 @@
   environment:
     GPO_TEMP_PATH: "{{ gpo_temp_path }}"
   register: _gpo_filter_result
-  run_once: true
+  when: not (_domain_exists | default(false) | bool)
   changed_when: "'CHANGED:' in (_gpo_filter_result.stdout | default(''))"
 
 - name: Display security filtering result
   ansible.builtin.debug:
-    msg: "{{ _gpo_filter_result.stdout_lines }}"
-  run_once: true
+    msg: "{{ _gpo_filter_result.stdout_lines | default(['skipped — additional DC']) }}"
+  when: not (_domain_exists | default(false) | bool)
 
 # ----------------------------------------------------------------------------
 # Section 7 — Stage branding images to NETLOGON\Images
@@ -416,8 +417,9 @@
   environment:
     GPO_TEMP_PATH: "{{ gpo_temp_path }}"
   register: _gpo_images_result
-  run_once: true
-  when: _domain_files_stat.stat.exists | default(false)
+  when:
+    - _domain_files_stat.stat.exists | default(false)
+    - not (_domain_exists | default(false) | bool)
   changed_when: "'CHANGED:' in (_gpo_images_result.stdout | default(''))"
 
 - name: Display image staging result
@@ -432,7 +434,7 @@
   ansible.windows.win_file:
     path: "{{ gpo_temp_path }}"
     state: absent
-  run_once: true
+  when: not (_domain_exists | default(false) | bool)
 
 # ----------------------------------------------------------------------------
 # Section 9 — Summary

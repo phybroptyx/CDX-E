@@ -4,4 +4,4 @@
 #   Provisioned by provision_relay.yml — do not rebuild per exercise.
 template_vm_id = 2039
 template_name  = "cdx-debian133-base"
-iso_file       = "QNAP:iso/debian-13.3.0-amd64-netinst.iso"
+iso_file       = "QNAP:iso/debian-13.3.0-amd64-DVD-1.iso"

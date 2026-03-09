@@ -25,10 +25,10 @@ variable "proxmox_node" {
 }
 
 # Template
-variable "debian13_template_vmid" {
+variable "debian12_template_vmid" {
   type        = number
-  default     = 2039
-  description = "Proxmox VMID of cdx-debian133-base template (built by debian-13.pkr.hcl)"
+  default     = 2038
+  description = "Proxmox VMID of cdx-debian129-base template (built by debian-12.pkr.hcl)"
 }
 
 # Relay identity

@@ -16,6 +16,10 @@
 # Proxmox API
 # =============================================================================
 
+# Proxmox bridge used for management (Layer0). VMs clone with net0 here for
+# DHCP bootstrap; Ansible migrates the NIC to the exercise bridge post-config.
+proxmox_layer0_bridge: "Layer0"
+
 proxmox_api_host: "{{ proxmox.api_host | default('cdx-pve-01') }}"
 proxmox_api_port: 8006
 proxmox_api_url: "https://{{ proxmox_api_host }}:{{ proxmox_api_port }}/api2/json"
@@ -23,6 +27,12 @@ proxmox_api_user: "{{ proxmox.api_user | default('ansible@pam') }}"
 proxmox_api_token_id: "{{ proxmox.api_token_id | default('ansible') }}"
 proxmox_api_token_secret: "{{ proxmox.api_token_secret }}"   # required — load from secrets/credentials.yml
 proxmox_validate_certs: false
+
+# CDX-RELAY: persistent Debian 12 VM that provides exercise connectivity.
+# SSH ProxyJump (Linux/VyOS) and SOCKS5 proxy port 1080 (Windows WinRM).
+# Must be running before any exercise deployment playbook executes.
+proxmox_relay_vmid: 102
+proxmox_relay_node: "cdx-pve-01"
 
 # Node where VM templates reside (source for all clones)
 template_node: "cdx-pve-01"
@@ -41,7 +51,7 @@ proxmox_hosts:
 clone_timeout: 300
 post_clone_delay: 8
 post_stop_delay: 3
-guest_agent_initial_delay: 30
+guest_agent_initial_delay: 75
 guest_agent_poll_interval: 10
 guest_agent_poll_retries: 30
 bootstrap_ssh_timeout: 15
@@ -50,6 +60,19 @@ configure_ssh_timeout: 30
 # VM power-on: seconds to wait for management port (WinRM/SSH) after boot
 vm_power_wait_timeout: 300
 vm_power_wait_sleep: 10
+
+# DHCP bootstrap timing (Layer0 NIC — Windows VMs before NIC migration)
+# network-get-interfaces is polled until a non-loopback, non-APIPA IPv4 appears.
+dhcp_discovery_retries: 20   # Max poll attempts (20 × 15 s = 5 minutes max)
+dhcp_discovery_delay:   15   # Seconds between poll attempts
+
+# Sysprep settle delay — seconds to wait after the QEMU guest agent first
+# responds before polling for a Layer0 DHCP IP.
+# The QEMU GA becomes responsive during the Specialize pass (first boot) but
+# Sysprep then reboots into the final state.  This delay ensures the DHCP poll
+# and guest-exec run against the stable post-Sysprep system.
+windows_sysprep_settle_delay: 30
+
 
 # =============================================================================
 # Packer
@@ -84,6 +107,14 @@ proxmox_node_template_offset:
 team_groups:      ['red_team', 'apt', 'blue_team', 'soc']
 red_team_groups:  ['red_team', 'apt']
 blue_team_groups: ['blue_team', 'soc']
+
+# Groups that auto-start at Terraform clone time (started=true in main.tf).
+# All other scenario VMs clone powered off and are brought up by
+# vm_power_management at the appropriate pipeline phase:
+#   Phase 2b  : routers + domain_controllers (this list)
+#   Phase 4.5 : member servers (after AD domain is built)
+#   Phase 6.5 : workstations  (after domain DHCP scope is active)
+terraform_autostart_groups: ['routers', 'domain_controllers']
 
 # =============================================================================
 # VM Configuration
@@ -224,7 +255,7 @@ template_registry:
   # ── Network ──────────────────────────────────────────────────────────────
   vyos:
     id: 2017
-    status: planned
+    status: built
     qnap_direct: true               # Skip RAID staging — linked-clone directly from QNAP master
     os: "VyOS 1.5 Rolling (202512150610)"
     os_type: "vyos"
@@ -334,7 +365,7 @@ template_registry:
 
   server_2008r2:
     id: 2024
-    status: built
+    status: in-progress
     os: "Windows Server 2008 R2"
     os_type: "windows"
     packer_template: "windows-server-2008r2.pkr.hcl"
@@ -441,6 +472,7 @@ template_registry:
     packer_template: "debian-12.pkr.hcl"
     packer_vars: "debian_12.pkrvars.hcl"
     proxmox_name: "cdx-debian129-base"
+    relay_base: true    # CDX-RELAY VM (VMID 102) is provisioned from this template
 
   debian_13:
     id: 2039
@@ -450,7 +482,6 @@ template_registry:
     packer_template: "debian-13.pkr.hcl"
     packer_vars: "debian_13.pkrvars.hcl"
     proxmox_name: "cdx-debian133-base"
-    relay_base: true    # CDX-RELAY VM (VMID 102) is provisioned from this template
 
   centos_7:
     id: 2019

@@ -163,6 +163,7 @@ source "proxmox-clone" "flare_vm" {
   token                    = var.proxmox_api_token_secret
   insecure_skip_tls_verify = true
   node                     = var.proxmox_node
+  pool                     = "CDX_TEMPLATES"
 
   # ── Clone source ────────────────────────────────────────────────────────────
   # Full clone so tool installation does not affect the Windows 10 base template.
@@ -269,6 +270,6 @@ build {
       "PROXMOX_NODE=${var.proxmox_node}",
       "TEMPLATE_VMID=${var.vm_id}",
     ]
-    script = "../scripts/common/strip-nics.sh"
+    inline = ["bash ../scripts/common/strip-nics.sh"]
   }
 }

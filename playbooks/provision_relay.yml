@@ -9,7 +9,7 @@
 # Terraform workspaces. It must be provisioned once before any exercises run.
 #
 # Architecture:
-#   VMID 102  — cdx-relay, Debian 13.3.0, cloned from VMID 2039 template
+#   VMID 102  — cdx-relay, Debian 12.9, cloned from VMID 2038 template
 #   eth0      — Layer0 static 10.0.0.10/22 (ACN management)
 #   eth1      — CDX-I EQIX4 uplink
 #   eth2-4    — Exercise bridges (managed by configure_relay, not Terraform)
@@ -52,23 +52,23 @@
         status_code: [200]
       register: _proxmox_vms
 
-    - name: Check for Debian 13 base template (VMID 2039)
+    - name: Check for Debian 12 base template (VMID 2038)
       ansible.builtin.set_fact:
         _template_exists: >-
           {{ _proxmox_vms.json.data
-             | selectattr('vmid', 'equalto', 2039)
+             | selectattr('vmid', 'equalto', 2038)
              | list | length > 0 }}
 
-    - name: Fail if Debian 13 base template is not available
+    - name: Fail if Debian 12 base template is not available
       ansible.builtin.fail:
         msg: >-
-          Debian 13 base template (VMID 2039, cdx-debian133-base) was not found
+          Debian 12 base template (VMID 2038, cdx-debian129-base) was not found
           in Proxmox. Build it first:
             cd INFRASTRUCTURE/packer/templates
             packer build \
               -var-file=../vars/common.pkrvars.hcl \
-              -var-file=../vars/debian_13.pkrvars.hcl \
-              debian-13.pkr.hcl
+              -var-file=../vars/debian_12.pkrvars.hcl \
+              debian-12.pkr.hcl
       when: not _template_exists
 
     - name: Check for existing relay VM (VMID 102)
@@ -99,6 +99,12 @@
   vars_files:
     - "../secrets/credentials.yml"
 
+  vars:
+    # proxmox_node is normally in group_vars/all.yml, but this playbook runs
+    # against localhost without the inventory path, so group_vars is not loaded.
+    # The relay is always on cdx-pve-01 — define it explicitly here.
+    proxmox_node: "cdx-pve-01"
+
   tasks:
     - name: Skip if relay already exists
       ansible.builtin.debug:
@@ -124,18 +130,61 @@
       register: _tf_apply
       changed_when: "'Apply complete' in (_tf_apply.stdout | default(''))"
 
+    # ── Discover management IP via QEMU guest agent ───────────────────────────
+    # Terraform's started=true powers the VM on. eth0 (Layer0) receives a DHCP
+    # address. Poll network-get-interfaces until eth0 reports an IPv4 address,
+    # then use that address to connect. configure_relay (Play 3) subsequently
+    # deploys /etc/network/interfaces with the permanent static 10.0.0.10/22.
+
+    - name: Wait for relay management NIC to receive DHCP address (via QEMU agent)
+      ansible.builtin.uri:
+        url: "{{ proxmox_api_url }}/nodes/{{ proxmox_node }}/qemu/102/agent/network-get-interfaces"
+        method: GET
+        headers:
+          Authorization: >-
+            PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+        validate_certs: "{{ proxmox_validate_certs }}"
+        status_code: [200]
+      register: _agent_ifaces
+      until: >-
+        _agent_ifaces.status == 200 and
+        (_agent_ifaces.json.data.result
+         | rejectattr('name', 'equalto', 'lo')
+         | selectattr('ip-addresses', 'defined')
+         | map(attribute='ip-addresses')
+         | flatten
+         | selectattr('ip-address-type', 'equalto', 'ipv4')
+         | list | length > 0)
+      retries: 36
+      delay: 5
+      when: not hostvars['localhost']['_relay_exists']
+
+    - name: Set relay management IP from DHCP discovery
+      ansible.builtin.set_fact:
+        _relay_mgmt_ip: >-
+          {{ _agent_ifaces.json.data.result
+             | rejectattr('name', 'equalto', 'lo')
+             | selectattr('ip-addresses', 'defined')
+             | map(attribute='ip-addresses')
+             | flatten
+             | selectattr('ip-address-type', 'equalto', 'ipv4')
+             | map(attribute='ip-address')
+             | first }}
+      when: not hostvars['localhost']['_relay_exists']
+
     - name: Register relay in in-memory inventory (post-provision)
       ansible.builtin.add_host:
         name: cdx-relay
         groups: relay
-        ansible_host: "10.0.0.10"
+        ansible_host: "{{ _relay_mgmt_ip }}"
         ansible_user: cdxadmin
+        ansible_ssh_pass: "{{ vault_cloud_init_password }}"
         ansible_ssh_private_key_file: "~/.ssh/id_ed25519"
       when: not hostvars['localhost']['_relay_exists']
 
-    - name: Wait for relay SSH to become available
+    - name: Wait for relay SSH to become available at discovered IP
       ansible.builtin.wait_for:
-        host: "10.0.0.10"
+        host: "{{ _relay_mgmt_ip }}"
         port: 22
         timeout: 300
         sleep: 5
@@ -156,3 +205,62 @@
     - role: configure_relay
       vars:
         relay_action: provision
+
+# ----------------------------------------------------------------------------
+# Play 4 — Assign static management IP (guest-exec)
+# ----------------------------------------------------------------------------
+- name: Assign static management IP to relay via QEMU guest-exec
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  vars:
+    proxmox_node: "cdx-pve-01"
+
+  tasks:
+    - name: Apply static IP 10.0.0.10/22 on relay management NIC via guest-exec
+      ansible.builtin.uri:
+        url: "{{ proxmox_api_url }}/nodes/{{ proxmox_node }}/qemu/102/agent/exec"
+        method: POST
+        headers:
+          Authorization: >-
+            PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+        validate_certs: "{{ proxmox_validate_certs }}"
+        body_format: json
+        body:
+          command:
+            - /bin/sh
+            - -c
+            - >-
+              IFACE=$(ls /sys/class/net | grep -v lo | head -1);
+              ip link set up dev $IFACE;
+              ip addr flush dev $IFACE;
+              ip addr add 10.0.0.10/22 dev $IFACE;
+              ip route replace default via 10.0.0.1 2>/dev/null;
+              true
+        status_code: [200]
+      register: _gx_ip
+
+    - name: Poll guest-exec until IP assignment completes
+      ansible.builtin.uri:
+        url: "{{ proxmox_api_url }}/nodes/{{ proxmox_node }}/qemu/102/agent/exec-status?pid={{ _gx_ip.json.data.pid }}"
+        method: GET
+        headers:
+          Authorization: >-
+            PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+        validate_certs: "{{ proxmox_validate_certs }}"
+        status_code: [200]
+      register: _gx_poll
+      until: _gx_poll.json.data.exited | int == 1
+      retries: 12
+      delay: 2
+
+    - name: Confirm relay SSH is reachable at 10.0.0.10
+      ansible.builtin.wait_for:
+        host: "10.0.0.10"
+        port: 22
+        timeout: 30
+        sleep: 2

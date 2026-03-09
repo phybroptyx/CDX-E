@@ -10,11 +10,15 @@
 #     in vms.yaml → network_topology.  Reloads networking via ifreload -a.
 #     All Proxmox node tasks are delegated from localhost.
 #
-#   Part 2 — VyOS router configuration
-#     Stages and applies per-router VyOS CLI config files found at:
-#       EXERCISES/<name>/VyOS/<vm-name>.conf
-#     Config is pushed via SSH (vbash -l -s).  Routers with no config file
-#     emit a warning and are skipped (not a failure — manual config valid).
+#   Part 2 — VyOS router configuration (Layer0 bootstrap pattern)
+#     Per-router config files at EXERCISES/<name>/VyOS/<vm-name>.conf are
+#     staged and applied via the Layer0 bootstrap flow:
+#       1. Discover VyOS Layer0 DHCP IP via Proxmox QEMU guest agent
+#       2. Stage config file via SSH to Layer0 IP (direct ACN→VM, no ProxyJump)
+#       3. Apply via nohup vbash (commit changes eth0, SSH drops — expected)
+#       4. Migrate net0: Layer0 → additional_nics[0].bridge (Proxmox API)
+#       5. Wait for SSH on exercise IP via relay; update ansible_host
+#     Routers with no config file emit a warning and are skipped.
 #
 # Expects facts set by read_exercise_config:
 #   virtual_machines  — list of VM objects from vms.yaml
@@ -23,7 +27,7 @@
 #   exercise_dir      — path to EXERCISES/<name>/
 #
 # Proxmox nodes must be in inventory/hosts.yml → proxmox_cluster.
-# VyOS hosts must be in the generated exercise_hosts.yml (ansible_host set).
+# VyOS: ansible_host is discovered at runtime via QEMU guest agent (Layer0 DHCP).
 # =============================================================================
 
 # ----------------------------------------------------------------------------
@@ -204,13 +208,13 @@
 # ----------------------------------------------------------------------------
 # Discover management IPs for VyOS VMs via Proxmox QEMU guest agent
 # ----------------------------------------------------------------------------
-# VyOS VMs receive management IPs via Layer0 DHCP (CDX-GTW). The IP is not
-# known in advance. Query the Proxmox QEMU guest agent after VM boot to get
-# the current interface list, then inject the discovered IP into in-memory
-# inventory via add_host so that the subsequent delegate_to can reach the router.
-# Skipped for VMs that already have ansible_host set (e.g. static assignment).
+# VyOS VMs receive management IPs via Layer0 DHCP. The IP is not known in advance.
+# Query the Proxmox QEMU guest agent every run (never use a cached ansible_host —
+# stale IPs from prior runs cause "no route to host" failures). The discovered IP
+# is injected into in-memory inventory via add_host so the SSH staging task can
+# delegate to the router at its current Layer0 address.
 
-- name: Query Proxmox guest agent — VyOS management IP
+- name: Query Proxmox guest agent — VyOS Layer0 DHCP IP
   ansible.builtin.uri:
     url: >-
       {{ proxmox_api_url }}/nodes/{{
@@ -226,8 +230,8 @@
   loop_control:
     label: "{{ item.name }} (vmid={{ item.vmid }})"
   register: _vyos_agent_responses
-  ignore_errors: true   # VM may be stopped (bridges run before power-on); warn task handles no-IP case
-  when: hostvars[item.name].ansible_host | default('') | length == 0
+  ignore_errors: true   # VM may be stopped or already configured; warn task handles no-IP case
+  # Always re-query — do not use a cached ansible_host; stale IPs from prior runs cause failures.
 
 - name: Build VyOS IP map from guest agent responses
   ansible.builtin.set_fact:
@@ -273,31 +277,241 @@
 # ----------------------------------------------------------------------------
 # Stage config on each VyOS host, then apply via vbash
 # ----------------------------------------------------------------------------
-- name: Stage VyOS config file on router
+# Register temporary delegation hosts for each VyOS VM with its discovered Layer0 IP.
+# Using a unique prefixed name (_vyos_mgmt_*) guarantees these are not in the static
+# inventory, so add_host vars are authoritative — no priority conflict with existing
+# ansible_host values. delegate_to evaluates loop variables correctly; vars: does not.
+- name: Register VyOS temporary delegation hosts (discovered Layer0 IPs)
+  ansible.builtin.add_host:
+    name: "_vyos_mgmt_{{ item.key }}"
+    ansible_host: "{{ item.value }}"
+    ansible_user: "{{ hostvars[item.key].ansible_user | default('vyos') }}"
+    ansible_password: "{{ hostvars[item.key].ansible_password | default(omit) }}"
+    ansible_ssh_private_key_file: "{{ hostvars[item.key].ansible_ssh_private_key_file | default(omit) }}"
+    ansible_ssh_common_args: "{{ hostvars[item.key].ansible_ssh_common_args | default(omit) }}"
+  loop: "{{ _vyos_discovered_ips | default({}) | dict2items }}"
+  loop_control:
+    label: "_vyos_mgmt_{{ item.key }} → {{ item.value }}"
+  when: _vyos_discovered_ips | default({}) | length > 0
+
+- name: Stage VyOS config file on router (SSH to Layer0 DHCP IP)
   ansible.builtin.copy:
     src: "{{ exercise_dir }}/VyOS/{{ item.item.name }}.conf"
     dest: "/tmp/vyos-{{ item.item.name }}.conf"
     mode: '0600'
-  delegate_to: "{{ item.item.name }}"
+  delegate_to: "_vyos_mgmt_{{ item.item.name }}"
   loop: "{{ _vyos_conf_stats.results | default([]) }}"
   loop_control:
     label: "{{ item.item.name }}"
   when:
     - item.stat.exists
-    - hostvars[item.item.name].ansible_host | default('') | length > 0
+    - _vyos_discovered_ips[item.item.name] | default('') | length > 0
+    # Skip if discovered IP already equals exercise IP — config applied on a prior run.
+    - _vyos_discovered_ips[item.item.name] | default('') != (item.item.network_bootstrap | default({})).ip | default('')
 
-- name: Apply VyOS configuration
-  ansible.builtin.shell: >-
-    vbash -c "source /opt/vyatta/etc/functions/script-template &&
-    source /tmp/vyos-{{ item.item.name }}.conf"
-  delegate_to: "{{ item.item.name }}"
+# Generate a proper #!/bin/vbash execution wrapper from the staged conf file.
+# The conf file format uses 'configure' (interactive subshell entrypoint) which
+# does not propagate its config session to the calling shell in non-interactive
+# contexts — all subsequent 'set' calls see "without config session" and no-op.
+# Correct non-interactive VyOS scripting: source script-template directly,
+# call 'set' functions without 'configure', then commit+save.
+# The wrapper is built by extracting only '^set ' lines from the conf file.
+- name: Generate VyOS execution wrapper on router (SSH to Layer0 DHCP IP)
+  ansible.builtin.shell: |
+    printf '#!/bin/vbash\n' > /tmp/vyos-run-{{ item.item.name }}.sh
+    printf 'exec > /tmp/vyos-apply-{{ item.item.name }}.log 2>&1\n' >> /tmp/vyos-run-{{ item.item.name }}.sh
+    printf 'source /opt/vyatta/etc/functions/script-template\n' >> /tmp/vyos-run-{{ item.item.name }}.sh
+    grep '^delete ' /tmp/vyos-{{ item.item.name }}.conf >> /tmp/vyos-run-{{ item.item.name }}.sh || true
+    grep '^set ' /tmp/vyos-{{ item.item.name }}.conf >> /tmp/vyos-run-{{ item.item.name }}.sh
+    printf 'commit\nsave\n' >> /tmp/vyos-run-{{ item.item.name }}.sh
+    chmod +x /tmp/vyos-run-{{ item.item.name }}.sh
+  delegate_to: "_vyos_mgmt_{{ item.item.name }}"
   loop: "{{ _vyos_conf_stats.results | default([]) }}"
   loop_control:
     label: "{{ item.item.name }}"
   when:
     - item.stat.exists
-    - hostvars[item.item.name].ansible_host | default('') | length > 0
+    - _vyos_discovered_ips[item.item.name] | default('') | length > 0
+    - _vyos_discovered_ips[item.item.name] | default('') != (item.item.network_bootstrap | default({})).ip | default('')
   changed_when: true
+
+# Apply VyOS config via QEMU guest-exec (not SSH).
+# SSH-based nohup cannot guarantee the vbash commit survives the session teardown
+# that occurs when VyOS reconfigures eth0 (changing IP drops the SSH connection).
+# guest-exec runs entirely inside the VM via virtio-serial — independent of SSH.
+# The Proxmox API returns a PID immediately; exec-status is polled until the
+# process exits, confirming commit + save completed before NIC migration runs.
+- name: Apply VyOS configuration via QEMU guest-exec
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.item.vmid }}/agent/exec
+    method: POST
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    body_format: json
+    body:
+      command:
+        - "/bin/vbash"
+        - "/tmp/vyos-run-{{ item.item.name }}.sh"
+        # Wrapper is a #!/bin/vbash script that sources script-template and calls
+        # set/commit/save as bash functions — no 'configure' (interactive-only).
+        # Executed directly by vbash; no su, no bash -c wrapper needed.
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  loop: "{{ _vyos_conf_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.stat.exists
+    - _vyos_discovered_ips[item.item.name] | default('') | length > 0
+    - _vyos_discovered_ips[item.item.name] | default('') != (item.item.network_bootstrap | default({})).ip | default('')
+  register: _vyos_gx_results
+  changed_when: true
+
+- name: Initialize VyOS exec PID collection
+  ansible.builtin.set_fact:
+    _vyos_gx_pids: []
+
+- name: Collect VyOS exec PIDs
+  ansible.builtin.set_fact:
+    _vyos_gx_pids: >-
+      {{ _vyos_gx_pids + [{'name': item.item.item.name, 'vmid': item.item.item.vmid,
+         'node': (item.item.item.proxmox | default({})).node | default(scenario.proxmox.node),
+         'pid': item.json.data.pid}] }}
+  when:
+    - not item.failed | default(false)
+    - not item.skipped | default(false)
+    - item.json.data.pid is defined
+  loop: "{{ _vyos_gx_results.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.item.name | default('?') }}"
+
+# VyOS commit + save can take 30+ seconds on a fresh boot with a full config.
+# Retry up to 30 times × 5s delay = 150s maximum wait.
+# Accept HTTP 500 "does not exist" — fast-exiting processes purge from the GA
+# tracking table before the first poll fires.
+- name: Poll VyOS guest-exec completion (commit + save)
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ item.node }}/qemu/{{ item.vmid }}/agent/exec-status?pid={{ item.pid }}
+    method: GET
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200, 500]
+  loop: "{{ _vyos_gx_pids }}"
+  loop_control:
+    label: "{{ item.name }} (pid={{ item.pid }})"
+  register: _vyos_gx_poll
+  until: >-
+    (_vyos_gx_poll.status == 200 and _vyos_gx_poll.json.data.exited | default(0) | int == 1)
+    or (_vyos_gx_poll.status == 500 and 'does not exist' in (_vyos_gx_poll.json.message | default('')))
+  retries: 30
+  delay: 5
+  when: _vyos_gx_pids | length > 0
+
+# Read current net0 MAC for each VyOS VM before migration.
+# Proxmox regenerates the MAC if it is omitted from the PUT net0 parameter.
+# A new MAC causes VyOS to lose the interface identity: eth0 loses its IP
+# immediately and gets renamed (e.g. eth3) on the next boot because VyOS's
+# interface naming can no longer match the MAC to the configured interface.
+- name: Initialize VyOS net0 MAC map
+  ansible.builtin.set_fact:
+    _vyos_net0_macs: {}
+
+- name: Get current net0 MAC — VyOS (pre-migration)
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.item.vmid }}/config
+    method: GET
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  loop: "{{ _vyos_conf_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when:
+    - item.stat.exists
+    - item.item.network_bootstrap is defined
+    - _vyos_discovered_ips[item.item.name] | default('') != (item.item.network_bootstrap | default({})).ip | default('')
+  register: _vyos_vm_configs
+
+- name: Build VyOS net0 MAC map
+  ansible.builtin.set_fact:
+    _vyos_net0_macs: >-
+      {%- set macs = _vyos_net0_macs | default({}) -%}
+      {%- if not item.skipped | default(false) and item.json.data.net0 is defined -%}
+        {%- set mac = item.json.data.net0 | regex_search('[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}') -%}
+        {%- if mac -%}
+          {%- set _ = macs.update({item.item.item.name: mac}) -%}
+        {%- endif -%}
+      {%- endif -%}
+      {{ macs }}
+  loop: "{{ _vyos_vm_configs.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.item.name | default('?') }}"
+
+# Migrate net0 from Layer0 → exercise bridge (additional_nics[0].bridge).
+# MAC is preserved in the PUT body — Proxmox regenerates the MAC if omitted,
+# which breaks VyOS interface identity immediately and on all subsequent reboots.
+- name: Migrate net0 — Layer0 → exercise bridge (VyOS)
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.item.vmid }}/config
+    method: PUT
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    body_format: form-urlencoded
+    body:
+      net0: "virtio={{ _vyos_net0_macs[item.item.name] }},bridge={{ item.item.network.additional_nics[0].bridge }},firewall=0"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  loop: "{{ _vyos_conf_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }} → {{ item.item.network.additional_nics[0].bridge | default('?') }}"
+  when:
+    - item.stat.exists
+    - item.item.network_bootstrap is defined
+    - _vyos_net0_macs[item.item.name] is defined
+    - _vyos_discovered_ips[item.item.name] | default('') != (item.item.network_bootstrap | default({})).ip | default('')
+    - item.item.network.additional_nics | default([]) | length > 0
+
+# Wait for SSH on the exercise IP via the relay.
+# After NIC migration, VyOS eth0 is on ex_dc303_in with the exercise IP.
+# The relay (also on ex_dc303_in) can reach it directly.
+- name: Wait for SSH connectivity (VyOS — via relay, post-NIC migration)
+  ansible.builtin.wait_for:
+    host:    "{{ item.item.network_bootstrap.ip }}"
+    port:    22
+    timeout: "{{ vm_power_wait_timeout }}"
+    sleep:   "{{ vm_power_wait_sleep }}"
+  delegate_to: cdx-relay
+  loop: "{{ _vyos_conf_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }} → {{ item.item.network_bootstrap.ip | default('NO IP') }}"
+  when:
+    - item.stat.exists
+    - item.item.network_bootstrap is defined
+
+# Update ansible_host to the exercise IP so subsequent playbooks can reach VyOS via relay.
+- name: Update VyOS ansible_host to exercise IP (post-NIC migration)
+  ansible.builtin.add_host:
+    name: "{{ item.item.name }}"
+    ansible_host: "{{ item.item.network_bootstrap.ip }}"
+  loop: "{{ _vyos_conf_stats.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.name }} → {{ item.item.network_bootstrap.ip | default('NO IP') }}"
+  when:
+    - item.stat.exists
+    - item.item.network_bootstrap is defined
 
 # ----------------------------------------------------------------------------
 # Warnings for missing or unreachable routers

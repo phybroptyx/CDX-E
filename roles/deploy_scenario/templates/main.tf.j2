@@ -48,12 +48,12 @@ resource "proxmox_virtual_environment_vm" "{{ vm.name | lower | regex_replace('[
     firewall = false
   }
 
-{% elif template_registry[vm.template].os_type in ['windows', 'linux'] %}
+{% elif template_registry[vm.template].os_type in ['windows', 'linux'] and vm.ansible_group == 'domain_controllers' %}
 
-  # Bootstrap NIC on Layer0 — VM receives DHCP IP for initial WinRM/SSH access.
-  # Ansible configures the static exercise IP via WinRM, then migrates this NIC
-  # to the exercise bridge via Proxmox API. lifecycle.ignore_changes prevents
-  # Terraform from reverting Ansible's NIC migration on subsequent applies.
+  # Domain controllers: Bootstrap NIC on Layer0 — DCs boot before the domain
+  # DHCP server is active. Ansible configures the static exercise IP via
+  # guest-exec, then migrates this NIC to the exercise bridge via Proxmox API.
+  # lifecycle.ignore_changes prevents Terraform from reverting the migration.
   network_device {
     # net0 — Layer0 bootstrap (Ansible migrates to {{ vm.network.additional_nics[0].bridge | default('exercise bridge') }})
     bridge   = "{{ proxmox_layer0_bridge }}"
@@ -61,10 +61,46 @@ resource "proxmox_virtual_environment_vm" "{{ vm.name | lower | regex_replace('[
     firewall = false
   }
 
+{% elif template_registry[vm.template].os_type in ['windows', 'linux'] %}
+
+  # Member servers: net0 directly on exercise bridge — by Phase 4.5, the domain
+  # DHCP server is active and serves addresses on this bridge. No Layer0
+  # bootstrap or NIC migration required. Static exercise IP is still configured
+  # via guest-exec after the DHCP address is confirmed.
+  network_device {
+    # net0 — {{ vm.network.additional_nics[0].bridge }} (exercise bridge; DHCP from domain then static via guest-exec)
+    bridge   = "{{ vm.network.additional_nics[0].bridge }}"
+    model    = "{{ vm.network.additional_nics[0].model | default('virtio') }}"
+    firewall = false
+  }
+
+{% elif template_registry[vm.template].os_type == 'vyos' %}
+
+  # VyOS: net0 starts on Layer0 for SSH bootstrap. configure_networking SSHes to
+  # the Layer0 DHCP IP, stages the full VyOS config file, then applies it via
+  # nohup vbash (commit reconfigures eth0, breaking the SSH session — expected).
+  # After apply, net0 is migrated from Layer0 to additional_nics[0].bridge via
+  # Proxmox API. lifecycle.ignore_changes prevents Terraform from reverting the
+  # bridge migration on subsequent applies.
+  network_device {
+    # net0 — Layer0 bootstrap (Ansible migrates to {{ vm.network.additional_nics[0].bridge | default('exercise bridge') }})
+    bridge   = "{{ proxmox_layer0_bridge }}"
+    model    = "virtio"
+    firewall = false
+  }
+
+{% for nic in vm.network.additional_nics[1:] %}
+  network_device {
+    # net{{ loop.index }} — {{ nic.bridge }}
+    bridge   = "{{ nic.bridge }}"
+    model    = "{{ nic.model | default('virtio') }}"
+    firewall = {{ 'true' if nic.firewall | default(false) | bool else 'false' }}
+  }
+{% endfor %}
+
 {% elif vm.network is defined and vm.network.additional_nics | default([]) | length > 0 %}
 
-  # VyOS / multi-NIC VMs: all exercise NICs specified directly.
-  # Bootstrap is via QEMU guest-exec (vbash/iproute2) — no Layer0 NIC needed.
+  # Multi-NIC VMs (non-VyOS): all exercise NICs specified directly.
 {% for nic in vm.network.additional_nics %}
   network_device {
     # net{{ loop.index0 }} — {{ nic.bridge }}
@@ -75,16 +111,17 @@ resource "proxmox_virtual_environment_vm" "{{ vm.name | lower | regex_replace('[
 {% endfor %}
 {% endif %}
 
-{% if vm.ansible_group == 'workstations' %}
-  # Workstations: remain powered off at clone time.
-  # Powered on by workstation_configuration (Phase 7) after DHCP scope is active.
+  # All VMs clone powered off. Terraform is a pure provisioner (clone + hardware config).
+  # The bpg/proxmox provider blocks until the QEMU guest agent responds when started=true,
+  # which can take 8-15 minutes for Windows Sysprep on a fresh clone — unacceptable for
+  # pipeline speed. Ansible (vm_power_management) drives all power-on operations via the
+  # Proxmox API in dependency order:
+  #   Phase 2b-r : routers only (first; no other VMs up yet)
+  #   Phase 3    : VyOS router configuration (router is exercise-ready before DCs boot)
+  #   Phase 2b   : domain_controllers (after router is exercise-ready)
+  #   Phase 4.5  : member servers (after AD domain is built)
+  #   Phase 6.5  : workstations (after domain DHCP scope is active)
   started = false
-{% else %}
-  # All other VMs: power on immediately — exercise bridges exist at clone time
-  # (Phase 1.5 creates them before Terraform). VyOS and Windows/Linux servers
-  # all boot immediately; vm_power_management (Phase 2b) waits for connectivity.
-  started = true
-{% endif %}
 
   # Use standard VGA display — avoids inheriting SPICE/QXL from the Packer template.
   vga {
@@ -92,9 +129,10 @@ resource "proxmox_virtual_environment_vm" "{{ vm.name | lower | regex_replace('[
   }
 
   lifecycle {
-    # Windows/Linux servers: ignore network_device — Ansible migrates net0 to exercise bridge.
-    # Workstations and VyOS: NIC config is fixed at clone time, no migration needed.
-    ignore_changes = [started{% if template_registry[vm.template].os_type in ['windows', 'linux'] and vm.ansible_group != 'workstations' %}, network_device{% endif %}]
+    # domain_controllers + VyOS: ignore network_device — Ansible migrates net0 to exercise bridge.
+    # Member servers: NIC starts on exercise bridge at clone time, no migration.
+    # Workstations: NIC config is fixed at clone time, no migration needed.
+    ignore_changes = [started{% if vm.ansible_group == 'domain_controllers' or template_registry[vm.template].os_type == 'vyos' %}, network_device{% endif %}]
   }
 }
 {% endfor %}

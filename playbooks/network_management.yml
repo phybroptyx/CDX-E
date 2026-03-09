@@ -61,3 +61,36 @@
       when: net_action == 'deploy'
     - role: revert_networking
       when: net_action == 'destroy'
+
+# ----------------------------------------------------------------------------
+# Play 3 — Relay exercise NIC management
+# ----------------------------------------------------------------------------
+# On deploy: hot-attach the relay's exercise NIC(s) and assign IPs after
+#            SDN bridges are up (Play 2 / configure_networking).
+# On destroy: release NICs and flush IPs (safe after bridge removal —
+#             all ip/link commands in release_nics.yml use failed_when: false).
+# Skips automatically if the exercise has no relay.nic_assignments defined.
+- name: Relay exercise NIC management
+  hosts: cdx-relay
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  vars:
+    relay_nic_assignments: >-
+      {{ (hostvars['localhost']['scenario'].relay | default({})).nic_assignments | default([]) }}
+    relay_routes: >-
+      {{ (hostvars['localhost']['scenario'].relay | default({})).routes | default([]) }}
+
+  pre_tasks:
+    - name: "[preflight] Skip — no relay NIC assignments defined for this exercise"
+      ansible.builtin.meta: end_play
+      when: relay_nic_assignments | length == 0
+
+  roles:
+    - role: configure_relay
+      vars:
+        relay_action: >-
+          {{ 'assign_nics' if (action | default('deploy')) == 'deploy' else 'release_nics' }}

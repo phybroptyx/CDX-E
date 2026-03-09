@@ -1,0 +1,23 @@
+---
+# =============================================================================
+# Role: relay_tunnel — Default Variables
+# =============================================================================
+# Controls the SSH dynamic-forwarding SOCKS5 tunnel from the ACN to CDX-RELAY.
+# The tunnel is required by all WinRM plays — ansible_winrm_proxy_url in
+# group_vars/windows_hosts.yml points to socks5://127.0.0.1:{{ socks5_port }}.
+# =============================================================================
+
+relay_tunnel_action: open           # 'open' or 'close'
+
+relay_tunnel_host:    "10.0.0.10"   # CDX-RELAY management IP (static, Layer0)
+relay_tunnel_user:    "cdxadmin"
+relay_tunnel_key:     "~/.ssh/id_ed25519"
+relay_tunnel_port:    1080          # Must match socks5_port in windows_hosts.yml
+
+# PID file on the ACN — used to track and kill the background tunnel process
+relay_tunnel_pid_file: "/tmp/cdx_relay_tunnel.pid"
+
+# SSH options
+relay_tunnel_connect_timeout:      15   # seconds
+relay_tunnel_keepalive_interval:   60   # ServerAliveInterval
+relay_tunnel_keepalive_count:       3   # ServerAliveCountMax

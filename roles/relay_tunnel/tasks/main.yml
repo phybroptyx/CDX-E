@@ -1,0 +1,22 @@
+---
+# =============================================================================
+# Role: relay_tunnel
+# =============================================================================
+# Manages the SSH dynamic-forwarding SOCKS5 tunnel between the ACN and the
+# CDX-RELAY VM.  All WinRM connections from Ansible route through this tunnel
+# via the socks5://127.0.0.1:1080 proxy set in group_vars/windows_hosts.yml.
+#
+# Usage (include_role in a localhost play):
+#
+#   - ansible.builtin.include_role:
+#       name: relay_tunnel
+#     vars:
+#       relay_tunnel_action: open   # or 'close'
+#
+# Actions:
+#   open  — Start tunnel if not already running. Idempotent.
+#   close — Kill the tunnel process and remove the PID file.
+# =============================================================================
+
+- name: "relay_tunnel: dispatch action '{{ relay_tunnel_action }}'"
+  ansible.builtin.include_tasks: "{{ relay_tunnel_action }}.yml"

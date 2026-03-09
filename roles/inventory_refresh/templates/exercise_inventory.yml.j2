@@ -10,20 +10,27 @@
 #   VyOS     → inventory/group_vars/vyos_hosts.yml    (SSH, ansible_user=vyos)
 #
 # IP address pattern:
-#   ansible_host  — Layer0 management IP (DHCP). Populated by vm_power_management
-#                   via inventory/host_vars/<name>.yml after VM boot. Empty here
-#                   because management IPs are not known at inventory_refresh time.
-#   cloud_init_ip — Exercise-network static IP from vms.yaml (cloud_init.ip).
-#                   Used by AD/DNS/DHCP config roles for service configuration.
-#                   NOT used for Ansible connectivity.
+#   ansible_host  — Exercise-network static IP (cloud_init.ip from vms.yaml).
+#                   Set here for all VMs that have a static IP defined.
+#                   Windows VMs reach Ansible via relay SOCKS5 proxy (port 5985).
+#                   Linux VMs reach Ansible via relay SSH ProxyJump (port 22).
+#                   VyOS: ansible_host managed at runtime by configure_networking.
+#                   Workstations (no cloud_init.ip): ansible_host omitted — discovered later.
+#   cloud_init_ip — Same exercise-network static IP, kept as a separate var so
+#                   AD/DNS/DHCP config roles can reference it without touching ansible_host.
 # =============================================================================
 
 all:
   children:
 
     # ─── All exercise VMs ─────────────────────────────────────────────────────
-    # ansible_host:    set at runtime via inventory/host_vars/<name>.yml
-    # cloud_init_ip:   exercise-network static IP (not the Ansible connection IP)
+    # ansible_host:    exercise-network static IP (cloud_init.ip). Set for all VMs
+    #                  that have a static IP in vms.yaml. Ansible connects via relay:
+    #                    Windows → SOCKS5 proxy (windows_hosts.yml ansible_winrm_proxy_url)
+    #                    Linux   → SSH ProxyJump (linux_hosts.yml ansible_ssh_common_args)
+    #                  VyOS: ansible_host updated at runtime by configure_networking.
+    #                  Workstations (no static IP): ansible_host omitted.
+    # cloud_init_ip:   same exercise IP kept as a separate role-accessible var
     # ansible_user:    cdxadmin (Windows/Linux) or vyos (VyOS)
     # ansible_os_type: windows | linux | vyos  (used by configuration roles)
     # vm_id:           Proxmox VMID
@@ -33,8 +40,12 @@ all:
       hosts:
 {% for vm in _all_vms %}
 {% set _os = template_registry[vm.template].os_type %}
+{% set _ip = _vm_ip_map[vm.name] | default('') %}
         {{ vm.name }}:
-          cloud_init_ip: "{{ _vm_ip_map[vm.name] | default('') }}"
+          cloud_init_ip: "{{ _ip }}"
+{% if _ip | length > 0 and _os != 'vyos' %}
+          ansible_host: "{{ _ip }}"
+{% endif %}
           ansible_user: "{{ 'vyos' if _os == 'vyos' else 'cdxadmin' }}"
           ansible_os_type: "{{ _os }}"
           vm_id: {{ vm.vmid }}

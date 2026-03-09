@@ -196,32 +196,32 @@
     {
       "name": "IT Administrators",
       "sAMAccountName": "IT-Admins",
-      "scope": "Global",
-      "category": "Security",
+      "groupScope": "Global",
+      "groupCategory": "Security",
       "description": "IT infrastructure and systems administrators",
       "ou": "OU=Groups,OU=IT-Core,OU=HQ,OU=DC303"
     },
     {
       "name": "Operations Users",
       "sAMAccountName": "Ops-Users",
-      "scope": "Global",
-      "category": "Security",
+      "groupScope": "Global",
+      "groupCategory": "Security",
       "description": "Operations department staff",
       "ou": "OU=Groups,OU=Operations,OU=HQ,OU=DC303"
     },
     {
       "name": "Engineering Users",
       "sAMAccountName": "Engineering-Users",
-      "scope": "Global",
-      "category": "Security",
+      "groupScope": "Global",
+      "groupCategory": "Security",
       "description": "Engineering department staff",
       "ou": "OU=Groups,OU=Engineering,OU=HQ,OU=DC303"
     },
     {
       "name": "Finance Users",
       "sAMAccountName": "Finance-Users",
-      "scope": "Global",
-      "category": "Security",
+      "groupScope": "Global",
+      "groupCategory": "Security",
       "description": "Finance department staff",
       "ou": "OU=Groups,OU=Finance,OU=HQ,OU=DC303"
     }

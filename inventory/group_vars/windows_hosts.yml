@@ -14,3 +14,8 @@ ansible_winrm_kerberos_delegation: false
 
 ansible_user:     cdxadmin
 ansible_password: "{{ vault_cloud_init_password }}"
+
+# SOCKS5 proxy — SSH dynamic forwarding tunnel established by the exercise
+# deployment playbook before any WinRM tasks run (see roles/relay_tunnel).
+# The ACN opens: ssh -D 1080 -N -f cdxadmin@<relay> and tears it down after.
+ansible_winrm_proxy: "socks5://127.0.0.1:{{ socks5_port | default(1080) }}"

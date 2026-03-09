@@ -164,6 +164,41 @@
   changed_when: false
 
 # ----------------------------------------------------------------------------
+# Section 5.5 — Restart NLA to force domain network profile detection
+# ----------------------------------------------------------------------------
+# After DC promotion and reboot, the Network Location Awareness (NLA) service
+# evaluates the network adapter before the DNS Server service starts serving
+# AD records. NLA cannot locate a DC at that point and defaults to the Public
+# firewall profile ("Network 2"). Now that AD is confirmed ready, restart NLA
+# so it re-evaluates the adapter and classifies it as DomainAuthenticated.
+# Runs on every DC — both the primary and any additional DCs have this issue.
+- name: Restart NLA service to force domain network profile detection
+  ansible.windows.win_service:
+    name: NlaSvc
+    state: restarted
+    force_dependent_services: true
+  when: not (_is_dc | bool)
+
+# ----------------------------------------------------------------------------
+# Section 5.6 — Enable built-in Administrator account
+# ----------------------------------------------------------------------------
+# The built-in Administrator is the only guaranteed Enterprise Admin in a fresh
+# forest. cdxadmin is Domain Admin but NOT Enterprise Admin — it cannot manage
+# AD Sites & Services or other Configuration-partition objects. Enable and set
+# the Administrator password here while still connected as cdxadmin (Domain
+# Admin rights are sufficient for local user management). Sections 7-11 then
+# switch to Administrator credentials for all AD configuration tasks.
+- name: Enable built-in Administrator and set domain admin password
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    net user Administrator /active:yes
+    net user Administrator "{{ scenario.domain.admin_password }}"
+    Write-Output "Administrator account ready"
+  run_once: true
+  no_log: true
+  changed_when: true
+
+# ----------------------------------------------------------------------------
 # Section 6 — Stage JSON configuration files on DC-01
 # ----------------------------------------------------------------------------
 - name: Create AD staging directory on DC
@@ -185,269 +220,290 @@
   run_once: true
 
 # ----------------------------------------------------------------------------
-# Section 7 — AD Sites and Services
+# Sections 7-11 — AD configuration (runs as built-in Administrator)
 # ----------------------------------------------------------------------------
-- name: Create AD Sites, Subnets, and Site Links
-  ansible.windows.win_shell: |
-    $ErrorActionPreference = 'Stop'
-    Import-Module ActiveDirectory
+# All AD object management (Sites, OUs, groups, users) requires Enterprise
+# Admin or equivalent rights on the Configuration partition. The built-in
+# Administrator account (enabled in Section 5.5) is a guaranteed Enterprise
+# Admin. Block-level vars override ansible_user/ansible_password so every
+# WinRM task in this block connects as Administrator.
+- block:
 
-    $template = Get-Content '{{ ad_temp_path }}\exercise_template.json' -Raw | ConvertFrom-Json
-    $changes  = @()
+    # Section 7 — AD Sites and Services
+    - name: Create AD Sites, Subnets, and Site Links
+      ansible.windows.win_shell: |
+        $ErrorActionPreference = 'Stop'
+        Import-Module ActiveDirectory
 
-    # ── Sites and Subnets ─────────────────────────────────────────────────────
-    foreach ($site in $template.sites) {
-        if (-not $site.name) { continue }
+        $template = Get-Content '{{ ad_temp_path }}\exercise_template.json' -Raw | ConvertFrom-Json
+        $changes  = @()
 
-        $siteName = $site.name
-        $existing = Get-ADReplicationSite -Filter "Name -eq '$siteName'" -ErrorAction SilentlyContinue
-        if (-not $existing) {
-            New-ADReplicationSite -Name $site.name -Description $site.description -ErrorAction Stop
-            $changes += "CHANGED: Created site '$($site.name)'"
-        }
+        # ── Sites ─────────────────────────────────────────────────────────────
+        # Rename Default-First-Site-Name to the exercise site name rather than
+        # creating a second site. All DCs are already registered in the default
+        # site at forest creation time — renaming keeps them in place.
+        foreach ($site in $template.sites) {
+            if (-not $site.name) { continue }
 
-        if ($site.subnet -and $site.subnet.cidr) {
-            $subnetName     = $site.subnet.cidr
-            $existingSubnet = Get-ADReplicationSubnet -Filter "Name -eq '$subnetName'" -ErrorAction SilentlyContinue
-            if (-not $existingSubnet) {
-                $loc = if ($site.subnet.location) { $site.subnet.location } else { $site.name }
-                New-ADReplicationSubnet -Name $site.subnet.cidr -Site $site.name -Location $loc -ErrorAction Stop
-                $changes += "CHANGED: Created subnet '$($site.subnet.cidr)' → site '$($site.name)'"
-            }
-        }
-    }
-
-    # ── Site Links ────────────────────────────────────────────────────────────
-    if ($template.siteLinks) {
-        foreach ($link in $template.siteLinks) {
-            if (-not $link.name) { continue }
-
-            $linkName = $link.name
-            $existing = Get-ADReplicationSiteLink -Filter "Name -eq '$linkName'" -ErrorAction SilentlyContinue
+            $siteName = $site.name
+            $existing = Get-ADReplicationSite -Filter "Name -eq '$siteName'" -ErrorAction SilentlyContinue
             if (-not $existing) {
-                $cost      = if ($link.cost) { $link.cost } else { 100 }
-                $replMins  = if ($link.replicationIntervalMins) { $link.replicationIntervalMins } else { 15 }
-                New-ADReplicationSiteLink -Name $link.name `
-                    -SitesIncluded $link.sites `
-                    -Cost $cost `
-                    -ReplicationFrequencyInMinutes $replMins `
-                    -InterSiteTransportProtocol IP `
-                    -ErrorAction Stop
-                $changes += "CHANGED: Created site link '$($link.name)'"
+                $defaultSite = Get-ADReplicationSite -Filter "Name -eq 'Default-First-Site-Name'" -ErrorAction SilentlyContinue
+                if ($defaultSite) {
+                    Set-ADReplicationSite -Identity 'Default-First-Site-Name' `
+                        -Description $site.description -ErrorAction Stop
+                    Rename-ADObject -Identity $defaultSite.DistinguishedName `
+                        -NewName $site.name -ErrorAction Stop
+                    $changes += "CHANGED: Renamed 'Default-First-Site-Name' → '$($site.name)'"
+                }
+            }
+
+            # ── Subnets ───────────────────────────────────────────────────────
+            if ($site.subnet -and $site.subnet.cidr) {
+                $subnetName     = $site.subnet.cidr
+                $existingSubnet = Get-ADReplicationSubnet -Filter "Name -eq '$subnetName'" -ErrorAction SilentlyContinue
+                if (-not $existingSubnet) {
+                    $loc = if ($site.subnet.location) { $site.subnet.location } else { $site.name }
+                    New-ADReplicationSubnet -Name $site.subnet.cidr -Site $site.name -Location $loc -ErrorAction Stop
+                    $changes += "CHANGED: Created subnet '$($site.subnet.cidr)' → site '$($site.name)'"
+                }
             }
         }
-    }
 
-    if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
-    else { Write-Output "OK: No AD Sites/Services changes required" }
-  register: _sites_result
-  run_once: true
-  changed_when: "'CHANGED:' in (_sites_result.stdout | default(''))"
+        # ── Site Links ────────────────────────────────────────────────────────
+        if ($template.siteLinks) {
+            foreach ($link in $template.siteLinks) {
+                if (-not $link.name) { continue }
 
-- name: Display Sites and Services result
-  ansible.builtin.debug:
-    msg: "{{ _sites_result.stdout_lines }}"
-  run_once: true
+                $linkName = $link.name
+                $existing = Get-ADReplicationSiteLink -Filter "Name -eq '$linkName'" -ErrorAction SilentlyContinue
+                if (-not $existing) {
+                    $cost      = if ($link.cost) { $link.cost } else { 100 }
+                    $replMins  = if ($link.replicationIntervalMins) { $link.replicationIntervalMins } else { 15 }
+                    New-ADReplicationSiteLink -Name $link.name `
+                        -SitesIncluded $link.sites `
+                        -Cost $cost `
+                        -ReplicationFrequencyInMinutes $replMins `
+                        -InterSiteTransportProtocol IP `
+                        -ErrorAction Stop
+                    $changes += "CHANGED: Created site link '$($link.name)'"
+                }
+            }
+        }
 
-# ----------------------------------------------------------------------------
-# Section 8 — OU Hierarchy
-# ----------------------------------------------------------------------------
-- name: Create OU hierarchy from exercise template
-  ansible.windows.win_shell: |
-    $ErrorActionPreference = 'Stop'
-    Import-Module ActiveDirectory
+        if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
+        else { Write-Output "OK: No AD Sites/Services changes required" }
+      register: _sites_result
+      run_once: true
+      retries: 3
+      delay: 10
+      until: _sites_result.rc == 0
+      changed_when: "'CHANGED:' in (_sites_result.stdout | default(''))"
 
-    $template = Get-Content '{{ ad_temp_path }}\exercise_template.json' -Raw | ConvertFrom-Json
-    $domain   = Get-ADDomain
-    $domainDN = $domain.DistinguishedName
-    $changes  = @()
+    - name: Display Sites and Services result
+      ansible.builtin.debug:
+        msg: "{{ _sites_result.stdout_lines }}"
+      run_once: true
 
-    $org    = $template.organizationalStructure
-    $rootOU = $org.rootOU
-    $rootDN = "OU=$rootOU,$domainDN"
+    # Section 8 — OU Hierarchy
+    - name: Create OU hierarchy from exercise template
+      ansible.windows.win_shell: |
+        $ErrorActionPreference = 'Stop'
+        Import-Module ActiveDirectory
 
-    # ── Root OU ───────────────────────────────────────────────────────────────
-    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rootDN'" -ErrorAction SilentlyContinue)) {
-        New-ADOrganizationalUnit -Name $rootOU -Path $domainDN `
-            -Description $org.rootOUDescription `
-            -ProtectedFromAccidentalDeletion $false -ErrorAction Stop
-        $changes += "CHANGED: Created root OU '$rootOU'"
-    }
+        $template = Get-Content '{{ ad_temp_path }}\exercise_template.json' -Raw | ConvertFrom-Json
+        $domain   = Get-ADDomain
+        $domainDN = $domain.DistinguishedName
+        $changes  = @()
 
-    # ── Site key OUs → Department OUs → Sub-OUs ───────────────────────────────
-    foreach ($siteKey in $org.siteMappings.PSObject.Properties.Name) {
-        if ($siteKey -match '^_') { continue }
+        $org    = $template.organizationalStructure
+        $rootOU = $org.rootOU
+        $rootDN = "OU=$rootOU,$domainDN"
 
-        $siteInfo = $org.siteMappings.$siteKey
-        $siteDN   = "OU=$siteKey,$rootDN"
-
-        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$siteDN'" -ErrorAction SilentlyContinue)) {
-            New-ADOrganizationalUnit -Name $siteKey -Path $rootDN `
+        # ── Root OU ───────────────────────────────────────────────────────────
+        if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$rootDN'" -ErrorAction SilentlyContinue)) {
+            New-ADOrganizationalUnit -Name $rootOU -Path $domainDN `
+                -Description $org.rootOUDescription `
                 -ProtectedFromAccidentalDeletion $false -ErrorAction Stop
-            $changes += "CHANGED: Created site OU '$siteKey'"
+            $changes += "CHANGED: Created root OU '$rootOU'"
         }
 
-        foreach ($dept in $siteInfo.departments) {
-            $deptDN = "OU=$dept,$siteDN"
+        # ── Site key OUs → Department OUs → Sub-OUs ───────────────────────────
+        foreach ($siteKey in $org.siteMappings.PSObject.Properties.Name) {
+            if ($siteKey -match '^_') { continue }
 
-            if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$deptDN'" -ErrorAction SilentlyContinue)) {
-                New-ADOrganizationalUnit -Name $dept -Path $siteDN `
+            $siteInfo = $org.siteMappings.$siteKey
+            $siteDN   = "OU=$siteKey,$rootDN"
+
+            if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$siteDN'" -ErrorAction SilentlyContinue)) {
+                New-ADOrganizationalUnit -Name $siteKey -Path $rootDN `
                     -ProtectedFromAccidentalDeletion $false -ErrorAction Stop
-                $changes += "CHANGED: Created department OU '$dept' under '$siteKey'"
+                $changes += "CHANGED: Created site OU '$siteKey'"
             }
 
-            foreach ($subOU in $org.departmentSubOUs) {
-                $subDN = "OU=$subOU,$deptDN"
+            foreach ($dept in $siteInfo.departments) {
+                $deptDN = "OU=$dept,$siteDN"
 
-                if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$subDN'" -ErrorAction SilentlyContinue)) {
-                    New-ADOrganizationalUnit -Name $subOU -Path $deptDN `
+                if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$deptDN'" -ErrorAction SilentlyContinue)) {
+                    New-ADOrganizationalUnit -Name $dept -Path $siteDN `
                         -ProtectedFromAccidentalDeletion $false -ErrorAction Stop
-                    $changes += "CHANGED: Created sub-OU '$subOU' under '$dept/$siteKey'"
+                    $changes += "CHANGED: Created department OU '$dept' under '$siteKey'"
+                }
+
+                foreach ($subOU in $org.departmentSubOUs) {
+                    $subDN = "OU=$subOU,$deptDN"
+
+                    if (-not (Get-ADOrganizationalUnit -Filter "DistinguishedName -eq '$subDN'" -ErrorAction SilentlyContinue)) {
+                        New-ADOrganizationalUnit -Name $subOU -Path $deptDN `
+                            -ProtectedFromAccidentalDeletion $false -ErrorAction Stop
+                        $changes += "CHANGED: Created sub-OU '$subOU' under '$dept/$siteKey'"
+                    }
                 }
             }
         }
-    }
 
-    if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
-    else { Write-Output "OK: No OU changes required" }
-  register: _ou_result
-  run_once: true
-  changed_when: "'CHANGED:' in (_ou_result.stdout | default(''))"
+        if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
+        else { Write-Output "OK: No OU changes required" }
+      register: _ou_result
+      run_once: true
+      changed_when: "'CHANGED:' in (_ou_result.stdout | default(''))"
 
-- name: Display OU hierarchy result
-  ansible.builtin.debug:
-    msg: "{{ _ou_result.stdout_lines }}"
-  run_once: true
+    - name: Display OU hierarchy result
+      ansible.builtin.debug:
+        msg: "{{ _ou_result.stdout_lines }}"
+      run_once: true
 
-# ----------------------------------------------------------------------------
-# Section 9 — Security Groups
-# ----------------------------------------------------------------------------
-- name: Create AD security groups
-  ansible.windows.win_shell: |
-    $ErrorActionPreference = 'Stop'
-    Import-Module ActiveDirectory
+    # Section 9 — Security Groups
+    - name: Create AD security groups
+      ansible.windows.win_shell: |
+        $ErrorActionPreference = 'Stop'
+        Import-Module ActiveDirectory
 
-    $usersData = Get-Content '{{ ad_temp_path }}\users.json' -Raw | ConvertFrom-Json
-    $domainDN  = (Get-ADDomain).DistinguishedName
-    $changes   = @()
+        $usersData = Get-Content '{{ ad_temp_path }}\users.json' -Raw | ConvertFrom-Json
+        $domainDN  = (Get-ADDomain).DistinguishedName
+        $changes   = @()
 
-    foreach ($group in $usersData.groups) {
-        if (-not $group.sAMAccountName) { continue }
+        foreach ($group in $usersData.groups) {
+            if (-not $group.sAMAccountName) { continue }
 
-        $groupSam = $group.sAMAccountName
-        $existing = Get-ADGroup -Filter "SamAccountName -eq '$groupSam'" -ErrorAction SilentlyContinue
-        if (-not $existing) {
-            $ouDN = "$($group.ou),$domainDN"
-            New-ADGroup -Name $group.name `
-                -SamAccountName $group.sAMAccountName `
-                -Description $group.description `
-                -GroupScope $group.groupScope `
-                -GroupCategory $group.groupCategory `
-                -Path $ouDN `
-                -ErrorAction Stop
-            $changes += "CHANGED: Created group '$($group.sAMAccountName)'"
-        }
-    }
-
-    if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
-    else { Write-Output "OK: No group changes required" }
-  register: _groups_result
-  run_once: true
-  changed_when: "'CHANGED:' in (_groups_result.stdout | default(''))"
-
-- name: Display groups result
-  ansible.builtin.debug:
-    msg: "{{ _groups_result.stdout_lines }}"
-  run_once: true
-
-# ----------------------------------------------------------------------------
-# Section 10 — User Accounts and Group Memberships
-# ----------------------------------------------------------------------------
-- name: Create AD user accounts and assign group memberships
-  ansible.windows.win_shell: |
-    $ErrorActionPreference = 'Stop'
-    Import-Module ActiveDirectory
-
-    $usersData  = Get-Content '{{ ad_temp_path }}\users.json' -Raw | ConvertFrom-Json
-    $domain     = Get-ADDomain
-    $domainDN   = $domain.DistinguishedName
-    $domainFQDN = $domain.DNSRoot
-    $changes    = @()
-
-    foreach ($user in $usersData.users) {
-        if (-not $user.sAMAccountName) { continue }
-
-        $userSam  = $user.sAMAccountName
-        $existing = Get-ADUser -Filter "SamAccountName -eq '$userSam'" -ErrorAction SilentlyContinue
-        if (-not $existing) {
-            $ouDN        = "$($user.ou),$domainDN"
-            $secPassword = ConvertTo-SecureString $user.password -AsPlainText -Force
-            $fullName    = if ($user.displayName) { $user.displayName } else { "$($user.givenName) $($user.sn)" }
-
-            $params = @{
-                SamAccountName        = $user.sAMAccountName
-                GivenName             = $user.givenName
-                Surname               = $user.sn
-                DisplayName           = $fullName
-                Name                  = "$($user.givenName) $($user.sn)"
-                UserPrincipalName     = "$($user.sAMAccountName)@$domainFQDN"
-                AccountPassword       = $secPassword
-                Enabled               = [bool]$user.enabled
-                Path                  = $ouDN
-                ChangePasswordAtLogon = $false
-                PasswordNeverExpires  = $true
+            $groupSam = $group.sAMAccountName
+            $existing = Get-ADGroup -Filter "SamAccountName -eq '$groupSam'" -ErrorAction SilentlyContinue
+            if (-not $existing) {
+                $ouDN = "$($group.ou),$domainDN"
+                New-ADGroup -Name $group.name `
+                    -SamAccountName $group.sAMAccountName `
+                    -Description $group.description `
+                    -GroupScope $group.groupScope `
+                    -GroupCategory $group.groupCategory `
+                    -Path $ouDN `
+                    -ErrorAction Stop
+                $changes += "CHANGED: Created group '$($group.sAMAccountName)'"
             }
-            if ($user.title)           { $params.Title         = $user.title }
-            if ($user.initials)        { $params.Initials       = $user.initials }
-            if ($user.telephoneNumber) { $params.OfficePhone    = $user.telephoneNumber }
-            if ($user.streetAddress)   { $params.StreetAddress  = $user.streetAddress }
-            if ($user.city)            { $params.City           = $user.city }
-            if ($user.state)           { $params.State          = $user.state }
-            if ($user.postalCode)      { $params.PostalCode     = $user.postalCode }
-            if ($user.country)         { $params.Country        = $user.country }
-
-            New-ADUser @params -ErrorAction Stop
-            $changes += "CHANGED: Created user '$($user.sAMAccountName)'"
         }
 
-        # Group memberships — run for new and pre-existing users
-        foreach ($groupName in $user.groups) {
-            $grp = Get-ADGroup -Filter "Name -eq '$groupName'" -ErrorAction SilentlyContinue
-            if (-not $grp) {
-                $grp = Get-ADGroup -Filter "SamAccountName -eq '$groupName'" -ErrorAction SilentlyContinue
-            }
-            if ($grp) {
-                $isMember = Get-ADGroupMember -Identity $grp.SamAccountName -ErrorAction SilentlyContinue |
-                            Where-Object { $_.SamAccountName -eq $user.sAMAccountName }
-                if (-not $isMember) {
-                    Add-ADGroupMember -Identity $grp.SamAccountName -Members $user.sAMAccountName -ErrorAction Stop
-                    $changes += "CHANGED: Added '$($user.sAMAccountName)' to '$($grp.SamAccountName)'"
+        if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
+        else { Write-Output "OK: No group changes required" }
+      register: _groups_result
+      run_once: true
+      changed_when: "'CHANGED:' in (_groups_result.stdout | default(''))"
+
+    - name: Display groups result
+      ansible.builtin.debug:
+        msg: "{{ _groups_result.stdout_lines }}"
+      run_once: true
+
+    # Section 10 — User Accounts and Group Memberships
+    - name: Create AD user accounts and assign group memberships
+      ansible.windows.win_shell: |
+        $ErrorActionPreference = 'Stop'
+        Import-Module ActiveDirectory
+
+        $usersData  = Get-Content '{{ ad_temp_path }}\users.json' -Raw | ConvertFrom-Json
+        $domain     = Get-ADDomain
+        $domainDN   = $domain.DistinguishedName
+        $domainFQDN = $domain.DNSRoot
+        $changes    = @()
+
+        foreach ($user in $usersData.users) {
+            if (-not $user.sAMAccountName) { continue }
+
+            $userSam  = $user.sAMAccountName
+            $existing = Get-ADUser -Filter "SamAccountName -eq '$userSam'" -ErrorAction SilentlyContinue
+            if (-not $existing) {
+                $ouDN        = "$($user.ou),$domainDN"
+                $secPassword = ConvertTo-SecureString $user.password -AsPlainText -Force
+                $fullName    = if ($user.displayName) { $user.displayName } else { "$($user.givenName) $($user.sn)" }
+
+                $params = @{
+                    SamAccountName        = $user.sAMAccountName
+                    GivenName             = $user.givenName
+                    Surname               = $user.sn
+                    DisplayName           = $fullName
+                    Name                  = "$($user.givenName) $($user.sn)"
+                    UserPrincipalName     = "$($user.sAMAccountName)@$domainFQDN"
+                    AccountPassword       = $secPassword
+                    Enabled               = [bool]$user.enabled
+                    Path                  = $ouDN
+                    ChangePasswordAtLogon = $false
+                    PasswordNeverExpires  = $true
                 }
-            } else {
-                Write-Warning "Group '$groupName' not found — skipping membership for '$($user.sAMAccountName)'"
+                if ($user.title)           { $params.Title         = $user.title }
+                if ($user.initials)        { $params.Initials       = $user.initials }
+                if ($user.telephoneNumber) { $params.OfficePhone    = $user.telephoneNumber }
+                if ($user.streetAddress)   { $params.StreetAddress  = $user.streetAddress }
+                if ($user.city)            { $params.City           = $user.city }
+                if ($user.state)           { $params.State          = $user.state }
+                if ($user.postalCode)      { $params.PostalCode     = $user.postalCode }
+                if ($user.country)         { $params.Country        = $user.country }
+
+                New-ADUser @params -ErrorAction Stop
+                $changes += "CHANGED: Created user '$($user.sAMAccountName)'"
+            }
+
+            # Group memberships — run for new and pre-existing users
+            foreach ($groupName in $user.groups) {
+                $grp = Get-ADGroup -Filter "Name -eq '$groupName'" -ErrorAction SilentlyContinue
+                if (-not $grp) {
+                    $grp = Get-ADGroup -Filter "SamAccountName -eq '$groupName'" -ErrorAction SilentlyContinue
+                }
+                if ($grp) {
+                    $isMember = Get-ADGroupMember -Identity $grp.SamAccountName -ErrorAction SilentlyContinue |
+                                Where-Object { $_.SamAccountName -eq $user.sAMAccountName }
+                    if (-not $isMember) {
+                        Add-ADGroupMember -Identity $grp.SamAccountName -Members $user.sAMAccountName -ErrorAction Stop
+                        $changes += "CHANGED: Added '$($user.sAMAccountName)' to '$($grp.SamAccountName)'"
+                    }
+                } else {
+                    Write-Warning "Group '$groupName' not found — skipping membership for '$($user.sAMAccountName)'"
+                }
             }
         }
-    }
 
-    if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
-    else { Write-Output "OK: No user changes required" }
-  register: _users_result
-  run_once: true
-  changed_when: "'CHANGED:' in (_users_result.stdout | default(''))"
+        if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
+        else { Write-Output "OK: No user changes required" }
+      register: _users_result
+      run_once: true
+      changed_when: "'CHANGED:' in (_users_result.stdout | default(''))"
 
-- name: Display users result
-  ansible.builtin.debug:
-    msg: "{{ _users_result.stdout_lines }}"
-  run_once: true
+    - name: Display users result
+      ansible.builtin.debug:
+        msg: "{{ _users_result.stdout_lines }}"
+      run_once: true
 
-# ----------------------------------------------------------------------------
-# Section 11 — Cleanup staging directory
-# ----------------------------------------------------------------------------
-- name: Remove AD staging directory from DC
-  ansible.windows.win_file:
-    path: "{{ ad_temp_path }}"
-    state: absent
-  run_once: true
+    # Section 11 — Cleanup staging directory
+    - name: Remove AD staging directory from DC
+      ansible.windows.win_file:
+        path: "{{ ad_temp_path }}"
+        state: absent
+      run_once: true
+
+  vars:
+    ansible_user: "Administrator"
+    ansible_password: "{{ scenario.domain.admin_password }}"
+  # Only the first DC (forest creator) runs AD population tasks.
+  # With serial:1, run_once fires per batch — use _domain_exists instead.
+  # Additional DCs (_domain_exists=True) skip; AD replication propagates results.
+  when: not (_domain_exists | default(false) | bool)
 
 # ----------------------------------------------------------------------------
 # Section 12 — Summary

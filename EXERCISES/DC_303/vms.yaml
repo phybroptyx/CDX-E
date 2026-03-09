@@ -57,12 +57,13 @@ virtual_machines:
       memory_mb: 2048
       cores: 2
       sockets: 1
-    # Bootstrap: configure the internal LAN interface immediately after boot so
-    # the CDX-RELAY (on ex_dc303_in) can reach this VM and Ansible can SSH in.
-    # vm_power_management pushes this config via QEMU guest-exec (vbash CLI).
-    # No gateway at bootstrap — full routing is set by configure_networking.
+    # Bootstrap: net0 starts on Layer0 (DHCP) so configure_networking can SSH in.
+    # configure_networking stages SDP-DEN-1.conf, applies it (which commits eth0 to
+    # 68.27.129.1/24, breaking the SSH session), then migrates net0 from Layer0 to
+    # additional_nics[0].bridge (ex_dc303_in) via Proxmox API.
+    # network_bootstrap.ip is the exercise IP the relay waits for after migration.
     network_bootstrap:
-      interface: "eth0"           # net0 → ex_dc303_in (first NIC in additional_nics order)
+      interface: "eth0"           # NIC after net0 migration: Layer0 → ex_dc303_in
       ip: "68.27.129.1"
       cidr: 24
     network:

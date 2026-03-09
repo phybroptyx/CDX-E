@@ -8,10 +8,6 @@
     name: networking
     state: restarted
 
-- name: restart danted
-  ansible.builtin.systemd:
-    name: danted
-    state: restarted
 
 - name: reload nftables
   ansible.builtin.systemd:

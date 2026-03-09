@@ -6,14 +6,14 @@ source /etc/network/interfaces.d/*
 auto lo
 iface lo inet loopback
 
-# eth0 — Layer0 management (static)
+# {{ relay_mgmt_iface }} — Layer0 management (static)
 # Ansible controller (ACN) connects here for relay management and ProxyJump
-auto eth0
-iface eth0 inet static
+auto {{ relay_mgmt_iface }}
+iface {{ relay_mgmt_iface }} inet static
     address {{ relay_management_ip }}/{{ relay_management_cidr }}
     gateway {{ relay_management_gw }}
 
-# eth1 — CDX-I EQIX4 uplink (static)
+# {{ relay_cdxi_iface }} — CDX-I EQIX4 uplink (static)
 # Traffic from exercise segments destined for CDX-I routes through here
 auto {{ relay_cdxi_iface }}
 iface {{ relay_cdxi_iface }} inet static

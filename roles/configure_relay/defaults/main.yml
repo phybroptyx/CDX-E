@@ -9,8 +9,11 @@ relay_management_ip:   "10.0.0.10"
 relay_management_cidr: "22"
 relay_management_gw:   "10.0.0.1"
 
-# CDX-I uplink (eth1)
-relay_cdxi_iface:  "eth1"
+# Interface names — discovered at runtime by provision.yml from Ansible facts.
+# Debian 12 uses predictable naming (ens18, ens19, …); these defaults are
+# overridden by the discovery tasks in provision.yml.
+relay_mgmt_iface:  "eth0"   # Management NIC (net0, Layer0 bridge)
+relay_cdxi_iface:  "eth1"   # CDX-I uplink NIC (net1)
 relay_cdxi_ip:     "10.1.1.2"
 relay_cdxi_cidr:   "30"
 

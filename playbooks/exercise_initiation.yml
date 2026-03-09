@@ -24,5 +24,41 @@
   vars_files:
     - "../secrets/credentials.yml"
 
+  pre_tasks:
+
+    - name: Check CDX-RELAY power state
+      ansible.builtin.uri:
+        url: "{{ proxmox_api_url }}/nodes/{{ proxmox_relay_node }}/qemu/{{ proxmox_relay_vmid }}/status/current"
+        method: GET
+        headers:
+          Authorization: >-
+            PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+        validate_certs: "{{ proxmox_validate_certs }}"
+        status_code: [200]
+      register: _relay_status
+      tags: [always]
+
+    - name: Assert CDX-RELAY is running
+      ansible.builtin.assert:
+        that: _relay_status.json.data.status == 'running'
+        fail_msg: >-
+          CDX-RELAY (VMID {{ proxmox_relay_vmid }}, node {{ proxmox_relay_node }}) is not running
+          (current status: {{ _relay_status.json.data.status | default('unknown') }}).
+          Run:  ansible-playbook playbooks/provision_relay.yml
+          Then start the VM via Proxmox UI or:
+            qm start {{ proxmox_relay_vmid }}  (on {{ proxmox_relay_node }})
+      tags: [always]
+
+    # Open the SOCKS5 tunnel (SSH -D) now that we know the relay is up.
+    # All WinRM plays route through socks5://127.0.0.1:1080 — this tunnel
+    # must be established before any Windows host play executes.
+    # The tunnel is idempotent: re-running initiation is safe.
+    - name: Open SOCKS5 relay tunnel
+      ansible.builtin.include_role:
+        name: relay_tunnel
+      vars:
+        relay_tunnel_action: open
+      tags: [always]
+
   roles:
     - read_exercise_config

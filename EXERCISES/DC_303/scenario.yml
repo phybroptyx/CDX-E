@@ -10,6 +10,8 @@
 # -----------------------------------------------------------------------------
 # Exercise Identity
 # -----------------------------------------------------------------------------
+timezone: "Mountain Standard Time"   # Windows timezone name for configure_vm
+
 exercise:
   name: DC_303
   codename: "Operation Criterion 303"
@@ -100,6 +102,8 @@ services:
 network:
   management_vlan: 100
   exercise_vlans: []
+
+  disable_ipv6: true            # Disable IPv6 on all Windows VMs in this exercise
 
   dns_servers:
     - 68.27.129.71            # 303-DC-01 (active after Phase 4)

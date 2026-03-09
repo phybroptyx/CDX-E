@@ -48,7 +48,7 @@
 
 - name: Windows | Set timezone
   ansible.windows.win_timezone:
-    timezone: "{{ vm_timezone }}"
+    timezone: "{{ scenario.timezone | default(vm_timezone) }}"
   when: ansible_os_type == 'windows'
 
 - name: Windows | Disable automatic updates (registry)
@@ -75,7 +75,12 @@
     members:
       - "{{ ansible_user }}"
     state: present
-  when: ansible_os_type == 'windows'
+  when:
+    - ansible_os_type == 'windows'
+    # Skip on domain controllers — cdxadmin is a domain account after DC promotion
+    # and bare username resolution fails. Domain Admins are already in Administrators
+    # via the domain's Builtin\Administrators group.
+    - ansible_group | default('') != 'domain_controllers'
 
 - name: Windows | Ensure WinRM NTLM and Basic auth are enabled
   ansible.windows.win_shell: |
@@ -83,6 +88,19 @@
     Set-Item -Path 'WSMan:\localhost\Service\Auth\Basic' -Value $true
   changed_when: false
   when: ansible_os_type == 'windows'
+
+- name: Windows | Disable IPv6 on all adapters
+  ansible.windows.win_shell: |
+    Get-NetAdapterBinding -ComponentID ms_tcpip6 |
+      Where-Object { $_.Enabled } |
+      ForEach-Object { Disable-NetAdapterBinding -Name $_.Name -ComponentID ms_tcpip6 }
+    # Registry: disable IPv6 on all interfaces including tunnel adapters
+    Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters' `
+      -Name DisabledComponents -Value 0xFF -Type DWord -Force
+  changed_when: false
+  when:
+    - ansible_os_type == 'windows'
+    - scenario.network.disable_ipv6 | default(false) | bool
 
 # ----------------------------------------------------------------------------
 # Linux
@@ -94,7 +112,7 @@
 
 - name: Linux | Set timezone
   community.general.timezone:
-    name: "{{ vm_timezone }}"
+    name: "{{ scenario.timezone | default(vm_timezone) }}"
   when: ansible_os_type == 'linux'
 
 - name: Linux | Disable unattended-upgrades

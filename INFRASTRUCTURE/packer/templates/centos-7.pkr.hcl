@@ -75,6 +75,7 @@ source "proxmox-iso" "centos-7" {
   token                    = var.proxmox_api_token_secret
   insecure_skip_tls_verify = true
   node                     = var.proxmox_node
+  pool                     = "CDX_TEMPLATES"
 
   # VM identification
   vm_id         = var.template_vm_id
@@ -156,6 +157,6 @@ build {
       "PROXMOX_NODE=${var.proxmox_node}",
       "TEMPLATE_VMID=${var.template_vm_id}",
     ]
-    script = "../scripts/common/strip-nics.sh"
+    inline = ["bash ../scripts/common/strip-nics.sh"]
   }
 }

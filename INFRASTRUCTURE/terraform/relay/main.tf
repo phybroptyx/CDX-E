@@ -11,7 +11,7 @@
 #     via Proxmox API (PUT /qemu/102/config) during exercise setup/teardown.
 #
 # Provider: bpg/proxmox >= 0.95.0
-# Template: cdx-debian133-base (VMID 2039, built by debian-13.pkr.hcl)
+# Template: cdx-debian129-base (VMID 2038, built by debian-12.pkr.hcl)
 #
 # Build command:
 #   cd INFRASTRUCTURE/terraform/relay
@@ -41,11 +41,12 @@ resource "proxmox_virtual_environment_vm" "relay" {
   node_name = var.proxmox_node
   vm_id     = 102
   name      = "cdx-relay"
+  pool_id   = "CDX_MGMT"
   tags      = ["cdx-infrastructure", "relay"]
 
   # Full clone — relay is persistent infrastructure, not a per-exercise VM
   clone {
-    vm_id = var.debian13_template_vmid
+    vm_id = var.debian12_template_vmid
     full  = true
   }
 
@@ -69,8 +70,7 @@ resource "proxmox_virtual_environment_vm" "relay" {
   }
 
   vga {
-    type   = "serial"
-    memory = 0
+    type = "std"
   }
 
   # eth0 — Layer0 static management interface
