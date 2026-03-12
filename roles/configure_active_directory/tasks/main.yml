@@ -194,9 +194,31 @@
     net user Administrator /active:yes
     net user Administrator "{{ scenario.domain.admin_password }}"
     Write-Output "Administrator account ready"
-  run_once: true
+  when: not (_domain_exists | default(false) | bool)
   no_log: true
   changed_when: true
+
+# ----------------------------------------------------------------------------
+# Section 5.7 — Configure W32TM NTP on the PDC emulator
+# ----------------------------------------------------------------------------
+# Point the PDC emulator at the exercise-defined NTP server (or the range
+# default if scenario.ntp_server is not set). Runs only on the forest-creating
+# DC so it executes exactly once; AD replication is not involved here — W32TM
+# hierarchy propagates through the domain automatically once the PDC is set.
+- name: Configure W32TM NTP sync on PDC emulator
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $ntpServer = "{{ scenario.ntp_server | default('46.244.164.88') }}"
+    w32tm /config /manualpeerlist:"$ntpServer" /syncfromflags:manual /reliable:YES /update
+    Restart-Service W32Time -Force
+    Start-Sleep -Seconds 5
+    w32tm /resync /force
+    Write-Output "CHANGED: W32TM configured to sync from $ntpServer"
+  changed_when: true
+  vars:
+    ansible_user: "Administrator"
+    ansible_password: "{{ scenario.domain.admin_password }}"
+  when: not (_domain_exists | default(false) | bool)
 
 # ----------------------------------------------------------------------------
 # Section 6 — Stage JSON configuration files on DC-01
@@ -205,19 +227,19 @@
   ansible.windows.win_file:
     path: "{{ ad_temp_path }}"
     state: directory
-  run_once: true
+  when: not (_domain_exists | default(false) | bool)
 
 - name: Stage exercise_template.json on DC
   ansible.windows.win_copy:
     src: "{{ exercise_dir }}/exercise_template.json"
     dest: "{{ ad_temp_path }}\\exercise_template.json"
-  run_once: true
+  when: not (_domain_exists | default(false) | bool)
 
 - name: Stage users.json on DC
   ansible.windows.win_copy:
     src: "{{ exercise_dir }}/users.json"
     dest: "{{ ad_temp_path }}\\users.json"
-  run_once: true
+  when: not (_domain_exists | default(false) | bool)
 
 # ----------------------------------------------------------------------------
 # Sections 7-11 — AD configuration (runs as built-in Administrator)
@@ -303,6 +325,54 @@
     - name: Display Sites and Services result
       ansible.builtin.debug:
         msg: "{{ _sites_result.stdout_lines }}"
+      run_once: true
+
+    # Section 7.5 — DNS Reverse Lookup Zones
+    - name: Configure DNS reverse lookup zones
+      ansible.windows.win_shell: |
+        $ErrorActionPreference = 'Stop'
+        Import-Module DnsServer
+
+        $template = Get-Content '{{ ad_temp_path }}\exercise_template.json' -Raw | ConvertFrom-Json
+        $changes  = @()
+
+        if ($template.dns -and $template.dns.reverseLookupZones) {
+            foreach ($zone in $template.dns.reverseLookupZones) {
+                if (-not $zone.networkId) { continue }
+
+                $octets      = $zone.networkId.Split('/')[0].Split('.')
+                $reverseZone = $octets[2] + '.' + $octets[1] + '.' + $octets[0] + '.in-addr.arpa'
+
+                $existing = Get-DnsServerZone -Name $reverseZone -ErrorAction SilentlyContinue
+                if (-not $existing) {
+                    Add-DnsServerPrimaryZone -NetworkId $zone.networkId `
+                        -ReplicationScope $zone.replicationScope `
+                        -ErrorAction Stop
+                    $changes += "CHANGED: Created reverse lookup zone " + $reverseZone
+                }
+            }
+        }
+
+        # Trigger DDNS re-registration on this DC so its PTR record is created
+        # now that the reverse zone exists. Without this, DEN-DC-01 will not
+        # get a PTR record until the next 24-hour refresh cycle.
+        Register-DnsClient
+        $changes += "OK: DNS client re-registration triggered for PTR records"
+
+        if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
+        else { Write-Output "OK: No DNS changes required" }
+      register: _dns_result
+      run_once: true
+      # WIN32 9903 — DNS service not fully initialized on freshly promoted DC.
+      # Retry up to 5 times × 15s = 75s max before failing.
+      retries: 5
+      delay: 15
+      until: _dns_result.rc == 0
+      changed_when: "'CHANGED:' in (_dns_result.stdout | default(''))"
+
+    - name: Display DNS result
+      ansible.builtin.debug:
+        msg: "{{ _dns_result.stdout_lines }}"
       run_once: true
 
     # Section 8 — OU Hierarchy

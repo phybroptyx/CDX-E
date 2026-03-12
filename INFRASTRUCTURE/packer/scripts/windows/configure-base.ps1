@@ -31,14 +31,21 @@ if ($hasNetSecurity) {
 $username = "cdxadmin"
 $password = 'IyTt+,uDhtR@.303'
 
-Write-Host "Creating CDX Administrator account ($username)..."
-
 $computer = [ADSI]"WinNT://."
-$user = $computer.Create("User", $username)
-$user.SetPassword($password)
-$user.Put("FullName", "CDX Administrator")
-$user.Put("Description", "CDX Range Administrator - exercise admin and Ansible service account")
-$user.SetInfo()
+$existingUser = $computer.Children | Where-Object { $_.SchemaClassName -eq 'User' -and $_.Name -eq $username }
+
+if ($existingUser) {
+    Write-Host "CDX Administrator account ($username) already exists - updating password and flags."
+    $user = [ADSI]"WinNT://./$username,User"
+    $user.SetPassword($password)
+} else {
+    Write-Host "Creating CDX Administrator account ($username)..."
+    $user = $computer.Create("User", $username)
+    $user.SetPassword($password)
+    $user.Put("FullName", "CDX Administrator")
+    $user.Put("Description", "CDX Range Administrator - exercise admin and Ansible service account")
+    $user.SetInfo()
+}
 
 # Set password to never expire (ADS_UF_DONT_EXPIRE_PASSWD = 0x10000)
 $user.RefreshCache()
@@ -46,9 +53,12 @@ $flags = [int]$user.UserFlags.Value
 $user.Put("UserFlags", ($flags -bor 0x10000))
 $user.SetInfo()
 
-# Add to local Administrators group
-$admins = [ADSI]"WinNT://./Administrators,Group"
-$admins.Add($user.Path)
+# Ensure membership in local Administrators group
+$admins   = [ADSI]"WinNT://./Administrators,Group"
+$isMember = $admins.Invoke("Members") | ForEach-Object { ([ADSI]$_).InvokeGet("Name") } | Where-Object { $_ -eq $username }
+if (-not $isMember) {
+    $admins.Add($user.Path)
+}
 
 Write-Host "CDX Administrator account created and added to Administrators."
 
@@ -76,12 +86,11 @@ if ($psVersion -ge 3) {
 winrm set winrm/config/service '@{AllowUnencrypted="true"}'
 winrm set winrm/config/service/auth '@{Basic="true"}'
 
-# Ensure HTTP listener exists
-$listeners = winrm enumerate winrm/config/Listener 2>&1
-if ($listeners -notmatch "Transport = HTTP") {
-    winrm create winrm/config/Listener?Address=*+Transport=HTTP
-    Write-Host "WinRM HTTP listener created."
-}
+# Ensure HTTP listener exists — delete and recreate to guarantee clean state.
+# Enable-PSRemoting above may have already created one; this is idempotent.
+winrm delete winrm/config/Listener?Address=*+Transport=HTTP 2>&1 | Out-Null
+winrm create winrm/config/Listener?Address=*+Transport=HTTP | Out-Null
+Write-Host "WinRM HTTP listener configured."
 
 # Firewall rule -- apply to ALL profiles (Domain, Private, Public)
 if ($hasNetSecurity) {

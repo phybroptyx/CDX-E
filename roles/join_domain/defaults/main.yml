@@ -1,0 +1,8 @@
+---
+# =============================================================================
+# Role: join_domain — defaults
+# =============================================================================
+
+# Set false in host_vars or vms.yaml for standalone systems that should NOT
+# be joined to the exercise domain (e.g. external DNS resolvers, DMZ hosts).
+domain_join: true

@@ -21,6 +21,16 @@
 
   "siteLinks": [],
 
+  "dns": {
+    "reverseLookupZones": [
+      {
+        "networkId": "68.27.129.0/24",
+        "replicationScope": "Forest",
+        "description": "DC303 Internal LAN reverse zone"
+      }
+    ]
+  },
+
   "organizationalStructure": {
     "rootOU": "DC303",
     "rootOUDescription": "DC303 domain root — all site and department OUs",

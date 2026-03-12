@@ -46,6 +46,8 @@ $unattendXml = @'
         <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
         <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
         <ProtectYourPC>3</ProtectYourPC>
+        <SkipMachineOOBE>true</SkipMachineOOBE>
+        <SkipUserOOBE>true</SkipUserOOBE>
       </OOBE>
       <UserAccounts>
         <AdministratorPassword>
@@ -58,7 +60,11 @@ $unattendXml = @'
 </unattend>
 '@
 
-$unattendPath = "C:\Windows\Temp\sysprep-unattend.xml"
+# Write to C:\Windows\Panther\ — the standard Windows search path for unattend
+# on post-Sysprep clone first boot. Writing to Temp is insufficient: Sysprep
+# cleans Temp during generalize, so clones boot without an unattend → OOBE.
+$unattendPath = "C:\Windows\Panther\unattend.xml"
+New-Item -ItemType Directory -Path "C:\Windows\Panther" -Force | Out-Null
 Write-Host "Writing Sysprep unattend to $unattendPath..."
 Set-Content -Path $unattendPath -Value $unattendXml -Encoding UTF8
 
@@ -69,7 +75,9 @@ Set-Content -Path $unattendPath -Value $unattendXml -Encoding UTF8
 Write-Host "Preparing system for Sysprep..."
 
 # Clear event logs
-wevtutil el | ForEach-Object { wevtutil cl $_ } 2>$null
+$ErrorActionPreference = "SilentlyContinue"
+wevtutil el | ForEach-Object { wevtutil cl $_ 2>&1 | Out-Null }
+$ErrorActionPreference = "Stop"
 
 # Remove temporary files (except the unattend we just wrote)
 Get-ChildItem -Path "C:\Windows\Temp" -Exclude "sysprep-unattend.xml" -ErrorAction SilentlyContinue |

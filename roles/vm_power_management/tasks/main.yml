@@ -38,6 +38,8 @@
 #   guest_agent_poll_retries   — max poll attempts before failing
 #   vm_power_wait_timeout      — max seconds for port connectivity wait
 #   vm_power_wait_sleep        — seconds between port connectivity checks
+#   sysprep_poll_retries       — max poll attempts for IsSetupComplete registry key
+#   sysprep_poll_delay         — seconds between IsSetupComplete poll attempts
 # =============================================================================
 
 # ----------------------------------------------------------------------------
@@ -233,6 +235,19 @@
   until: _agent_poll is not failed
 
 # ----------------------------------------------------------------------------
+# Sysprep settle delay (Windows VMs only)
+# ----------------------------------------------------------------------------
+# Allow Windows to complete OOBE/Sysprep final pass before DHCP polling begins.
+# The guest agent responds during Sysprep but WinRM is not yet stable.
+# This is a placeholder until IsSetupComplete registry polling is implemented.
+- name: Sysprep settle delay (allow Windows VMs to complete initial reboot)
+  ansible.builtin.pause:
+    seconds: "{{ windows_sysprep_settle_delay }}"
+  when: >-
+    _vms_windows | length > 0 and
+    (_vms_to_start | selectattr('name', 'in', _vms_windows | map(attribute='name') | list) | list | length > 0)
+
+# ----------------------------------------------------------------------------
 # Network bootstrap
 # ----------------------------------------------------------------------------
 # Windows VMs start with net0 on Layer0 (DHCP). Bootstrap flow:
@@ -310,18 +325,12 @@
         VyOS SSH config push + NIC migration handled by configure_networking (Phase 3)
 
 # ── Windows: Layer0 DHCP discovery → guest-exec static IP → NIC migration ──────
-
-# Sysprep settle: the QEMU guest agent responds during the first Sysprep boot
-# pass (Specialize), but the system then reboots into its final state.  Waiting
-# here ensures the DHCP poll runs against the stable post-Sysprep system rather
-# than the transient first-boot environment.
-# Only runs when Windows VMs were actually powered on (not pre-running).
-- name: Sysprep settle delay (allow Windows VMs to complete initial reboot)
-  ansible.builtin.pause:
-    seconds: "{{ windows_sysprep_settle_delay }}"
-  when: >-
-    _vms_windows | length > 0 and
-    (_vms_to_start | selectattr('name', 'in', _vms_windows | map(attribute='name') | list) | list | length > 0)
+# NOTE: IsSetupComplete registry polling via agent/exec + agent/exec-status
+# is not compatible with this Proxmox version (agent/exec-status rejects the
+# pid query parameter). The sysprep_poll_retries/sysprep_poll_delay variables
+# are retained for future implementation when a compatible Proxmox version is
+# available. Sysprep completion is currently gated by windows_sysprep_settle_delay
+# (flat pause) + win_ping retries in configure_vm (functional WinRM check).
 
 - name: Initialize DHCP IP registry
   ansible.builtin.set_fact:
@@ -789,6 +798,38 @@
   loop_control:
     label: "{{ item.name }} → {{ item.cloud_init.ip | default('NO IP') }}"
   when: item.cloud_init.ip is defined and item.cloud_init.ip | length > 0
+
+# Workstations have no static IP — write the DHCP IP discovered via QGA so
+# configure_vm can reach them via the relay. The DHCP IP is valid for the
+# current session; it may change on reboot but is stable for Phase 7.
+- name: Write DHCP IP to host_vars for workstations (QGA-discovered)
+  ansible.builtin.copy:
+    content: |
+      ---
+      # Auto-updated by vm_power_management — DHCP IP discovered via QEMU guest agent.
+      # Workstations have no static IP; this IP is valid for the current session.
+      ansible_host: "{{ _vm_dhcp_ips[item.name] }}"
+    dest: "{{ playbook_dir }}/../inventory/host_vars/{{ item.name }}.yml"
+    mode: '0644'
+  loop: "{{ _effective_vms }}"
+  loop_control:
+    label: "{{ item.name }} → {{ _vm_dhcp_ips[item.name] | default('NO IP') }}"
+  when:
+    - (item.cloud_init | default({})).ip | default('') | length == 0
+    - item.name in _vm_dhcp_ips
+    - _vm_dhcp_ips[item.name] | default('') | length > 0
+
+- name: Update in-memory ansible_host for workstations with DHCP IP
+  ansible.builtin.add_host:
+    name: "{{ item.name }}"
+    ansible_host: "{{ _vm_dhcp_ips[item.name] }}"
+  loop: "{{ _effective_vms }}"
+  loop_control:
+    label: "{{ item.name }} → {{ _vm_dhcp_ips[item.name] | default('NO IP') }}"
+  when:
+    - (item.cloud_init | default({})).ip | default('') | length == 0
+    - item.name in _vm_dhcp_ips
+    - _vm_dhcp_ips[item.name] | default('') | length > 0
 
 # ----------------------------------------------------------------------------
 # Wait for management connectivity via relay

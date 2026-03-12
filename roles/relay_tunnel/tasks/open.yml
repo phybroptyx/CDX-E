@@ -7,13 +7,41 @@
 # =============================================================================
 
 # ── Check for existing tunnel ────────────────────────────────────────────────
-- name: Check if relay tunnel is already running
+# Two-stage check: process exists AND port is actively listening.
+# A relay reboot breaks the SSH connection but may leave the ACN-side ssh
+# process alive temporarily. pgrep finds the stale PID and falsely reports
+# "already running" while port 1080 is not listening. Verifying the port
+# separately catches dead tunnels and forces a clean re-open.
+- name: Check if relay tunnel process exists
   ansible.builtin.shell:
     cmd: >-
       pgrep -f "ssh -D {{ relay_tunnel_port }}.*{{ relay_tunnel_user }}@{{ relay_tunnel_host }}"
-  register: _existing_tunnel
+  register: _tunnel_process
   failed_when: false
   changed_when: false
+
+- name: Check if tunnel port is actually listening
+  ansible.builtin.shell:
+    cmd: "ss -tlnp | grep -q ':{{ relay_tunnel_port }} '"
+  register: _tunnel_port
+  failed_when: false
+  changed_when: false
+
+- name: Kill stale tunnel processes (process found but port not listening)
+  ansible.builtin.shell:
+    cmd: >-
+      pkill -f "ssh -D {{ relay_tunnel_port }}.*{{ relay_tunnel_user }}@{{ relay_tunnel_host }}" || true
+  when:
+    - _tunnel_process.rc == 0
+    - _tunnel_port.rc != 0
+  failed_when: false
+  changed_when: true
+
+- name: Set existing tunnel fact (process running AND port listening)
+  ansible.builtin.set_fact:
+    _existing_tunnel:
+      rc: "{{ 0 if (_tunnel_process.rc == 0 and _tunnel_port.rc == 0) else 1 }}"
+      stdout: "{{ _tunnel_process.stdout | trim }}"
 
 - name: Report existing tunnel
   ansible.builtin.debug:
@@ -21,7 +49,7 @@
       SOCKS5 relay tunnel already running
       (PID {{ _existing_tunnel.stdout | trim }}, port {{ relay_tunnel_port }}).
       Skipping open.
-  when: _existing_tunnel.rc == 0
+  when: _existing_tunnel.rc | int == 0
 
 # ── Open tunnel ──────────────────────────────────────────────────────────────
 - name: Open SOCKS5 relay tunnel (SSH dynamic forwarding)
@@ -36,7 +64,7 @@
       -o ServerAliveCountMax={{ relay_tunnel_keepalive_count }}
       -i {{ relay_tunnel_key }}
       {{ relay_tunnel_user }}@{{ relay_tunnel_host }}
-  when: _existing_tunnel.rc != 0
+  when: _existing_tunnel.rc | int != 0
   changed_when: true
 
 # ── Record PID ───────────────────────────────────────────────────────────────
@@ -46,7 +74,7 @@
       pgrep -f "ssh -D {{ relay_tunnel_port }}.*{{ relay_tunnel_user }}@{{ relay_tunnel_host }}"
       | tail -1
   register: _tunnel_pid
-  when: _existing_tunnel.rc != 0
+  when: _existing_tunnel.rc | int != 0
   changed_when: false
 
 - name: Write tunnel PID file
@@ -54,7 +82,7 @@
     content: "{{ _tunnel_pid.stdout | trim }}\n"
     dest: "{{ relay_tunnel_pid_file }}"
     mode: '0600'
-  when: _existing_tunnel.rc != 0
+  when: _existing_tunnel.rc | int != 0
 
 # ── Verify tunnel is listening ────────────────────────────────────────────────
 - name: Verify SOCKS5 port {{ relay_tunnel_port }} is listening
@@ -63,7 +91,7 @@
     port: "{{ relay_tunnel_port }}"
     timeout: 10
     state: started
-  when: _existing_tunnel.rc != 0
+  when: _existing_tunnel.rc | int != 0
 
 - name: Report tunnel open
   ansible.builtin.debug:
@@ -71,4 +99,4 @@
       SOCKS5 relay tunnel open on 127.0.0.1:{{ relay_tunnel_port }}
       via {{ relay_tunnel_user }}@{{ relay_tunnel_host }}
       (PID {{ _tunnel_pid.stdout | trim }}).
-  when: _existing_tunnel.rc != 0
+  when: _existing_tunnel.rc | int != 0

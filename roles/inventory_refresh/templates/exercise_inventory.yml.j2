@@ -52,6 +52,7 @@ all:
           template: "{{ vm.template }}"
           ansible_group: "{{ vm.ansible_group }}"
           additional_groups: {{ vm.additional_groups | default([]) | to_yaml | trim }}
+          domain_join: {{ vm.domain_join | default(true) | bool }}
 {% endfor %}
 
     # ─── OS-type parent groups ─────────────────────────────────────────────────

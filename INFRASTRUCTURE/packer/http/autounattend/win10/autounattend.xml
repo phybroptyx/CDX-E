@@ -61,6 +61,12 @@
       </DiskConfiguration>
       <ImageInstall>
         <OSImage>
+          <InstallFrom>
+            <MetaData wcm:action="add">
+              <Key>/IMAGE/INDEX</Key>
+              <Value>3</Value>
+            </MetaData>
+          </InstallFrom>
           <InstallTo>
             <DiskID>0</DiskID>
             <PartitionID>2</PartitionID>
@@ -89,10 +95,26 @@
         </RunSynchronousCommand>
         <RunSynchronousCommand wcm:action="add">
           <Order>3</Order>
-          <Path>cmd /c netsh advfirewall firewall add rule name="WinRM-HTTP" dir=in localport=5985 protocol=tcp action=allow</Path>
+          <Path>cmd /c net start WinRM</Path>
         </RunSynchronousCommand>
         <RunSynchronousCommand wcm:action="add">
           <Order>4</Order>
+          <Path>cmd /c winrm quickconfig -q</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>5</Order>
+          <Path>cmd /c winrm set winrm/config/service @{AllowUnencrypted="true"}</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>6</Order>
+          <Path>cmd /c winrm set winrm/config/service/auth @{Basic="true"}</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>7</Order>
+          <Path>cmd /c netsh advfirewall firewall add rule name="WinRM-HTTP" dir=in localport=5985 protocol=tcp action=allow profile=any</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>8</Order>
           <Path>cmd /c netsh advfirewall firewall add rule name="ICMP Allow" protocol=icmpv4:8,any dir=in action=allow</Path>
         </RunSynchronousCommand>
       </RunSynchronous>
@@ -111,6 +133,8 @@
         <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
         <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
         <ProtectYourPC>3</ProtectYourPC>
+        <SkipMachineOOBE>true</SkipMachineOOBE>
+        <SkipUserOOBE>true</SkipUserOOBE>
       </OOBE>
       <UserAccounts>
         <AdministratorPassword>
@@ -138,10 +162,10 @@
         </Password>
       </AutoLogon>
       <FirstLogonCommands>
-        <!-- Run CDX setup script from custom ISO (QEMU GA, WinRM, network profile) -->
+        <!-- Search all optical drives for setup.ps1 and run it when found -->
         <SynchronousCommand wcm:action="add">
           <Order>1</Order>
-          <CommandLine>cmd /c "if exist D:\setup.ps1 (powershell -NoProfile -ExecutionPolicy Bypass -File D:\setup.ps1) else if exist E:\setup.ps1 (powershell -NoProfile -ExecutionPolicy Bypass -File E:\setup.ps1) else if exist F:\setup.ps1 (powershell -NoProfile -ExecutionPolicy Bypass -File F:\setup.ps1)"</CommandLine>
+          <CommandLine>powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-PSDrive -PSProvider FileSystem | ForEach-Object { $p = $_.Root + 'setup.ps1'; if (Test-Path $p) { &amp; $p; break } }"</CommandLine>
         </SynchronousCommand>
       </FirstLogonCommands>
     </component>

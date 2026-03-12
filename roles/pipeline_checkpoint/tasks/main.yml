@@ -1,0 +1,143 @@
+---
+# =============================================================================
+# Role: pipeline_checkpoint
+# =============================================================================
+# Manages per-phase state tracking for the CDX-E pipeline. Allows a full
+# site.yml run to skip configuration phases that already completed
+# successfully on a prior run — useful for resuming after a mid-pipeline
+# failure without re-running the expensive phases that preceded it.
+#
+# State file location:  EXERCISES/<name>/phase_state.yml
+# State file format:
+#   exercise:      "OBSIDIAN_DAGGER"
+#   last_updated:  "2026-03-12T04:00:00Z"
+#   phases:
+#     phase4:
+#       status:       complete          # complete | failed | not_started
+#       completed_at: "2026-03-12T04:00:00Z"
+#
+# Actions:
+#   check           — Read state file; set _phase_skip: true if phase is complete.
+#                     Missing file or missing phase key → _phase_skip: false.
+#   record_complete — Upsert phase entry with status: complete + timestamp.
+#   record_failed   — Upsert phase entry with status: failed + timestamp.
+#   reset           — Delete the state file.
+#
+# Usage (localhost pre-play):
+#   - ansible.builtin.include_role:
+#       name: pipeline_checkpoint
+#     vars:
+#       pipeline_checkpoint_action: check
+#       pipeline_checkpoint_phase: phase4
+# =============================================================================
+
+- name: "[checkpoint] Assert phase name is provided"
+  ansible.builtin.assert:
+    that: pipeline_checkpoint_phase | length > 0
+    fail_msg: >-
+      pipeline_checkpoint_phase must be set when calling pipeline_checkpoint.
+      Example: pipeline_checkpoint_phase: phase4
+  when: pipeline_checkpoint_action != 'reset'
+
+# ── action: check ─────────────────────────────────────────────────────────── #
+
+- name: "[checkpoint:check] Stat phase state file"
+  ansible.builtin.stat:
+    path: "{{ pipeline_checkpoint_file }}"
+  register: _checkpoint_stat
+  when: pipeline_checkpoint_action == 'check'
+
+- name: "[checkpoint:check] Load phase state file"
+  ansible.builtin.include_vars:
+    file: "{{ pipeline_checkpoint_file }}"
+    name: _checkpoint_state
+  when:
+    - pipeline_checkpoint_action == 'check'
+    - _checkpoint_stat.stat.exists
+
+- name: "[checkpoint:check] Evaluate phase completion status"
+  ansible.builtin.set_fact:
+    _phase_skip: >-
+      {{
+        (
+          _checkpoint_stat.stat.exists | default(false)
+          and (_checkpoint_state.phases[pipeline_checkpoint_phase].status
+               | default('not_started')) == 'complete'
+        ) | bool
+      }}
+  when: pipeline_checkpoint_action == 'check'
+
+- name: "[checkpoint:check] Phase '{{ pipeline_checkpoint_phase }}' is complete — will skip"
+  ansible.builtin.debug:
+    msg: >-
+      Phase '{{ pipeline_checkpoint_phase }}' already completed.
+      Set pipeline_checkpoint_action: reset (or delete phase_state.yml) to re-run.
+  when:
+    - pipeline_checkpoint_action == 'check'
+    - _phase_skip | default(false) | bool
+
+- name: "[checkpoint:check] Phase '{{ pipeline_checkpoint_phase }}' will run"
+  ansible.builtin.debug:
+    msg: "Phase '{{ pipeline_checkpoint_phase }}' has no complete record — proceeding."
+  when:
+    - pipeline_checkpoint_action == 'check'
+    - not (_phase_skip | default(false) | bool)
+
+# ── action: record_complete / record_failed ───────────────────────────────── #
+
+- name: "[checkpoint:record] Stat existing state file"
+  ansible.builtin.stat:
+    path: "{{ pipeline_checkpoint_file }}"
+  register: _checkpoint_write_stat
+  when: pipeline_checkpoint_action in ['record_complete', 'record_failed']
+
+- name: "[checkpoint:record] Load existing state file"
+  ansible.builtin.include_vars:
+    file: "{{ pipeline_checkpoint_file }}"
+    name: _checkpoint_existing
+  when:
+    - pipeline_checkpoint_action in ['record_complete', 'record_failed']
+    - _checkpoint_write_stat.stat.exists
+
+- name: "[checkpoint:record] Merge and write updated state file"
+  ansible.builtin.copy:
+    dest: "{{ pipeline_checkpoint_file }}"
+    mode: "0644"
+    content: |
+      {{ _checkpoint_merged | to_nice_yaml(indent=2) }}
+  vars:
+    _now: "{{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ')) }}"
+    _status: "{{ 'complete' if pipeline_checkpoint_action == 'record_complete' else 'failed' }}"
+    _phase_entry: >-
+      {{
+        {
+          'status': _status,
+          ('completed_at' if _status == 'complete' else 'failed_at'): _now
+        }
+      }}
+    _existing_phases: "{{ (_checkpoint_existing.phases | default({})) if _checkpoint_write_stat.stat.exists else {} }}"
+    _merged_phases:   "{{ _existing_phases | combine({ pipeline_checkpoint_phase: _phase_entry }) }}"
+    _checkpoint_merged:
+      exercise:      "{{ exercise | default('unknown') }}"
+      last_updated:  "{{ _now }}"
+      phases:        "{{ _merged_phases }}"
+  when: pipeline_checkpoint_action in ['record_complete', 'record_failed']
+
+- name: "[checkpoint:record] Recorded '{{ pipeline_checkpoint_phase }}' as {{ pipeline_checkpoint_action | replace('record_', '') }}"
+  ansible.builtin.debug:
+    msg: >-
+      Phase state written to {{ pipeline_checkpoint_file }}
+  when: pipeline_checkpoint_action in ['record_complete', 'record_failed']
+
+# ── action: reset ─────────────────────────────────────────────────────────── #
+
+- name: "[checkpoint:reset] Remove phase state file"
+  ansible.builtin.file:
+    path: "{{ pipeline_checkpoint_file }}"
+    state: absent
+  when: pipeline_checkpoint_action == 'reset'
+
+- name: "[checkpoint:reset] State file removed"
+  ansible.builtin.debug:
+    msg: "Phase state file deleted: {{ pipeline_checkpoint_file }}"
+  when: pipeline_checkpoint_action == 'reset'

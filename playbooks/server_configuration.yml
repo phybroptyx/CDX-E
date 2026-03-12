@@ -3,13 +3,16 @@
 # CDX-E Playbook: General Server Configuration
 # =============================================================================
 # Purpose: Apply base OS configuration and Windows Server features to
-#          member servers (ansible_group: servers).  Domain controllers run
-#          through domain_management.yml; workstations through
-#          workstation_configuration.yml.
+#          ALL member server types (servers, sql_servers, exchange_servers,
+#          sccm_servers). Domain controllers run through domain_management.yml;
+#          workstations through workstation_configuration.yml.
+#          Base config (hostname, domain join, WinRM, features) runs here for
+#          ALL member servers regardless of which service phases are enabled.
 #
 # Roles:
 #   - configure_vm           — hostname, timezone, WinRM, PS policy
 #   - install_windowsfeature — features from windows_feature_sets['servers']
+#   - join_domain            — domain join (post_tasks; skipped if domain_join: false)
 #
 # Usage:
 #   ansible-playbook playbooks/server_configuration.yml \
@@ -29,10 +32,37 @@
         name: read_exercise_config
 
 # ----------------------------------------------------------------------------
+# Pre-play: ensure SOCKS5 relay tunnel is open before WinRM connections
+# ----------------------------------------------------------------------------
+- name: Ensure Relay SOCKS5 Tunnel
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Ensure SOCKS5 relay tunnel is open
+      ansible.builtin.include_role:
+        name: relay_tunnel
+      vars:
+        relay_tunnel_action: open
+
+# ----------------------------------------------------------------------------
+# Pre-play: check pipeline checkpoint — skip if phase5 already completed
+# ----------------------------------------------------------------------------
+- name: Check Phase 5 Checkpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check pipeline checkpoint for phase5
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: check
+        pipeline_checkpoint_phase: phase5
+
+# ----------------------------------------------------------------------------
 # Main play: configure member servers
 # ----------------------------------------------------------------------------
 - name: General Server Configuration
-  hosts: servers
+  hosts: servers:sql_servers:exchange_servers:sccm_servers
   gather_facts: false
   tags: [servers, configuration]
 
@@ -46,6 +76,10 @@
         exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
         virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
 
+    - name: "[preflight] Skip — phase5 already completed (checkpoint)"
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']._phase_skip | default(false) | bool
+
     - name: "[preflight] Skip — destroy workflow, no configuration to run"
       ansible.builtin.meta: end_play
       when: (action | default('deploy')) == 'destroy'
@@ -54,13 +88,43 @@
       ansible.builtin.meta: end_play
       when: not (scenario.phases.servers | default(true) | bool)
 
-    - name: "[preflight] Assert servers group is populated"
+    - name: "[preflight] Assert at least one member server group is populated"
       ansible.builtin.assert:
-        that: groups['servers'] | default([]) | length > 0
+        that: >-
+          (groups['servers'] | default([]) | length > 0) or
+          (groups['sql_servers'] | default([]) | length > 0) or
+          (groups['exchange_servers'] | default([]) | length > 0) or
+          (groups['sccm_servers'] | default([]) | length > 0)
         fail_msg: >-
-          servers group is empty. Check inventory_refresh output and ensure
-          vms.yaml has VMs with ansible_group: servers.
+          All member server groups are empty (servers, sql_servers, exchange_servers,
+          sccm_servers). Check inventory_refresh and vms.yaml.
 
   roles:
     - configure_vm
     - install_windowsfeature
+
+  post_tasks:
+    # Domain join runs AFTER configure_vm (hostname set + rebooted) and
+    # install_windowsfeature. Renaming a domain-joined computer requires domain
+    # admin rights — setting the hostname first while still in workgroup avoids
+    # the Access Denied error from win_hostname on already-joined machines.
+    # Configurable per-VM via domain_join: true/false in vms.yaml (default: true).
+    # Set false for standalone systems (external DNS resolvers, etc.).
+    - name: Join domain
+      ansible.builtin.include_role:
+        name: join_domain
+
+# ----------------------------------------------------------------------------
+# Post-play: record phase5 completion in pipeline checkpoint
+# ----------------------------------------------------------------------------
+- name: Record Phase 5 Checkpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Record phase5 as complete
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: record_complete
+        pipeline_checkpoint_phase: phase5
+      when: not (_phase_skip | default(false) | bool)

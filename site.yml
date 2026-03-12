@@ -92,9 +92,12 @@
 
 # ── Phase 2a: Inventory Refresh ──────────────────────────────────────────────
 # Reads Terraform outputs + vms.yaml to write dynamic inventory.
+# cleanup_host_vars=true removes stale host_vars from any prior deployment run.
 # Must run before vm_power_management. Does not require VMs to be online.
 # Gates on: scenario.phases.terraform
 - import_playbook: playbooks/inventory_refresh.yml
+  vars:
+    cleanup_host_vars: true
 
 # ── Phase 2b-r: VM Power Management — Routers Only ───────────────────────────
 # Powers on routers and waits for SSH readiness. Routers are the first VMs
@@ -172,7 +175,11 @@
 # (Exchange and SCCM require SQL). DHCP was configured in Phase 4.7; the DHCP
 # play runs again here idempotently (existing scopes are skipped). All other
 # services (SQL, Exchange, SCCM, IIS) are configured for the first time here.
+# domain_services_checkpoint_phase activates resume logic for this full run;
+# the Phase 4.7 DHCP-only import above leaves this unset (no checkpoint gate).
 - import_playbook: playbooks/domain_services.yml
+  vars:
+    domain_services_checkpoint_phase: phase6
 
 # ── Phase 6.5: Workstation Power-On ──────────────────────────────────────────
 # Powers on workstations now that the domain DHCP scope is active and clients

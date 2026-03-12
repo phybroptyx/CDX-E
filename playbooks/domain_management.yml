@@ -32,6 +32,36 @@
         name: read_exercise_config
 
 # ----------------------------------------------------------------------------
+# Pre-play: ensure SOCKS5 relay tunnel is open before WinRM connections
+# ----------------------------------------------------------------------------
+# The tunnel is opened at Phase 0 (exercise_initiation) but can die between
+# then and Phase 4. Re-opening is idempotent — already-running tunnels are
+# detected and left in place.
+- name: Ensure Relay SOCKS5 Tunnel
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Ensure SOCKS5 relay tunnel is open
+      ansible.builtin.include_role:
+        name: relay_tunnel
+      vars:
+        relay_tunnel_action: open
+
+# ----------------------------------------------------------------------------
+# Pre-play: check pipeline checkpoint — skip if phase4 already completed
+# ----------------------------------------------------------------------------
+- name: Check Phase 4 Checkpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check pipeline checkpoint for phase4
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: check
+        pipeline_checkpoint_phase: phase4
+
+# ----------------------------------------------------------------------------
 # Main play: domain controller configuration
 # ----------------------------------------------------------------------------
 - name: Domain Management
@@ -50,6 +80,10 @@
         scenario:         "{{ hostvars['localhost'].scenario }}"
         exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
         virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — phase4 already completed (checkpoint)"
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']._phase_skip | default(false) | bool
 
     - name: "[preflight] Skip — destroy workflow, no configuration to run"
       ansible.builtin.meta: end_play
@@ -81,3 +115,21 @@
     - install_windowsfeature
     - configure_active_directory
     - deploy_group_policy_objects
+
+# ----------------------------------------------------------------------------
+# Post-play: record phase4 completion in pipeline checkpoint
+# ----------------------------------------------------------------------------
+# Runs on localhost after all DC configuration succeeds. serial: 1 means the
+# main play runs multiple times (once per DC); this play runs once after all
+# serial batches complete. Only records if the phase was not already skipped.
+- name: Record Phase 4 Checkpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Record phase4 as complete
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: record_complete
+        pipeline_checkpoint_phase: phase4
+      when: not (_phase_skip | default(false) | bool)

@@ -32,6 +32,29 @@
 # ----------------------------------------------------------------------------
 # Windows
 # ----------------------------------------------------------------------------
+- name: Windows | Wait for WinRM TCP port to open
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: 5985
+    timeout: 300
+    sleep: 10
+  delegate_to: cdx-relay
+  when:
+    - ansible_os_type == 'windows'
+    - ansible_host | ansible.utils.ipaddr | default(false) | bool
+
+- name: Windows | Verify WinRM is functionally ready (NTLM handshake)
+  ansible.windows.win_ping:
+  register: _winrm_ready
+  until: _winrm_ready is not failed and not (_winrm_ready is unreachable)
+  retries: 20
+  delay: 15
+  when:
+    - ansible_os_type == 'windows'
+    - ansible_host | ansible.utils.ipaddr | default(false) | bool
+  ignore_unreachable: true
+  ignore_errors: true
+
 - name: Windows | Set hostname
   ansible.windows.win_hostname:
     name: "{{ inventory_hostname }}"
@@ -138,4 +161,4 @@
   ansible.builtin.debug:
     msg: >-
       configure_vm complete for {{ inventory_hostname }}
-      (os_type={{ ansible_os_type }}, timezone={{ vm_timezone }}).
+      (os_type={{ ansible_os_type }}, timezone={{ scenario.timezone | default(vm_timezone) }}).

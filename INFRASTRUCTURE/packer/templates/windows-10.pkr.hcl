@@ -113,10 +113,10 @@ source "proxmox-iso" "windows-10" {
     firewall = true
   }
 
-  # Display - QXL for SPICE
+  # Display - standard VGA (avoids SPICE/QXL dependency on cloned VMs)
   vga {
-    type   = "qxl"
-    memory = 32
+    type   = "std"
+    memory = 16
   }
 
   # QEMU Guest Agent
@@ -140,17 +140,20 @@ build {
 
   # Install VirtIO guest tools (includes QEMU GA, balloon, SPICE agent)
   provisioner "powershell" {
-    script = "../scripts/windows/install-virtio-guest-tools.ps1"
+    execution_policy = "bypass"
+    script           = "../scripts/windows/install-virtio-guest-tools.ps1"
   }
 
   # CDX base config (cdxadmin account, WinRM, RDP, ICMP)
   provisioner "powershell" {
-    script = "../scripts/windows/configure-base.ps1"
+    execution_policy = "bypass"
+    script           = "../scripts/windows/configure-base.ps1"
   }
 
   # Sysprep and generalize (embeds OOBE-bypass unattend)
   provisioner "powershell" {
-    script = "../scripts/windows/sysprep.ps1"
+    execution_policy = "bypass"
+    script           = "../scripts/windows/sysprep.ps1"
   }
   # ── Strip management NICs (shell-local: runs on Packer build host) ─────────
   # Removes all net* devices from the build VM via the Proxmox API before

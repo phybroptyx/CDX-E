@@ -28,6 +28,43 @@
       ansible.builtin.import_role:
         name: read_exercise_config
 
+# ----------------------------------------------------------------------------
+# Pre-play: ensure SOCKS5 relay tunnel is open before WinRM connections
+# ----------------------------------------------------------------------------
+- name: Ensure Relay SOCKS5 Tunnel
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Ensure SOCKS5 relay tunnel is open
+      ansible.builtin.include_role:
+        name: relay_tunnel
+      vars:
+        relay_tunnel_action: open
+
+# ----------------------------------------------------------------------------
+# Pre-play: check pipeline checkpoint — skip if phase6 already completed
+# ----------------------------------------------------------------------------
+# Only active when domain_services_checkpoint_phase is set by the caller.
+# Phase 4.7 (DHCP pre-boot) leaves this unset so the checkpoint is not
+# evaluated for the early DHCP run. Phase 6 (site.yml) passes
+# domain_services_checkpoint_phase: phase6 to enable resume logic.
+- name: Check Phase 6 Checkpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check pipeline checkpoint for domain services phase
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: check
+        pipeline_checkpoint_phase: "{{ domain_services_checkpoint_phase }}"
+      when: domain_services_checkpoint_phase | default('') | length > 0
+
+    - name: Set _phase_skip to false when checkpoint is not configured
+      ansible.builtin.set_fact:
+        _phase_skip: false
+      when: domain_services_checkpoint_phase | default('') | length == 0
+
 # --- DHCP ------------------------------------------------------------------ #
 - name: "Domain Services: DHCP"
   hosts: dhcp_servers
@@ -44,6 +81,10 @@
         exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
         virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
 
+    - name: "[preflight] Skip — phase6 already completed (checkpoint)"
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']._phase_skip | default(false) | bool
+
     - name: "[preflight] Skip — destroy workflow, no configuration to run"
       ansible.builtin.meta: end_play
       when: (action | default('deploy')) == 'destroy'
@@ -58,8 +99,6 @@
         fail_msg: "dhcp_servers group is empty but DHCP phase is enabled."
 
   roles:
-    - configure_vm
-    - install_windowsfeature
     - deploy_dhcp
 
 # --- SQL Server ------------------------------------------------------------ #
@@ -92,8 +131,6 @@
         fail_msg: "sql_servers group is empty but SQL phase is enabled."
 
   roles:
-    - configure_vm
-    - install_windowsfeature
     - deploy_sql_server
 
 # --- Microsoft Exchange ---------------------------------------------------- #
@@ -131,8 +168,6 @@
         fail_msg: "exchange_servers group is empty but Exchange phase is enabled."
 
   roles:
-    - configure_vm
-    - install_windowsfeature
     - deploy_microsoft_exchange
 
 # --- SCCM ------------------------------------------------------------------ #
@@ -170,8 +205,6 @@
         fail_msg: "sccm_servers group is empty but SCCM phase is enabled."
 
   roles:
-    - configure_vm
-    - install_windowsfeature
     - deploy_configuration_manager
 
 # --- IIS ------------------------------------------------------------------- #
@@ -204,5 +237,24 @@
         fail_msg: "iis_servers group is empty but IIS phase is enabled."
 
   roles:
-    - configure_vm
-    - install_windowsfeature
+    - install_windowsfeature   # IIS feature only — configure_vm runs in Phase 5
+
+# ----------------------------------------------------------------------------
+# Post-play: record phase6 completion in pipeline checkpoint
+# ----------------------------------------------------------------------------
+# Only writes a checkpoint record when domain_services_checkpoint_phase is set
+# (i.e., this is the full Phase 6 run from site.yml, not the Phase 4.7 DHCP
+# pre-boot call). The record is skipped if the phase was already complete.
+- name: Record Phase 6 Checkpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Record domain services phase as complete
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: record_complete
+        pipeline_checkpoint_phase: "{{ domain_services_checkpoint_phase }}"
+      when:
+        - domain_services_checkpoint_phase | default('') | length > 0
+        - not (_phase_skip | default(false) | bool)

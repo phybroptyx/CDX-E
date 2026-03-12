@@ -10,9 +10,9 @@ facts to be set by upstream roles in the same pipeline run.
 
 - [Configuration Loaders](#configuration-loaders) — load exercise/APT/SOC data into Ansible facts
 - [Infrastructure Provisioning](#infrastructure-provisioning) — Packer, Terraform, Inventory
-- [VM Lifecycle](#vm-lifecycle) — power management, OS base config, Windows features
-- [Networking](#networking) — OVS SDN, VyOS router config
-- [Active Directory](#active-directory) — DC promotion, OU structure, GPOs, domain services
+- [VM Lifecycle](#vm-lifecycle) — power management, OS base config, Windows features, domain join
+- [Networking](#networking) — OVS SDN, VyOS router config, SOCKS5 relay tunnel
+- [Active Directory](#active-directory) — DC promotion, OU structure, GPOs
 - [Domain Services](#domain-services) — DHCP, SQL, Exchange, SCCM
 - [Team Configuration](#team-configuration) — Red Team C2, Blue Team SOC stack
 - [Operational](#operational) — agents, validation, cluster bootstrap
@@ -255,8 +255,9 @@ so subsequent plays in the same pipeline run can target VMs by group.
 **Called from:** `vm_power_management.yml` (Phase 2b), `red_team_deployment.yml`,
 `blue_team_deployment.yml`
 
-Powers on VMs via the Proxmox API and waits for management connectivity. Supports
-three VM tiers via `target_tier`:
+Powers on VMs via the Proxmox API, configures static IPs via QEMU guest-exec, migrates
+DC NICs to the exercise bridge, and waits for management connectivity via the relay.
+Supports three VM tiers via `target_tier`:
 
 | `target_tier` | VM source |
 |---|---|
@@ -264,17 +265,25 @@ three VM tiers via `target_tier`:
 | `red_team` | `apt_vms` — Red Team VMs |
 | `blue_team` | `soc_vms` — Blue Team VMs |
 
+A `vm_include_groups` whitelist controls which groups are processed in each pipeline stage
+(e.g., `domain_controllers` for Phase 2b-r, `workstations` for Phase 6.5).
+
 **Readiness sequence:**
 1. Pre-check current power state; filter to only VMs that need to be started (idempotent)
 2. POST `/qemu/<vmid>/status/start` for each VM that isn't already running
 3. Pause for initial boot delay (`guest_agent_initial_delay`)
 4. Poll QEMU guest agent via `/agent/ping` until responsive
-5. Query `/agent/network-get-interfaces` for actual management IP; retries through
-   cloud-init-triggered agent disappearance (HTTP 500 accepted during retry window)
-6. Warn on any IP mismatch between expected `cloud_init.ip` and actual discovered IP
-7. Wait for WinRM port 5985 (Windows) or SSH port 22 (Linux/VyOS) on the management IP
-8. Write management IP to `inventory/host_vars/<vm-name>.yml` (persists for standalone runs)
-9. Call `add_host` to update in-memory `ansible_host` for the current pipeline run
+5. Windows: poll DHCP IP via `/agent/network-get-interfaces` (boot-complete signal)
+6. Guest-exec: configure static exercise IP via PowerShell/netsh (modern) or WMI EnableStatic
+   (legacy Windows 2008R2/Win7). No WinRM required — uses virtio-serial channel
+7. Poll exec-status PIDs for completion
+8. Verify exercise IP via QEMU guest agent; build `_vms_static_configured` allow-list
+9. Read current DC net0 config (GET) to preserve MAC; PUT net0 to exercise bridge for DCs only
+   (member servers and workstations clone directly onto exercise bridge — no migration needed)
+10. Guest-exec: ensure WinRM is started after NIC bridge migration (no-op if already running)
+11. Write exercise IP to `inventory/host_vars/<vm-name>.yml`; update in-memory `ansible_host`
+12. Workstations (no `cloud_init.ip`): write QGA-discovered DHCP IP to `host_vars`
+13. Wait for WinRM port 5985 (Windows) or SSH port 22 (Linux/VyOS) via relay (`delegate_to: cdx-relay`)
 
 **Key timing variables (in `all.yml`):**
 
@@ -285,23 +294,32 @@ three VM tiers via `target_tier`:
 | `guest_agent_poll_retries` | `30` | Max poll attempts |
 | `vm_power_wait_timeout` | `300` | Max seconds for port connectivity wait |
 | `vm_power_wait_sleep` | `10` | Seconds between port checks |
+| `windows_sysprep_settle_delay` | `60` | Flat pause after guest agent confirms boot, before DHCP poll |
+| `dhcp_discovery_retries` | `30` | Max attempts for DHCP IP discovery via QGA |
+| `dhcp_discovery_delay` | `10` | Seconds between DHCP discovery attempts |
 
 ---
 
 ### `configure_vm`
 
 **Called from:** `server_configuration.yml`, `workstation_configuration.yml`,
-`domain_management.yml`, and all `domain_services.yml` service plays
+`domain_management.yml`
 
 Applies base OS configuration to each exercise VM. Branches on `ansible_os_type`.
 
-**Windows tasks:**
+**Windows tasks (in order):**
+- `wait_for` port 5985 delegated to `cdx-relay` (confirms NIC migration complete and VM
+  is reachable via relay SOCKS5 proxy before any WinRM tasks run)
+- `win_ping` retry loop (NTLM handshake — confirms WinRM is functionally ready, not just
+  TCP-open; retries 20 times × 15s to handle post-Sysprep WinRM initialization delay)
 - Set hostname; reboot if changed
 - Set timezone (`vm_timezone`, Windows format e.g. `"Eastern Standard Time"`)
 - Disable automatic updates and auto-reboot (registry)
 - Set PowerShell execution policy to `Unrestricted`
-- Ensure `ansible_user` is in local Administrators
+- Ensure `ansible_user` is in local Administrators (skipped for `domain_controllers` —
+  cdxadmin is a domain account post-promotion; Domain Admins are already in Administrators)
 - Ensure WinRM NTLM and Basic auth are enabled
+- Disable IPv6 on all adapters if `scenario.network.disable_ipv6: true`
 
 **Linux tasks:**
 - Set hostname
@@ -341,6 +359,38 @@ immediately if any feature reports `reboot_required`.
 ---
 
 ## Networking
+
+### `relay_tunnel`
+
+**Called from:** Pre-play in `domain_management.yml`, `server_configuration.yml`,
+`workstation_configuration.yml`, `domain_services.yml`, `exercise_initiation.yml`;
+`relay_tunnel_teardown.yml` (standalone)
+
+Manages the SSH dynamic-forwarding SOCKS5 tunnel from the ACN to the CDX-RELAY VM.
+All WinRM connections from Ansible route through this tunnel via
+`socks5://127.0.0.1:{{ relay_tunnel_port }}` (set in `group_vars/windows_hosts.yml`).
+
+Always runs on `localhost` (the ACN). Does not touch the relay VM itself.
+
+**Actions:**
+
+| Action | Behavior |
+|---|---|
+| `open` | Checks for existing PID file and running process; starts `ssh -D <port> -N -f` if not already running (idempotent) |
+| `close` | Kills the process by PID file and removes the PID file |
+
+**Key variables:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `relay_tunnel_action` | `open` | `open` or `close` |
+| `relay_tunnel_host` | `10.0.0.10` | CDX-RELAY management IP (Layer0 static) |
+| `relay_tunnel_user` | `cdxadmin` | SSH user on relay |
+| `relay_tunnel_key` | `~/.ssh/id_ed25519` | SSH key path on ACN |
+| `relay_tunnel_port` | `1080` | Local SOCKS5 port (must match `windows_hosts.yml`) |
+| `relay_tunnel_pid_file` | `/tmp/cdx_relay_tunnel.pid` | PID file location on ACN |
+
+---
 
 ### `configure_networking`
 
@@ -394,23 +444,58 @@ Targets: `domain_controllers` group. Runs with `serial: 1` from the calling play
 
 Performs the full Active Directory deployment lifecycle:
 
-**Section 1 — Phase gate:** Skips if `scenario.phases.domain` is false.
+**Section 1 — Preflight assertions:** Validates `scenario.domain.*` facts are defined.
 
-**Section 2 — Domain Controller Promotion:**
-- Checks if the host is already a DC; skips promotion if so
-- First DC: installs a new AD forest and domain using parameters from `scenario.domain`
-- Additional DCs: joins the existing domain as replica DCs
-- Reboots are handled automatically via `win_reboot` after promotion
+**Section 2 — DC status check:** Queries `Win32_ComputerSystem.DomainRole`; sets
+`_is_dc` fact. Already-promoted DCs skip Sections 3–5.
 
-**Section 3 — AD Structure Population** (runs on first DC only):
-- Creates OU tree structure
-- Creates AD replication sites, subnets, and site links
-- Populates users and groups from `users.json` and `exercise_template.json`
-- All filter comparisons use string filters (`"Name -eq '$var'"`) to avoid
-  PowerShell scope resolution issues with `-Filter { scriptblock }` syntax
+**Section 3 — Domain existence check:** Tests LDAP port 389 on the domain FQDN;
+sets `_domain_exists` fact. Used to select forest-creation vs. replica-DC path.
 
-**Section 4 — DNS Configuration:**
-- Configures DNS forwarders and reverse lookup zones per `scenario.dns`
+**Section 4a — Forest creation (first DC):** `win_domain` installs a new AD forest using
+`scenario.domain.*` parameters. Reboots automatically.
+
+**Section 4b — Replica DC promotion:** `win_domain_controller` promotes additional DCs
+into the existing domain. Reboots automatically. Assigns DC to its AD site if `ad_site`
+is set in `host_vars`.
+
+**Section 5 — Wait for AD readiness:** Polls `Import-Module ActiveDirectory; Get-ADDomain`
+until successful.
+
+**Section 5.5 — NLA restart:** Restarts the Network Location Awareness service
+(`NlaSvc`) with `force_dependent_services: true` so the network adapter is reclassified
+as `DomainAuthenticated` (not `Public`). Without this, Windows Firewall blocks WinRM
+on the domain-joined DC. Runs only on freshly promoted DCs (`when: not _is_dc`).
+
+**Section 5.6 — Enable built-in Administrator:** The built-in Administrator is the only
+guaranteed Enterprise Admin in a fresh forest. `cdxadmin` is Domain Admin but not Enterprise
+Admin and cannot manage the Configuration partition (Sites & Services, GPO linking).
+This section enables the Administrator account and sets its password via `net user` while
+still connected as `cdxadmin`. Runs only on the forest-creating DC.
+
+**Section 5.7 — W32TM NTP configuration:** Configures the PDC emulator to sync from
+`scenario.ntp_server` (default: CDX-I NTP container at `46.244.164.88`). Runs as
+`Administrator`. Runs only on the forest-creating DC. W32TM hierarchy propagates NTP
+settings to member machines automatically.
+
+**Sections 6 — Stage JSON files:** Copies `exercise_template.json` and `users.json` to
+a temp directory on DC-01 for PowerShell consumption.
+
+**Sections 7–11 — AD configuration (block, runs as Administrator):** All tasks in this
+block use `vars: ansible_user: Administrator`. Only runs when `not _domain_exists` (i.e.,
+the forest-creating DC only). `run_once: true` is avoided because with `serial: 1` it
+would fire once per batch — `when: not _domain_exists` achieves the same single-execution
+semantics safely.
+
+- **Section 7:** Create/rename AD sites, subnets, and site links from `exercise_template.json`
+- **Section 7.5:** Create DNS reverse lookup zones; trigger DDNS re-registration for PTR records
+- **Section 8:** Create OU hierarchy (root OU → site key OUs → department OUs → sub-OUs)
+- **Section 9:** Create AD security groups from `users.json`
+- **Section 10:** Create user accounts and assign group memberships from `users.json`
+- **Section 11:** Remove staging directory from DC
+
+All PowerShell AD filter comparisons use string-based `-Filter "Name -eq '$var'"` syntax to
+avoid PowerShell scope resolution issues with `-Filter { scriptblock }` syntax.
 
 **Key input variables (from `scenario.yml`):**
 
@@ -420,6 +505,7 @@ Performs the full Active Directory deployment lifecycle:
 | `scenario.domain.netbios` | NetBIOS name |
 | `scenario.domain.functional_level` | Forest/domain functional level |
 | `scenario.domain.admin_password` | Domain admin password (vault reference) |
+| `scenario.ntp_server` | NTP server for PDC emulator (default: `46.244.164.88`) |
 
 ---
 
@@ -446,23 +532,68 @@ executes them; AD replication propagates the result to other DCs.
 
 ---
 
+### `join_domain`
+
+**Called from:** `server_configuration.yml` (post_tasks), `workstation_configuration.yml`
+(post_tasks) — via `include_role`
+
+Joins a Windows VM to the exercise Active Directory domain. Called from `post_tasks` in
+both configuration playbooks so it always runs after `configure_vm` (which sets the
+hostname and reboots if needed). Setting the hostname while still in workgroup avoids
+the Access Denied error that occurs when renaming an already domain-joined computer.
+
+**Idempotent:** checks `Win32_ComputerSystem.PartOfDomain` via WMI before attempting
+the join. If the machine is already a member of the correct domain, the role exits cleanly
+without making any changes.
+
+**Gate variable:** `domain_join` (default: `true`) — set `false` in `vms.yaml` per-VM
+for standalone systems that should not join the domain (external DNS resolvers, DMZ hosts,
+intentionally isolated endpoints).
+
+**Sections:**
+1. Gate: skips non-Windows hosts (`ansible_os_type != 'windows'`), hosts with `domain_join: false`,
+   and hosts where `scenario.domain` is not defined
+2. Idempotency check: WMI query for current domain membership
+3. Domain join: `ansible.windows.win_domain_membership`; uses `Administrator@<domain>` as
+   the joining account (guaranteed Domain Admin)
+4. Reboot if required
+5. Summary
+
+**Key variables:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `domain_join` | `true` | Set `false` in `vms.yaml` to skip join for standalone VMs |
+| `scenario.domain.name` | — | Domain FQDN; sourced from `read_exercise_config` |
+| `scenario.domain.admin_password` | — | Domain Administrator password (vault reference) |
+
+---
+
 ## Domain Services
 
 ### `deploy_dhcp`
 
-**Called from:** `domain_services.yml`, `dhcp_management.yml` (Phase 6)
+**Called from:** `domain_services.yml`, `dhcp_management.yml` (Phase 4.7 / Phase 7)
 
-Configures Windows DHCP Server on domain-joined Windows hosts.
+Configures Windows DHCP Server on domain-joined Windows hosts. All DHCP Server operations
+run as domain `Administrator` via a block-level `vars: ansible_user: Administrator` override.
+`cdxadmin` is used only for local OS tasks (not in this role).
 
 **Sections:**
 1. Phase gate + preflight (asserts `scenario.phases.services.dhcp` and scopes are defined)
 2. Ensures `DHCPServer` service is started and set to automatic
-3. Authorizes the DHCP server in Active Directory (uses `cloud_init_ip` — the exercise-network
+3. **DHCP post-install AD initialization:** Runs `Add-DhcpServerSecurityGroup` if the
+   `DHCP Administrators` AD group does not exist. This creates the DHCP AD security groups
+   and initializes the DHCP Server module's AD connectivity — equivalent to the Server Manager
+   "Complete DHCP configuration" banner. Idempotent (guarded by group existence check).
+   The DHCPServer service is restarted unconditionally after initialization and polled until
+   the scope database is ready.
+4. Authorizes the DHCP server in Active Directory (uses `cloud_init_ip` — the exercise-network
    IP — to avoid management NIC ambiguity on dual-NIC hosts)
-4. Detects existing scopes by subnet address
-5. Creates missing scopes (idempotent — existing scopes are skipped)
-6. Applies scope options 3 (router), 6 (DNS), 15 (domain name) with `-Force`
-7. Ensures all configured scopes are in `Active` state
+5. Detects existing scopes by subnet address
+6. Creates missing scopes (idempotent — existing scopes are skipped)
+7. Applies scope options 3 (router), 6 (DNS), 15 (domain name) with `-Force`
+8. Ensures all configured scopes are in `Active` state
 
 DHCP scopes come from `scenario.services.dhcp.scopes` in `scenario.yml`.
 
@@ -631,5 +762,15 @@ All are `cacheable: true` and available across plays within the same pipeline ru
 | `soc_layout_name` | `read_soc_layout` | Active SOC layout name |
 | `soc_layout` | `read_soc_layout` | Parsed `layout.yml` |
 | `soc_vms` | `read_soc_layout` | Blue Team VM list |
-| `cloud_init_ip` | `inventory_refresh` | Per-host exercise-network IP |
-| `ansible_host` | `vm_power_management` | Per-host management IP (Layer0 DHCP) |
+| `cloud_init_ip` | `inventory_refresh` | Per-host exercise-network IP (from `vms.yaml`) |
+| `ansible_host` | `vm_power_management` | Per-host management IP written to `host_vars/` |
+
+### Per-host role facts (set during task execution, not cacheable)
+
+| Fact | Set By | Description |
+|---|---|---|
+| `_is_dc` | `configure_active_directory` | `true` if host's DomainRole >= 4 |
+| `_domain_exists` | `configure_active_directory` | `true` if LDAP port 389 responds on domain FQDN |
+| `_already_joined` | `join_domain` | `true` if host is already a member of the exercise domain |
+| `_vm_dhcp_ips` | `vm_power_management` | Dict of VM name → Layer0 DHCP IP (used for workstations) |
+| `_vms_static_configured` | `vm_power_management` | List of VMs whose exercise IPs were verified by QGA |

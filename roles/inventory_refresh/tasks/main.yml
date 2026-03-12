@@ -220,8 +220,8 @@
   loop_control:
     label: "{{ item.name }}"
   when:
-    - (item.cloud_init | default({})).ip | default('') | length > 0
     - (template_registry[item.template].os_type | default('')) != 'vyos'
+    - (cleanup_host_vars | default(false) | bool) or ((action | default('deploy')) == 'destroy')
 
 # ----------------------------------------------------------------------------
 # Write inventory file

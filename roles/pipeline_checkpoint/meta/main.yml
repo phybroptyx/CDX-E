@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  role_name: pipeline_checkpoint
+  author: CDX-E
+  description: >-
+    Tracks per-phase completion state for the CDX-E pipeline. Enables
+    resume-on-failure by skipping configuration phases that already
+    completed successfully in a prior run.
+  license: proprietary
+  min_ansible_version: "2.14"
+
+dependencies: []

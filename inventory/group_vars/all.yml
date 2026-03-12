@@ -66,12 +66,15 @@ vm_power_wait_sleep: 10
 dhcp_discovery_retries: 20   # Max poll attempts (20 × 15 s = 5 minutes max)
 dhcp_discovery_delay:   15   # Seconds between poll attempts
 
-# Sysprep settle delay — seconds to wait after the QEMU guest agent first
-# responds before polling for a Layer0 DHCP IP.
-# The QEMU GA becomes responsive during the Specialize pass (first boot) but
-# Sysprep then reboots into the final state.  This delay ensures the DHCP poll
-# and guest-exec run against the stable post-Sysprep system.
-windows_sysprep_settle_delay: 30
+# Sysprep completion polling — vm_power_management queries the Windows registry
+# key HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\OOBE\IsSetupComplete via
+# QEMU guest-exec (virtio-serial, no WinRM) and retries until the value equals 1.
+# IsSetupComplete=1 means Windows has finished the OOBE/Sysprep final pass and is
+# ready for DHCP polling and guest-exec static IP configuration.
+#   sysprep_poll_retries × sysprep_poll_delay = 60 × 15 s = 15 minutes max.
+sysprep_poll_retries: 60   # Max poll attempts before failing
+sysprep_poll_delay:   15   # Seconds between poll attempts
+windows_sysprep_settle_delay: 30  # Flat settle pause (pending IsSetupComplete polling implementation)
 
 
 # =============================================================================
@@ -166,29 +169,15 @@ windows_feature_sets:
     - Telnet-Client
 
   exchange_servers:
-    # Exchange Server prerequisites
+    # Base management tools only (matches sql_servers pattern).
+    # When scenario.phases.services.exchange is false, this server is a placeholder
+    # — no Exchange-specific features are installed here. IIS/WAS prerequisites
+    # and all other Exchange requirements are handled by deploy_microsoft_exchange
+    # (Phase 6), which only runs when exchange: true.
     - RSAT-AD-Tools
     - RSAT-AD-PowerShell
     - Net-Framework-45-Features
-    # Exchange requires these Windows features
-    - Web-Server
-    - Web-Mgmt-Console
-    - Web-Asp-Net45
-    - Web-ISAPI-Ext
-    - Web-ISAPI-Filter
-    - Web-Net-Ext45
-    - Web-Metabase
-    - Web-Lgcy-Mgmt-Console
-    - WAS-Process-Model
-    - WAS-Config-APIs
-    - Web-Dyn-Compression
-    - Web-Http-Errors
-    - Web-Http-Logging
-    - Web-Basic-Auth
-    - Web-Windows-Auth
-    - Web-Stat-Compression
-    - Web-Request-Monitor
-    - RPC-over-HTTP-proxy
+    - Telnet-Client
 
   sccm_servers:
     # SCCM / Configuration Manager prerequisites

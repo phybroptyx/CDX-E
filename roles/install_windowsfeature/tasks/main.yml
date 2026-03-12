@@ -47,8 +47,12 @@
         if (windows_features is defined and windows_features | length > 0)
         else (
           (windows_feature_sets[ansible_group] | default([]))
+          + (additional_groups | default([])
+             | select('in', windows_feature_sets.keys() | list)
+             | map('extract', windows_feature_sets)
+             | flatten | list)
           + (windows_features_extra | default([]))
-        )
+        ) | unique | list
       }}
 
 # ----------------------------------------------------------------------------

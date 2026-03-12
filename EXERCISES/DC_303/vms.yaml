@@ -135,6 +135,7 @@ virtual_machines:
     name: "DEN-FS-01"
     template: "server_2016"
     ansible_group: "servers"
+    domain_join: true
     monitor: true
     resources:
       memory_mb: 8192
@@ -156,6 +157,7 @@ virtual_machines:
     name: "DEN-DB-01"
     template: "server_2016"
     ansible_group: "sql_servers"
+    domain_join: true
     monitor: true
     resources:
       memory_mb: 16384
@@ -177,6 +179,7 @@ virtual_machines:
     name: "DEN-EX-01"
     template: "server_2016"
     ansible_group: "exchange_servers"
+    domain_join: true
     monitor: true
     resources:
       memory_mb: 32768
@@ -198,6 +201,7 @@ virtual_machines:
     name: "DEN-BU-01"
     template: "server_2012r2"
     ansible_group: "servers"
+    domain_join: true
     monitor: true
     resources:
       memory_mb: 8192
@@ -222,6 +226,7 @@ virtual_machines:
     name: "DEN-CLI-01"
     template: "windows_10"
     ansible_group: "workstations"
+    domain_join: true
     resources:
       memory_mb: 4096
       cores: 2
@@ -237,6 +242,7 @@ virtual_machines:
     name: "DEN-CLI-02"
     template: "windows_10"
     ansible_group: "workstations"
+    domain_join: true
     resources:
       memory_mb: 4096
       cores: 2
@@ -252,6 +258,7 @@ virtual_machines:
     name: "DEN-CLI-03"
     template: "windows_10"
     ansible_group: "workstations"
+    domain_join: true
     resources:
       memory_mb: 4096
       cores: 2
@@ -267,6 +274,7 @@ virtual_machines:
     name: "DEN-CLI-04"
     template: "windows_10"
     ansible_group: "workstations"
+    domain_join: true
     resources:
       memory_mb: 4096
       cores: 2
@@ -282,6 +290,7 @@ virtual_machines:
     name: "DEN-CLI-05"
     template: "windows_10"
     ansible_group: "workstations"
+    domain_join: true
     resources:
       memory_mb: 4096
       cores: 2

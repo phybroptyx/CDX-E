@@ -11,6 +11,7 @@
 # Exercise Identity
 # -----------------------------------------------------------------------------
 timezone: "Mountain Standard Time"   # Windows timezone name for configure_vm
+ntp_server: "46.244.164.88"          # NTP server for W32TM PDC emulator sync
 
 exercise:
   name: DC_303
@@ -63,9 +64,9 @@ phases:
   servers: true
 
   services:
-    dhcp:     true        # DC-01 hosts DHCP for client subnet
-    sql:      true        # Required by Exchange (303-DB-01)
-    exchange: true        # 303-EX-01
+    dhcp:     true        # DC-02 hosts DHCP for client subnet
+    sql:      false       # Not deployed in this demo scenario
+    exchange: false       # Not deployed in this demo scenario
     sccm:     false
     iis:      false
 
