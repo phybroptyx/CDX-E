@@ -1,0 +1,126 @@
+---
+# =============================================================================
+# Role: configure_blue_team
+# =============================================================================
+# Configures Blue Team / SOC infrastructure on deployed VMs.
+# Runs AFTER deploy_blue_team (Terraform) and vm_power_management (power-on).
+#
+# Expects facts (set by read_soc_layout pre-play + hostvars import):
+#   soc_layout       — parsed layout.yml content
+#   soc_layout_name  — SOC layout name
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight
+# ----------------------------------------------------------------------------
+- name: Assert SOC layout facts are present
+  ansible.builtin.assert:
+    that:
+      - soc_layout is defined
+      - soc_layout_name is defined
+    fail_msg: >-
+      soc_layout and soc_layout_name facts are not defined.
+      Ensure read_soc_layout runs in a pre-play before configure_blue_team.
+  run_once: true
+
+- name: Display SOC layout summary
+  ansible.builtin.debug:
+    msg:
+      - "SOC Layout   : {{ soc_layout_name }}"
+      - "Description  : {{ soc_layout.soc_layout.description | default('N/A') }}"
+  run_once: true
+
+# ----------------------------------------------------------------------------
+# Malcolm Network Analysis Platform
+# ----------------------------------------------------------------------------
+- name: Configure Malcolm server
+  block:
+
+    - name: Ensure Malcolm services are started and enabled
+      ansible.builtin.systemd:
+        name: "malcolm"
+        state: started
+        enabled: true
+      register: _malcolm_service
+
+    - name: Wait for Malcolm web UI to become available
+      ansible.builtin.wait_for:
+        host: "{{ ansible_host }}"
+        port: "{{ malcolm_web_port }}"
+        timeout: 300
+        state: started
+      delegate_to: localhost
+
+    - name: Report Malcolm status
+      ansible.builtin.debug:
+        msg: "Malcolm is running at https://{{ ansible_host }}:{{ malcolm_web_port }}"
+
+  when:
+    - soc_layout.malcolm is defined
+    - inventory_hostname == soc_layout.malcolm.vm
+
+# ----------------------------------------------------------------------------
+# Hedgehog Linux Sensor Configuration
+# ----------------------------------------------------------------------------
+- name: Configure Hedgehog sensor
+  block:
+
+    - name: Resolve sensor config for this host
+      ansible.builtin.set_fact:
+        _hh_sensor: >-
+          {{ soc_layout.sensors
+             | selectattr('vm', 'equalto', inventory_hostname)
+             | first }}
+
+    - name: Ensure Hedgehog capture service is started
+      ansible.builtin.systemd:
+        name: "hedgehog-capture"
+        state: started
+        enabled: true
+
+    - name: Report Hedgehog sensor status
+      ansible.builtin.debug:
+        msg: >-
+          Hedgehog sensor {{ inventory_hostname }} is active.
+          Capturing on {{ _hh_sensor.capture_interface }},
+          forwarding to {{ _hh_sensor.malcolm_server }}.
+
+  when:
+    - soc_layout.sensors is defined
+    - soc_layout.sensors | selectattr('vm', 'equalto', inventory_hostname) | list | length > 0
+
+# ----------------------------------------------------------------------------
+# Analyst Workstation Configuration
+# ----------------------------------------------------------------------------
+- name: Configure analyst workstation
+  block:
+
+    - name: Install analyst packages
+      ansible.builtin.apt:
+        name: "{{ blue_team_analyst_packages }}"
+        state: present
+        update_cache: true
+      when: ansible_os_family == "Debian"
+
+    - name: Create Malcolm bookmark (if Malcolm is in this layout)
+      ansible.builtin.lineinfile:
+        path: /root/.bashrc
+        line: "alias malcolm='xdg-open {{ soc_layout.analysts | selectattr('vm', 'equalto', inventory_hostname) | map(attribute='malcolm_url') | first }}'"
+        create: true
+      when:
+        - soc_layout.analysts is defined
+        - soc_layout.analysts | selectattr('vm', 'equalto', inventory_hostname) | list | length > 0
+
+  when:
+    - soc_layout.analysts is defined
+    - soc_layout.analysts | selectattr('vm', 'equalto', inventory_hostname) | list | length > 0
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+- name: Blue Team configuration summary
+  ansible.builtin.debug:
+    msg: |
+      Blue Team configuration complete on {{ inventory_hostname }}.
+      SOC layout  : {{ soc_layout_name }}
+  run_once: true

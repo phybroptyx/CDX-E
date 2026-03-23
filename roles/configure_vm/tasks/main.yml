@@ -1,0 +1,292 @@
+---
+# =============================================================================
+# Role: configure_vm
+# =============================================================================
+# Applies base OS configuration to each exercise VM.
+# Runs against actual hosts (not localhost) after inventory_refresh and
+# vm_power_management have completed.
+#
+# OS branching uses ansible_os_type set per-host in exercise_hosts.yml.
+#
+# Windows:
+#   - Hostname, reboot if required
+#   - Timezone (Windows format, e.g. "UTC")
+#   - Disable automatic updates (registry)
+#   - PowerShell execution policy: Unrestricted
+#   - Ensure ansible_user is in local Administrators
+#   - Ensure WinRM NTLM + Basic auth enabled
+#
+# Linux:
+#   - Hostname
+#   - Timezone (IANA format, e.g. "UTC")
+#   - Disable unattended-upgrades service (non-fatal)
+#
+# VyOS:
+#   - Skipped; managed by configure_networking
+#
+# Expects:
+#   ansible_os_type  — set per-host in generated inventory
+#   vm_timezone      — from inventory/group_vars/all.yml (default: "UTC")
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Windows
+# ----------------------------------------------------------------------------
+# WinRM HTTP listener check — skipped if vm_power_management already confirmed
+# winrm_http_ready: true via _vm_state. Runs for VMs that vm_power_management
+# could not probe (workstations with DHCP IPs, or VMs that missed ip_verified).
+- name: Windows | Wait for WinRM HTTP ready — listener fully initialized
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:5985/wsman"
+    method: GET
+    status_code: [401, 405]
+    validate_certs: false
+  delegate_to: cdx-relay
+  register: _winrm_http_poll
+  retries: "{{ winrm_http_ready_retries }}"
+  delay:   "{{ winrm_http_ready_delay }}"
+  until:   _winrm_http_poll.status in [401, 405]
+  when:
+    - ansible_os_type == 'windows'
+    - not (hostvars['localhost']._vm_state[inventory_hostname].winrm_http_ready | default(false) | bool)
+
+# WinRM SOAP layer check — confirms Ansible can execute commands through the
+# full SOAP/NTLM stack, not just that the HTTP listener is accepting connections.
+# Skipped if vm_power_management already confirmed winrm_soap_ready: true.
+- name: Windows | Wait for WinRM SOAP layer ready — command execution confirmed
+  ansible.builtin.wait_for_connection:
+    timeout:         "{{ vm_readiness_winrm_soap_timeout | default(300) }}"
+    sleep:           "{{ vm_readiness_winrm_soap_sleep | default(5) }}"
+    connect_timeout: "{{ vm_readiness_winrm_soap_connect_timeout | default(10) }}"
+  when:
+    - ansible_os_type == 'windows'
+    - not (hostvars['localhost']._vm_state[inventory_hostname].winrm_soap_ready | default(false) | bool)
+
+# Stage 3a: NlaSvc Running confirms the network adapter has been classified.
+# Prevents tasks that depend on network profile from racing with NLA evaluation.
+- name: Windows | Wait for NlaSvc Running — network adapter classified
+  ansible.windows.win_shell: |
+    if ((Get-Service NlaSvc).Status -eq 'Running') { exit 0 } else { exit 1 }
+  register: _nlasvc_ready
+  until: _nlasvc_ready.rc == 0
+  retries: 12
+  delay: 10
+  changed_when: false
+  when: ansible_os_type == 'windows'
+
+# Stage 3b: LogonUI running = login screen displayed, all startup tasks complete.
+# Explorer running = user session active. Either confirms interactive readiness.
+- name: Windows | Wait for login screen — LogonUI or explorer running
+  ansible.windows.win_shell: |
+    $l = Get-Process LogonUI -ErrorAction SilentlyContinue
+    $e = Get-Process explorer -ErrorAction SilentlyContinue
+    if ($l -or $e) { exit 0 } else { exit 1 }
+  register: _logon_ready
+  until: _logon_ready.rc == 0
+  retries: 18
+  delay: 10
+  changed_when: false
+  when: ansible_os_type == 'windows'
+
+
+- name: Windows | Set hostname
+  ansible.windows.win_hostname:
+    name: "{{ inventory_hostname }}"
+  register: _hostname_set
+  when: ansible_os_type == 'windows'
+
+- name: Windows | Reboot if hostname changed
+  ansible.windows.win_reboot:
+    reboot_timeout: 300
+    post_reboot_delay: 15
+  when:
+    - ansible_os_type == 'windows'
+    - _hostname_set.reboot_required | default(false)
+
+- name: Windows | Wait for NlaSvc after hostname reboot — network re-classified
+  ansible.windows.win_shell: |
+    if ((Get-Service NlaSvc).Status -eq 'Running') { exit 0 } else { exit 1 }
+  register: _nlasvc_post_hostname_reboot
+  until: _nlasvc_post_hostname_reboot.rc == 0
+  retries: 12
+  delay: 10
+  changed_when: false
+  when:
+    - ansible_os_type == 'windows'
+    - _hostname_set.reboot_required | default(false)
+
+- name: Windows | Set timezone
+  ansible.windows.win_timezone:
+    timezone: "{{ scenario.timezone | default(vm_timezone) }}"
+  when: ansible_os_type == 'windows'
+
+# Configure W32TM on the PDC emulator only (first DC in inventory, the forest
+# creator). Only the PDC emulator should sync from an external NTP source with
+# /reliable:YES — additional DCs use syncfromflags:domhier and inherit time
+# from the PDC emulator through the AD domain hierarchy automatically.
+# W32TM requires only local admin rights — no AD dependency.
+- name: Windows | Configure W32TM NTP source on PDC emulator
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $ntpServer = "{{ scenario.ntp_server | default('46.244.164.88') }}"
+    w32tm /config /manualpeerlist:"$ntpServer" /syncfromflags:manual /reliable:YES /update
+    Restart-Service W32Time -Force
+    Start-Sleep -Seconds 5
+    w32tm /resync /force
+    Write-Output "CHANGED: W32TM configured to sync from $ntpServer"
+  changed_when: true
+  when:
+    - ansible_os_type == 'windows'
+    - inventory_hostname == (groups['domain_controllers'] | first)
+
+# Additional DCs cannot resolve the domain FQDN before joining — DNS is not yet
+# configured on the host at configure_vm time. Use the PDC emulator's exercise IP
+# directly (always populated in hostvars by Phase 2, no DNS required).
+# No /reliable:YES — that designation belongs only on the PDC emulator.
+# After promotion, NT5DS will reconfigure these DCs to sync from the PDC emulator.
+- name: Windows | Correct clock skew on additional domain controllers pre-promotion
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $ntpServer = "{{ hostvars[groups['domain_controllers'] | first].ansible_host }}"
+    w32tm /config /manualpeerlist:"$ntpServer" /syncfromflags:manual /update
+    Restart-Service W32Time -Force
+    Start-Sleep -Seconds 3
+    w32tm /resync /force
+    Write-Output "CHANGED: Clock corrected from PDC emulator $ntpServer"
+  changed_when: true
+  when:
+    - ansible_os_type == 'windows'
+    - ansible_group | default('') == 'domain_controllers'
+    - inventory_hostname != (groups['domain_controllers'] | first)
+
+# Member servers and workstations have DHCP-provided DNS (pointing at dc303.cdx.lab)
+# by Phase 5, so the domain FQDN resolves cleanly. Use the PDC emulator's exercise IP
+# directly (consistent with additional DCs, no DNS dependency, always available).
+# After joining the domain, NT5DS takes over and these hosts will track the DCs.
+- name: Windows | Correct clock skew pre-domain-join (member servers and workstations)
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $ntpServer = "{{ hostvars[groups['domain_controllers'] | first].ansible_host }}"
+    w32tm /config /manualpeerlist:"$ntpServer" /syncfromflags:manual /update
+    Restart-Service W32Time -Force
+    Start-Sleep -Seconds 3
+    w32tm /resync /force
+    Write-Output "CHANGED: Clock corrected from PDC emulator $ntpServer"
+  changed_when: true
+  when:
+    - ansible_os_type == 'windows'
+    - ansible_group | default('') != 'domain_controllers'
+
+- name: Windows | Disable automatic updates (registry)
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU
+    name: "{{ item.name }}"
+    data: "{{ item.data }}"
+    type: dword
+  loop:
+    - { name: NoAutoUpdate,                    data: 1 }
+    - { name: NoAutoRebootWithLoggedOnUsers,    data: 1 }
+    - { name: AUOptions,                        data: 2 }
+  when: ansible_os_type == 'windows'
+
+- name: Windows | Set PowerShell execution policy to Unrestricted
+  ansible.windows.win_shell: |
+    Set-ExecutionPolicy Unrestricted -Scope LocalMachine -Force
+  changed_when: false
+  when: ansible_os_type == 'windows'
+
+- name: Windows | Ensure ansible_user is in local Administrators
+  ansible.windows.win_group_membership:
+    name: Administrators
+    members:
+      - "{{ ansible_user }}"
+    state: present
+  when:
+    - ansible_os_type == 'windows'
+    # Skip on domain controllers — cdxadmin is a domain account after DC promotion
+    # and bare username resolution fails. Domain Admins are already in Administrators
+    # via the domain's Builtin\Administrators group.
+    - ansible_group | default('') != 'domain_controllers'
+
+- name: Windows | Ensure WinRM NTLM and Basic auth are enabled
+  ansible.windows.win_shell: |
+    Set-Item -Path 'WSMan:\localhost\Service\Auth\Ntlm'  -Value $true
+    Set-Item -Path 'WSMan:\localhost\Service\Auth\Basic' -Value $true
+  changed_when: false
+  when: ansible_os_type == 'windows'
+
+- name: Windows | Disable IPv6 on all adapters
+  ansible.windows.win_shell: |
+    Get-NetAdapterBinding -ComponentID ms_tcpip6 |
+      Where-Object { $_.Enabled } |
+      ForEach-Object { Disable-NetAdapterBinding -Name $_.Name -ComponentID ms_tcpip6 }
+    # Registry: disable IPv6 on all interfaces including tunnel adapters
+    Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters' `
+      -Name DisabledComponents -Value 0xFF -Type DWord -Force
+  changed_when: false
+  when:
+    - ansible_os_type == 'windows'
+    - scenario.network.disable_ipv6 | default(false) | bool
+
+# ----------------------------------------------------------------------------
+# Linux
+# ----------------------------------------------------------------------------
+- name: Linux | Set hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+  when: ansible_os_type == 'linux'
+
+- name: Linux | Set timezone
+  community.general.timezone:
+    name: "{{ scenario.timezone | default(vm_timezone) }}"
+  when: ansible_os_type == 'linux'
+
+# Same stale hardware clock problem exists on Linux templates. Correct it
+# immediately after timezone is set. Handles both chrony (Debian server builds)
+# and systemd-timesyncd (fallback). VyOS is excluded — managed separately.
+# Uses the PDC emulator's exercise IP (always in hostvars, no DNS dependency).
+- name: Linux | Correct clock skew pre-operation
+  ansible.builtin.shell: |
+    NTP_SERVER="{{ hostvars[groups['domain_controllers'] | first].ansible_host }}"
+
+    if command -v chronyc >/dev/null 2>&1; then
+      CONF=$( [ -f /etc/chrony/chrony.conf ] && echo /etc/chrony/chrony.conf || echo /etc/chrony.conf )
+      grep -qF "$NTP_SERVER" "$CONF" || echo "server $NTP_SERVER iburst" >> "$CONF"
+      systemctl restart chrony
+      sleep 3
+      chronyc makestep
+    else
+      mkdir -p /etc/systemd/timesyncd.conf.d
+      printf '[Time]\nNTP=%s\n' "$NTP_SERVER" > /etc/systemd/timesyncd.conf.d/cdx.conf
+      systemctl restart systemd-timesyncd
+      sleep 5
+      timedatectl set-ntp true
+    fi
+    echo "CHANGED: Clock corrected from $NTP_SERVER"
+  changed_when: true
+  when: ansible_os_type == 'linux'
+
+- name: Linux | Disable unattended-upgrades
+  ansible.builtin.systemd:
+    name: unattended-upgrades
+    state: stopped
+    enabled: false
+  ignore_errors: true
+  when: ansible_os_type == 'linux'
+
+# ----------------------------------------------------------------------------
+# VyOS — skip (managed by configure_networking)
+# ----------------------------------------------------------------------------
+- name: VyOS | Skip base configuration
+  ansible.builtin.debug:
+    msg: "VyOS host {{ inventory_hostname }} — base config handled by configure_networking."
+  when: ansible_os_type == 'vyos'
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+- name: configure_vm summary
+  ansible.builtin.debug:
+    msg: >-
+      configure_vm complete for {{ inventory_hostname }}
+      (os_type={{ ansible_os_type }}, timezone={{ scenario.timezone | default(vm_timezone) }}).

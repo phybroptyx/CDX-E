@@ -1,0 +1,78 @@
+---
+# =============================================================================
+# DEPLOYMENT_TEST - VM Specification
+# =============================================================================
+# Test deployment for validating Packer-built templates.
+# Deploys 8 VMs across multiple OS types.
+# =============================================================================
+
+exercise:
+  name: "DEPLOYMENT_TEST"
+  description: "Template Validation Test Deployment"
+
+virtual_machines:
+  - vmid: 710
+    name: "TD-DC-01"
+    template: "server_2025"
+    ansible_group: "domain_controllers"
+    os_type: "windows"
+    resources:
+      memory_mb: 16384
+      cores: 2
+      sockets: 2
+
+  # - vmid: 711
+  #   name: "TD-DC-02"
+  #   template: "server_2022"
+  #   resources:
+  #     memory_mb: 16384
+  #     cores: 2
+  #     sockets: 2
+
+  # - vmid: 712
+  #   name: "TD-EX-01"
+  #   template: "server_2019"
+  #   resources:
+  #     memory_mb: 16384
+  #     cores: 2
+  #     sockets: 2
+
+  # - vmid: 713
+  #   name: "TD-FS-01"
+  #   template: "server_2016"
+  #   resources:
+  #     memory_mb: 16384
+  #     cores: 2
+  #     sockets: 2
+
+  # - vmid: 714
+  #   name: "TD-FS-02"
+  #   template: "server_2012r2"
+  #   resources:
+  #     memory_mb: 16384
+  #     cores: 2
+  #     sockets: 2
+
+  # - vmid: 715
+  #   name: "TD-FHM-01"
+  #   template: "server_2008r2"
+  #   resources:
+  #     memory_mb: 16384
+  #     cores: 2
+  #     sockets: 2
+
+  # - vmid: 716
+  #   name: "TD-HST-01"
+  #   template: "centos_7_server"
+  #   resources:
+  #     memory_mb: 16384
+  #     cores: 2
+  #     sockets: 2
+
+  # - vmid: 717
+  #   name: "TD-KLI-01"
+  #   template: "kali_purple"
+  #   resources:
+  #     memory_mb: 32768
+  #     cores: 4
+  #     sockets: 1

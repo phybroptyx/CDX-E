@@ -1,0 +1,229 @@
+{
+  "users": [
+    {
+      "sAMAccountName": "svc.admin",
+      "numericId": "0000000001",
+      "givenName": "Service",
+      "sn": "Admin",
+      "initials": "A",
+      "displayName": "Admin, Service A",
+      "title": "Domain Administrator",
+      "streetAddress": "700 Kalamath St",
+      "city": "Denver",
+      "state": "CO",
+      "postalCode": "80204",
+      "country": "US",
+      "telephoneNumber": "+1 (303) 555-0001",
+      "ou": "OU=ServiceAccounts,OU=IT-Core,OU=HQ,OU=DC303",
+      "password": "P@ssw0rd123!",
+      "enabled": true,
+      "groups": [
+        "Domain Admins",
+        "IT-Admins"
+      ]
+    },
+    {
+      "sAMAccountName": "m.chen",
+      "numericId": "0000000002",
+      "givenName": "Morgan",
+      "sn": "Chen",
+      "initials": "L",
+      "displayName": "Chen, Morgan L",
+      "title": "IT Director",
+      "streetAddress": "700 Kalamath St",
+      "city": "Denver",
+      "state": "CO",
+      "postalCode": "80204",
+      "country": "US",
+      "telephoneNumber": "+1 (303) 555-0002",
+      "ou": "OU=Users,OU=IT-Core,OU=HQ,OU=DC303",
+      "password": "P@ssw0rd123!",
+      "enabled": true,
+      "groups": [
+        "IT-Admins"
+      ]
+    },
+    {
+      "sAMAccountName": "j.rodriguez",
+      "numericId": "0000000003",
+      "givenName": "Jamie",
+      "sn": "Rodriguez",
+      "initials": "M",
+      "displayName": "Rodriguez, Jamie M",
+      "title": "Systems Administrator",
+      "streetAddress": "700 Kalamath St",
+      "city": "Denver",
+      "state": "CO",
+      "postalCode": "80204",
+      "country": "US",
+      "telephoneNumber": "+1 (303) 555-0003",
+      "ou": "OU=Users,OU=IT-Core,OU=HQ,OU=DC303",
+      "password": "P@ssw0rd123!",
+      "enabled": true,
+      "groups": [
+        "IT-Admins"
+      ]
+    },
+    {
+      "sAMAccountName": "k.johnson",
+      "numericId": "0000000004",
+      "givenName": "Kendall",
+      "sn": "Johnson",
+      "initials": "A",
+      "displayName": "Johnson, Kendall A",
+      "title": "Operations Manager",
+      "streetAddress": "700 Kalamath St",
+      "city": "Denver",
+      "state": "CO",
+      "postalCode": "80204",
+      "country": "US",
+      "telephoneNumber": "+1 (303) 555-0004",
+      "ou": "OU=Users,OU=Operations,OU=HQ,OU=DC303",
+      "password": "P@ssw0rd123!",
+      "enabled": true,
+      "groups": [
+        "Ops-Users"
+      ]
+    },
+    {
+      "sAMAccountName": "t.williams",
+      "numericId": "0000000005",
+      "givenName": "Taylor",
+      "sn": "Williams",
+      "initials": "B",
+      "displayName": "Williams, Taylor B",
+      "title": "Operations Analyst",
+      "streetAddress": "700 Kalamath St",
+      "city": "Denver",
+      "state": "CO",
+      "postalCode": "80204",
+      "country": "US",
+      "telephoneNumber": "+1 (303) 555-0005",
+      "ou": "OU=Users,OU=Operations,OU=HQ,OU=DC303",
+      "password": "P@ssw0rd123!",
+      "enabled": true,
+      "groups": [
+        "Ops-Users"
+      ]
+    },
+    {
+      "sAMAccountName": "s.brown",
+      "numericId": "0000000006",
+      "givenName": "Sam",
+      "sn": "Brown",
+      "initials": "C",
+      "displayName": "Brown, Sam C",
+      "title": "Facilities Coordinator",
+      "streetAddress": "700 Kalamath St",
+      "city": "Denver",
+      "state": "CO",
+      "postalCode": "80204",
+      "country": "US",
+      "telephoneNumber": "+1 (303) 555-0006",
+      "ou": "OU=Users,OU=Operations,OU=HQ,OU=DC303",
+      "password": "P@ssw0rd123!",
+      "enabled": true,
+      "groups": [
+        "Ops-Users"
+      ]
+    },
+    {
+      "sAMAccountName": "a.patel",
+      "numericId": "0000000007",
+      "givenName": "Alex",
+      "sn": "Patel",
+      "initials": "R",
+      "displayName": "Patel, Alex R",
+      "title": "Lead Engineer",
+      "streetAddress": "700 Kalamath St",
+      "city": "Denver",
+      "state": "CO",
+      "postalCode": "80204",
+      "country": "US",
+      "telephoneNumber": "+1 (303) 555-0007",
+      "ou": "OU=Users,OU=Engineering,OU=HQ,OU=DC303",
+      "password": "P@ssw0rd123!",
+      "enabled": true,
+      "groups": [
+        "Engineering-Users"
+      ]
+    },
+    {
+      "sAMAccountName": "d.kim",
+      "numericId": "0000000008",
+      "givenName": "Drew",
+      "sn": "Kim",
+      "initials": "J",
+      "displayName": "Kim, Drew J",
+      "title": "Software Engineer",
+      "streetAddress": "700 Kalamath St",
+      "city": "Denver",
+      "state": "CO",
+      "postalCode": "80204",
+      "country": "US",
+      "telephoneNumber": "+1 (303) 555-0008",
+      "ou": "OU=Users,OU=Engineering,OU=HQ,OU=DC303",
+      "password": "P@ssw0rd123!",
+      "enabled": true,
+      "groups": [
+        "Engineering-Users"
+      ]
+    },
+    {
+      "sAMAccountName": "r.martinez",
+      "numericId": "0000000009",
+      "givenName": "Riley",
+      "sn": "Martinez",
+      "initials": "K",
+      "displayName": "Martinez, Riley K",
+      "title": "Finance Manager",
+      "streetAddress": "700 Kalamath St",
+      "city": "Denver",
+      "state": "CO",
+      "postalCode": "80204",
+      "country": "US",
+      "telephoneNumber": "+1 (303) 555-0009",
+      "ou": "OU=Users,OU=Finance,OU=HQ,OU=DC303",
+      "password": "P@ssw0rd123!",
+      "enabled": true,
+      "groups": [
+        "Finance-Users"
+      ]
+    }
+  ],
+
+  "groups": [
+    {
+      "name": "IT Administrators",
+      "sAMAccountName": "IT-Admins",
+      "groupScope": "Global",
+      "groupCategory": "Security",
+      "description": "IT infrastructure and systems administrators",
+      "ou": "OU=Groups,OU=IT-Core,OU=HQ,OU=DC303"
+    },
+    {
+      "name": "Operations Users",
+      "sAMAccountName": "Ops-Users",
+      "groupScope": "Global",
+      "groupCategory": "Security",
+      "description": "Operations department staff",
+      "ou": "OU=Groups,OU=Operations,OU=HQ,OU=DC303"
+    },
+    {
+      "name": "Engineering Users",
+      "sAMAccountName": "Engineering-Users",
+      "groupScope": "Global",
+      "groupCategory": "Security",
+      "description": "Engineering department staff",
+      "ou": "OU=Groups,OU=Engineering,OU=HQ,OU=DC303"
+    },
+    {
+      "name": "Finance Users",
+      "sAMAccountName": "Finance-Users",
+      "groupScope": "Global",
+      "groupCategory": "Security",
+      "description": "Finance department staff",
+      "ou": "OU=Groups,OU=Finance,OU=HQ,OU=DC303"
+    }
+  ]
+}

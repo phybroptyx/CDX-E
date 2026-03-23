@@ -1,0 +1,90 @@
+---
+# =============================================================================
+# Role: prestage_computers
+# =============================================================================
+# Creates pre-staged computer accounts in the correct OUs before member
+# servers and workstations join the domain. Pre-staging ensures machines land
+# in the target OU even if the join_domain OUPath parameter fails or is absent.
+#
+# Runs on the primary DC (DEN-DC-01 / first domain controller) after AD
+# structure (OUs, users, groups) has been fully deployed by
+# configure_active_directory. Called from domain_management.yml after the
+# main domain configuration play completes.
+#
+# Behaviour:
+#   - Iterates virtual_machines from vms.yaml
+#   - Skips domain controllers (already in the correct OU from promotion)
+#   - Skips VMs with domain_join: false
+#   - Skips VMs with no 'ou' key defined
+#   - Creates each computer account with New-ADComputer -Path
+#   - Idempotent: Get-ADComputer check before creation; skips if exists
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Section 1 — Gate
+# ----------------------------------------------------------------------------
+- name: "prestage_computers: skip — no domain defined"
+  ansible.builtin.meta: end_host
+  when: >-
+    scenario.domain is not defined or
+    scenario.domain.name is not defined
+
+# ----------------------------------------------------------------------------
+# Section 2 — Build pre-stage list
+# ----------------------------------------------------------------------------
+- name: "prestage_computers: build list of VMs to pre-stage"
+  ansible.builtin.set_fact:
+    _prestage_vms: >-
+      {{
+        virtual_machines
+        | selectattr('ou', 'defined')
+        | selectattr('ou', 'ne', '')
+        | rejectattr('ansible_group', 'equalto', 'domain_controllers')
+        | rejectattr('ansible_group', 'equalto', 'routers')
+        | rejectattr('domain_join', 'equalto', false) | list
+      }}
+
+- name: "prestage_computers: report pre-stage plan"
+  ansible.builtin.debug:
+    msg: >-
+      Pre-staging {{ _prestage_vms | length }} computer account(s) in AD.
+      Skipping VMs with no 'ou', domain_join: false, DCs, and routers.
+
+# ----------------------------------------------------------------------------
+# Section 3 — Pre-stage computer accounts
+# ----------------------------------------------------------------------------
+- name: "prestage_computers: create computer account in target OU"
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $name    = '{{ item.name }}'
+    $ouPath  = '{{ item.ou }},DC={{ scenario.domain.name | replace(".", ",DC=") }}'
+    $domain  = '{{ scenario.domain.name }}'
+
+    # Idempotency: check if account already exists
+    try {
+        $existing = Get-ADComputer -Identity $name -ErrorAction Stop
+        Write-Output "EXISTS: $name already in AD ($(($existing.DistinguishedName)))"
+        exit 0
+    } catch [Microsoft.ActiveDirectory.Management.ADIdentityNotFoundException] {
+        # Not found — proceed with creation
+    }
+
+    # Create the pre-staged account
+    New-ADComputer -Name $name -Path $ouPath -Enabled $true
+    Write-Output "CREATED: $name in $ouPath"
+  register: _prestage_result
+  changed_when: "'CREATED:' in (_prestage_result.stdout | default(''))"
+  loop: "{{ _prestage_vms }}"
+  loop_control:
+    label: "{{ item.name }} → {{ item.ou }}"
+
+# ----------------------------------------------------------------------------
+# Section 4 — Summary
+# ----------------------------------------------------------------------------
+- name: "prestage_computers: summary"
+  ansible.builtin.debug:
+    msg: >-
+      prestage_computers complete.
+      {{ _prestage_vms | length }} VM(s) processed.
+      Created: {{ _prestage_result.results | selectattr('changed') | list | length }}
+      Already existed: {{ _prestage_result.results | rejectattr('changed') | list | length }}

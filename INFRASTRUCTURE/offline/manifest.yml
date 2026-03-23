@@ -1,0 +1,161 @@
+# =============================================================================
+# Offline Staging Manifest
+# =============================================================================
+# Lists all external dependencies that must be staged on the ACN and/or
+# Proxmox cluster BEFORE air-gapped deployment. Use this manifest to verify
+# readiness before disconnecting from the Internet.
+#
+# Workflow:
+#   1. On an Internet-connected system, download all listed items
+#   2. Transfer to the ACN / Proxmox storage
+#   3. Verify checksums
+#   4. Disconnect from Internet and proceed with deployment
+# =============================================================================
+
+binaries:
+  terraform:
+    version: "1.14.5"
+    platform: "linux_amd64"
+    url: "https://releases.hashicorp.com/terraform/1.14.5/terraform_1.14.5_linux_amd64.zip"
+    install_path: "/usr/local/bin/terraform"
+
+  packer:
+    version: "1.15.0"
+    platform: "linux_amd64"
+    url: "https://releases.hashicorp.com/packer/1.15.0/packer_1.15.0_linux_amd64.zip"
+    install_path: "/usr/local/bin/packer"
+
+system_packages:
+  xorriso:
+    description: "ISO creation tool required by Packer cd_files"
+    install:
+      debian: "apt install -y xorriso"
+      rhel: "yum install -y xorriso"
+    notes: "Packer uses xorriso/mkisofs to assemble autounattend and preseed files into a temporary ISO"
+
+terraform_providers:
+  bpg_proxmox:
+    source: "bpg/proxmox"
+    version: "0.95.0"
+    mirror_command: >
+      terraform providers mirror
+      -platform=linux_amd64
+      /opt/terraform/providers
+    acn_path: "/opt/terraform/providers"
+    terraformrc: |
+      provider_installation {
+        filesystem_mirror {
+          path = "/opt/terraform/providers"
+        }
+        direct {
+          exclude = ["*/*/*"]
+        }
+      }
+
+packer_plugins:
+  proxmox:
+    source: "github.com/hashicorp/proxmox"
+    version: ">= 1.2.3"
+    init_command: >
+      PACKER_PLUGIN_PATH=/opt/packer/plugins
+      packer init templates/
+    acn_path: "/opt/packer/plugins"
+
+iso_images:
+  - name: "Windows Server 2012 R2"
+    proxmox_path: "QNAP:iso/Windows.Server.2012.R2.iso"
+    notes: "Standard or Datacenter edition"
+
+  - name: "Windows 11"
+    proxmox_path: "QNAP:iso/Win11_Enterprise_21H2_No_TPM.iso"
+    notes: "Enterprise 21H2, No-TPM variant for VM deployment"
+
+  - name: "Ubuntu 21.10"
+    proxmox_path: "QNAP:iso/ubuntu-21.10-desktop-amd64.iso"
+    notes: "Desktop ISO for workstation templates"
+
+  - name: "VyOS"
+    proxmox_path: "QNAP:iso/vyos-1.5-rolling-202512150610-cdx-qga-amd64.iso"
+    notes: "CDX custom build with QEMU Guest Agent baked in"
+
+  - name: "VirtIO-Win (latest)"
+    proxmox_path: "QNAP:iso/virtio-win.iso"
+    url: "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
+    notes: "Required for Windows 11 template builds"
+
+  - name: "VirtIO-Win 0.1.185 (Win8.1/2012R2)"
+    proxmox_path: "QNAP:iso/virtio-win-0.1.185.iso"
+    url: "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.185/virtio-win-0.1.185.iso"
+    notes: "Legacy driver set required for Windows Server 2012 R2 builds"
+
+  - name: "VirtIO-Win 0.1.160 (Win7/2008R2)"
+    proxmox_path: "QNAP:iso/virtio-win-0.1.160.iso"
+    url: "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.160/virtio-win-0.1.160.iso"
+    notes: "Legacy driver set required for future Windows 7 / Server 2008 R2 builds"
+
+  - name: "Windows Server 2016"
+    proxmox_path: "QNAP:iso/Windows.Server.2016.iso"
+    notes: "Datacenter edition — Desktop Experience and Server Core"
+
+  - name: "Windows Server 2019"
+    proxmox_path: "QNAP:iso/Windows.Server.2019.iso"
+    notes: "Datacenter edition — Desktop Experience and Server Core"
+
+  - name: "Windows Server 2022"
+    proxmox_path: "QNAP:iso/Windows.Server.2022.iso"
+    notes: "Datacenter edition — Desktop Experience and Server Core"
+
+  - name: "Windows Server 2025"
+    proxmox_path: "QNAP:iso/Windows.Server.2025.iso"
+    notes: "Datacenter edition — Desktop Experience and Server Core"
+
+  - name: "Windows 10 21H2"
+    proxmox_path: "QNAP:iso/Windows_10_21H2.iso"
+    notes: "Enterprise edition for workstation templates"
+
+  - name: "Windows 7 SP1"
+    proxmox_path: "QNAP:iso/Windows_7_SP1.iso"
+    notes: "Enterprise edition — requires legacy VirtIO drivers"
+
+  - name: "Windows 8.1"
+    proxmox_path: "QNAP:iso/en_windows_8_1_enterprise_x64_dvd_2971902.iso"
+    notes: "Enterprise edition — requires legacy VirtIO 0.1.185 drivers"
+
+  - name: "Windows Server 2008 R2 SP1"
+    proxmox_path: "QNAP:iso/Windows.Server.2008.R2.SP1.iso"
+    notes: "SP1 integrated — Standard/Datacenter, single edition per SKU, no MetaData needed"
+
+  - name: "Kali Linux 2025.4"
+    proxmox_path: "QNAP:iso/kali-linux-2025.4-installer-amd64.iso"
+    notes: "Standard Kali installer for offensive security templates"
+
+  - name: "Kali Linux (Purple) 2025.4"
+    proxmox_path: "QNAP:iso/kali-linux-2025.4-installer-purple-amd64.iso"
+    notes: "Kali Purple installer with defensive security metapackage"
+
+  - name: "Ubuntu Server 16.04"
+    proxmox_path: "QNAP:iso/ubuntu-16.04.7-server-amd64.iso"
+    notes: "Legacy Debian installer (preseed-based, NOT autoinstall)"
+
+  - name: "CentOS 7"
+    proxmox_path: "QNAP:iso/CentOS-7-x86_64-DVD-1908.iso"
+    notes: "Server and GNOME Desktop variants via kickstart"
+
+  - name: "SPICE Guest Tools"
+    proxmox_path: "QNAP:iso/qemu-spice-win7-2008r2-20260124.iso"
+    notes: "SPICE agent for Windows guests (QXL display support)"
+
+pre_staged:
+  wmf_3_0:
+    description: "Windows Management Framework 3.0 for Server 2008 R2 / Windows 7"
+    filename: "Windows6.1-KB2506143-x64.msu"
+    staging_path: "INFRASTRUCTURE/packer/http/wmf_3.0/"
+    notes: "Required for future 2008 R2/Win7 templates (PowerShell 3.0). Already staged."
+
+ansible_collections:
+  - name: "community.general"
+    notes: "Proxmox KVM module for Ansible-native operations"
+  - name: "cloud.terraform"
+    notes: "Terraform integration for Ansible orchestration"
+  - name: "ansible.posix"
+    notes: "Timer/profile callbacks"

@@ -1,6 +1,7 @@
-# CDX-E Secrets
+# CDX-E Secrets Template
 
-This directory is a **template**. It shows the required structure for sensitive configuration data.
+This directory is a **committed template** showing the required structure for sensitive
+configuration data. Copy it to `secrets/` and populate with real values.
 
 ## Setup
 
@@ -12,32 +13,9 @@ Edit `secrets/credentials.yml` with real values. The `secrets/` directory is git
 
 ## What goes in `secrets/`
 
-| File / Directory | Purpose |
-|------------------|---------|
+| File | Purpose |
+|------|---------|
 | `credentials.yml` | API tokens, passwords for Proxmox, AD deployment, and VM initial credentials |
-| `ssh_keys/` | Controller SSH keypairs, auto-generated per exercise deployment |
-
-## SSH Key Lifecycle
-
-Each `action=deploy` run generates a fresh Ed25519 keypair unique to that exercise:
-
-```
-secrets/ssh_keys/
-├── id_cdx_obsidian_dagger       # private key
-└── id_cdx_obsidian_dagger.pub   # public key
-```
-
-**Deploy flow:**
-1. Generate keypair → `secrets/ssh_keys/id_cdx_<exercise_name>`
-2. Clone and boot VMs
-3. Discover management IPs via QEMU guest agent
-4. Bootstrap: SSH/WinRM into VMs using initial password credentials, distribute public key
-5. Configure: all subsequent operations use key-based authentication
-
-**Configure flow (standalone):**
-- Reuses the existing keypair from the last deploy — no regeneration
-
-This ensures each exercise deployment has a unique trust chain between the controller and its VMs.
 
 ## Usage
 
@@ -47,15 +25,23 @@ Pass the secrets file as extra-vars:
 
 ```bash
 ansible-playbook site.yml \
-  -e "@secrets/credentials.yml" \
-  -e "action=deploy exercise_yaml=../obsidian_dagger_vms.yaml"
+  -e "exercise=MY_EXERCISE" \
+  -e "@secrets/credentials.yml" --ask-vault-pass
 ```
 
-Or encrypt with Ansible Vault for an additional layer:
+Or for individual phase playbooks:
+
+```bash
+ansible-playbook playbooks/domain_management.yml \
+  -e "exercise=MY_EXERCISE" \
+  -e "@secrets/credentials.yml" --ask-vault-pass
+```
+
+Encrypt with Ansible Vault for an additional layer of protection:
 
 ```bash
 ansible-vault encrypt secrets/credentials.yml
 ansible-playbook site.yml \
-  -e "@secrets/credentials.yml" --ask-vault-pass \
-  -e "action=deploy exercise_yaml=../obsidian_dagger_vms.yaml"
+  -e "exercise=MY_EXERCISE" \
+  -e "@secrets/credentials.yml" --ask-vault-pass
 ```

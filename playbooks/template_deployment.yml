@@ -1,0 +1,89 @@
+---
+# =============================================================================
+# CDX-E Playbook: Template Deployment
+# =============================================================================
+# Purpose: Determine what Proxmox VM templates are required for the scenario,
+#          build any missing templates via Packer (Phase 1), then stage full
+#          copies of those templates to the target node's local RAID storage
+#          (Phase 1b) so Terraform can create linked clones during deployment.
+#
+# Roles:
+#   - read_exercise_config     — load scenario + virtual_machines facts
+#   - deploy_packer_template   — query Proxmox, build missing templates (QNAP)
+#   - stage_templates          — copy QNAP masters to per-node RAID storage
+#
+# Usage:
+#   ansible-playbook playbooks/template_deployment.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration on the Ansible controller
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Main play: Packer template build
+# ----------------------------------------------------------------------------
+- name: Template Deployment
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [packer, templates]
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from controller
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — destroy workflow, no templates to build"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
+    - name: "[preflight] Note — Packer phase disabled (smart gate applies)"
+      ansible.builtin.debug:
+        msg: >-
+          scenario.phases.packer=false. Smart gate will evaluate whether any
+          templates are missing and build only if needed to prevent Terraform failures.
+      when: not (scenario.phases.packer | default(true) | bool)
+
+  roles:
+    - deploy_packer_template
+
+# ----------------------------------------------------------------------------
+# Phase 1b: stage QNAP master templates to target node RAID storage
+# ----------------------------------------------------------------------------
+- name: Template Staging (Phase 1b)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [staging, templates]
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from controller
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — destroy workflow, no staging needed"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
+  roles:
+    - stage_templates

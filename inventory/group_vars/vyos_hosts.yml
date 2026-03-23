@@ -1,0 +1,19 @@
+---
+# =============================================================================
+# Connection variables — VyOS router VMs
+# =============================================================================
+# Applied to all hosts in the vyos_hosts group (written by inventory_refresh).
+# ansible_user=vyos is set per-host in the generated inventory (exercise_hosts.yml).
+#
+# Password auth: vm_credentials.vyos.password must be set in secrets/credentials.yml.
+# The value must match vyos_admin_password used in the Packer template build
+# (INFRASTRUCTURE/packer/vars/vyos.pkrvars.hcl).
+#
+# TODO: add ACN public key to /home/vyos/.ssh/authorized_keys via Packer shell
+#       provisioner so this can switch to key-based auth (matching linux_hosts.yml).
+# =============================================================================
+
+ansible_connection: ssh
+ansible_port: 22
+ansible_password: "{{ vm_credentials.vyos.password }}"
+ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"

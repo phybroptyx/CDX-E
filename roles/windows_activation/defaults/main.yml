@@ -1,0 +1,4 @@
+---
+# KMS server hostname — resolves to vlmcsd container via CDX-I DNS
+kms_server: "activation.windows.com"
+kms_port: 1688

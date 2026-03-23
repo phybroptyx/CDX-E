@@ -1,0 +1,122 @@
+---
+# =============================================================================
+# Include: ping_via_guest_exec.yml
+# =============================================================================
+# Runs a single reachability test from inside a VM using the Proxmox QEMU
+# guest-exec API. Appends a pass/fail dict to _ct_results.
+#
+# Required caller vars:
+#   _ping_vm     — VM object from virtual_machines
+#   _ping_target — IP address or hostname to ping
+#   _ping_label  — human-readable description of what is being tested
+#                  (e.g. "gateway", "SDP internal", "PDC emulator", "Internet")
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Windows: ping.exe (native binary — consistent exit code across all OS
+# versions and execution contexts, including SYSTEM via QEMU guest-exec)
+# ----------------------------------------------------------------------------
+- name: "Guest-exec ping (Windows): {{ _ping_vm.name }} → {{ _ping_label }}"
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (_ping_vm.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ _ping_vm.vmid }}/agent/exec
+    method: POST
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    body_format: json
+    body:
+      command:
+        - "ping.exe"
+        - "-n"
+        - "{{ connectivity_test_ping_count | string }}"
+        - "-w"
+        - "2000"
+        - "{{ _ping_target }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  register: _ping_exec_win
+  when: template_registry[_ping_vm.template].os_type == 'windows'
+  ignore_errors: true
+  check_mode: false
+
+# ----------------------------------------------------------------------------
+# Linux / VyOS: standard ping binary
+# ----------------------------------------------------------------------------
+- name: "Guest-exec ping (Linux/VyOS): {{ _ping_vm.name }} → {{ _ping_label }}"
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (_ping_vm.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ _ping_vm.vmid }}/agent/exec
+    method: POST
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    body_format: json
+    body:
+      command:
+        - "/bin/ping"
+        - "-c"
+        - "{{ connectivity_test_ping_count | string }}"
+        - "-W"
+        - "{{ connectivity_test_ping_timeout_s | string }}"
+        - "{{ _ping_target }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  register: _ping_exec_lin
+  when: template_registry[_ping_vm.template].os_type in ['linux', 'vyos']
+  ignore_errors: true
+  check_mode: false
+
+# ----------------------------------------------------------------------------
+# Normalize the exec result into a single variable regardless of OS branch
+# ----------------------------------------------------------------------------
+- name: "Normalize exec result: {{ _ping_vm.name }} → {{ _ping_label }}"
+  ansible.builtin.set_fact:
+    _ping_exec: >-
+      {{ _ping_exec_win if template_registry[_ping_vm.template].os_type == 'windows'
+         else _ping_exec_lin }}
+
+# ----------------------------------------------------------------------------
+# Poll exec-status until the ping command exits (max ~60s)
+# ----------------------------------------------------------------------------
+- name: "Poll exec-status: {{ _ping_vm.name }} → {{ _ping_label }}"
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (_ping_vm.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ _ping_vm.vmid }}/agent/exec-status?pid={{ _ping_exec.json.data.pid }}
+    method: GET
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  register: _ping_status
+  until: _ping_status.json.data.exited | default(0) | int == 1
+  retries: 12
+  delay: 5
+  when:
+    - _ping_exec is not failed
+    - _ping_exec.json is defined
+  ignore_errors: true
+  check_mode: false
+
+# ----------------------------------------------------------------------------
+# Append pass/fail result to _ct_results
+# ----------------------------------------------------------------------------
+- name: "Record result: {{ _ping_vm.name }} → {{ _ping_label }}"
+  ansible.builtin.set_fact:
+    _ct_results: >-
+      {{ _ct_results + [{
+        'vm':     _ping_vm.name,
+        'test':   'ping → ' + _ping_label,
+        'target': _ping_target,
+        'status': 'pass' if (
+          _ping_exec is not failed and
+          _ping_exec.json is defined and
+          _ping_status is not failed and
+          _ping_status.json is defined and
+          (_ping_status.json.data.exitcode | default(1)) | int == 0
+        ) else 'fail'
+      }] }}

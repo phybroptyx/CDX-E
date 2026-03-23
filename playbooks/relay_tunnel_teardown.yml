@@ -1,0 +1,30 @@
+---
+# =============================================================================
+# CDX-E Playbook: Relay Tunnel Teardown
+# =============================================================================
+# Closes the SSH dynamic-forwarding SOCKS5 tunnel established by
+# exercise_initiation.yml.
+#
+# Run this after all exercise configuration playbooks have completed, or
+# whenever the SOCKS5 tunnel on port 1080 should be terminated.
+#
+# Usage:
+#   ansible-playbook playbooks/relay_tunnel_teardown.yml \
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
+#
+# Note: This playbook runs against localhost only (the ACN). No relay or
+# exercise inventory is required.
+# =============================================================================
+
+- name: Close SOCKS5 relay tunnel
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  roles:
+    - role: relay_tunnel
+      vars:
+        relay_tunnel_action: close

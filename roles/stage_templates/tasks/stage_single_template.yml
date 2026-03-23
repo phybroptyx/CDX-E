@@ -1,0 +1,209 @@
+---
+# =============================================================================
+# stage_single_template.yml
+# =============================================================================
+# Stages one QNAP master template to the target node's RAID storage.
+# Called from main.yml via include_tasks; loop variable is 'item' (template key).
+#
+# Why the migrate-first approach:
+#   Proxmox requires the template's compute resources (node assignment in the
+#   cluster config) to be homed on the target node before a full clone to that
+#   node's local RAID storage can succeed. Cross-node clone to local storage
+#   fails because the RAID is opaque to the source node. The migration moves
+#   only the config file — no disk I/O — when the source disk is on shared
+#   storage (QNAP). The master config is migrated back immediately after the
+#   clone completes so it is always on template_node at rest.
+#
+# Steps (cross-node, _stage_node != template_node):
+#   1. Resolve IDs and names
+#   2. Migrate master config  → _stage_node  (config-only, disk stays on QNAP)
+#   3. Full-clone master      → RAID on _stage_node  (intra-node)
+#   4. Migrate master config  → template_node  (restore canonical location)
+#   5. Assert clone succeeded
+#   6. Convert staged clone to a Proxmox template on _stage_node
+#   7. Assert conversion succeeded
+#   8. Confirm
+#
+# Steps (same-node, _stage_node == template_node):
+#   Migration steps are skipped — the clone is already intra-node.
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Step 1 — Resolve IDs
+# ----------------------------------------------------------------------------
+- name: "Resolve IDs for '{{ item }}'"
+  ansible.builtin.set_fact:
+    _master_vmid: "{{ template_registry[item].id | int }}"
+    _staged_vmid: "{{ template_registry[item].id | int + _stage_offset | int }}"
+    _staged_name: "{{ template_registry[item].proxmox_name }}-local"
+
+# ----------------------------------------------------------------------------
+# Steps 2-4 — Config migration (cross-node only)
+# ----------------------------------------------------------------------------
+- name: "Migrate master template config to {{ _stage_node }} ({{ _master_vmid }})"
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ template_node }}/qemu/{{ _master_vmid }}/migrate"
+    method: POST
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      target: "{{ _stage_node }}"
+      online: 0
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: 200
+  register: _migrate_to_response
+  when: _stage_node != template_node
+
+- name: "Wait for config migration to {{ _stage_node }}"
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ template_node }}/tasks/{{ _migrate_to_response.json.data }}/status"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+  register: _migrate_to_status
+  until: _migrate_to_status.json.data.status == 'stopped'
+  retries: "{{ stage_template_migrate_retries }}"
+  delay:   "{{ stage_template_migrate_delay }}"
+  when: _stage_node != template_node
+
+- name: "Assert config migration to {{ _stage_node }} succeeded"
+  ansible.builtin.assert:
+    that:
+      - _migrate_to_status.json.data.exitstatus == 'OK'
+    fail_msg: >-
+      Migration of master template '{{ item }}' (VMID {{ _master_vmid }})
+      config to {{ _stage_node }} failed.
+      Proxmox task exit status: {{ _migrate_to_status.json.data.exitstatus }}
+  when: _stage_node != template_node
+
+# ----------------------------------------------------------------------------
+# Step 3 — Clone master to RAID (intra-node after migration)
+# ----------------------------------------------------------------------------
+- name: "Clone {{ item }} — VMID {{ _master_vmid }} → RAID VMID {{ _staged_vmid }} on {{ _stage_node }}"
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ _stage_node }}/qemu/{{ _master_vmid }}/clone"
+    method: POST
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      newid:   "{{ _staged_vmid | int }}"
+      name:    "{{ _staged_name }}"
+      storage: "{{ stage_template_storage }}"
+      full:    1
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: 200
+  register: _clone_response
+
+# UPID is on _stage_node — clone was issued intra-node after config migration.
+- name: "Wait for clone task — {{ item }} ({{ _master_vmid }} → {{ _staged_vmid }})"
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ _stage_node }}/tasks/{{ _clone_response.json.data }}/status"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+  register: _clone_status
+  until: _clone_status.json.data.status == 'stopped'
+  retries: "{{ stage_template_clone_retries }}"
+  delay:   "{{ stage_template_clone_delay }}"
+
+# ----------------------------------------------------------------------------
+# Step 4 — Migrate master config back to template_node
+# Done immediately after clone completes so the master is always on
+# template_node at rest, regardless of what happens to the staged copy.
+# ----------------------------------------------------------------------------
+- name: "Migrate master template config back to {{ template_node }} ({{ _master_vmid }})"
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ _stage_node }}/qemu/{{ _master_vmid }}/migrate"
+    method: POST
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      target: "{{ template_node }}"
+      online: 0
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: 200
+  register: _migrate_back_response
+  when: _stage_node != template_node
+
+- name: "Wait for config migration back to {{ template_node }}"
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ _stage_node }}/tasks/{{ _migrate_back_response.json.data }}/status"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+  register: _migrate_back_status
+  until: _migrate_back_status.json.data.status == 'stopped'
+  retries: "{{ stage_template_migrate_retries }}"
+  delay:   "{{ stage_template_migrate_delay }}"
+  when: _stage_node != template_node
+
+- name: "Assert config migration back to {{ template_node }} succeeded"
+  ansible.builtin.assert:
+    that:
+      - _migrate_back_status.json.data.exitstatus == 'OK'
+    fail_msg: >-
+      Migration of master template '{{ item }}' (VMID {{ _master_vmid }})
+      config back to {{ template_node }} failed.
+      Proxmox task exit status: {{ _migrate_back_status.json.data.exitstatus }}
+  when: _stage_node != template_node
+
+# ----------------------------------------------------------------------------
+# Step 5 — Assert clone succeeded
+# Checked after migration back so the master is always restored even on failure.
+# ----------------------------------------------------------------------------
+- name: "Assert clone succeeded — {{ item }}"
+  ansible.builtin.assert:
+    that:
+      - _clone_status.json.data.exitstatus == 'OK'
+    fail_msg: >-
+      Clone of '{{ item }}' (VMID {{ _master_vmid }} → {{ _staged_vmid }}) failed.
+      Proxmox task exit status: {{ _clone_status.json.data.exitstatus }}
+
+# ----------------------------------------------------------------------------
+# Steps 6-7 — Convert staged clone to a Proxmox template
+# ----------------------------------------------------------------------------
+- name: "Convert clone to template — {{ _staged_name }} ({{ _staged_vmid }})"
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ _stage_node }}/qemu/{{ _staged_vmid }}/template"
+    method: POST
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: 200
+  register: _template_response
+
+- name: "Wait for template conversion — {{ _staged_name }}"
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ _stage_node }}/tasks/{{ _template_response.json.data }}/status"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+  register: _convert_status
+  until: _convert_status.json.data.status == 'stopped'
+  retries: "{{ stage_template_convert_retries }}"
+  delay:   "{{ stage_template_convert_delay }}"
+
+- name: "Assert template conversion succeeded — {{ item }}"
+  ansible.builtin.assert:
+    that:
+      - _convert_status.json.data.exitstatus == 'OK'
+    fail_msg: >-
+      Template conversion of VMID {{ _staged_vmid }} ({{ _staged_name }}) failed.
+      Proxmox task exit status: {{ _convert_status.json.data.exitstatus }}
+
+# ----------------------------------------------------------------------------
+# Step 8 — Confirm
+# ----------------------------------------------------------------------------
+- name: "Staged — {{ item }}: VMID {{ _staged_vmid }} ({{ _staged_name }}) ready on {{ _stage_node }}"
+  ansible.builtin.debug:
+    msg: "OK: {{ item }} staged as {{ _staged_name }} (VMID {{ _staged_vmid }}) on {{ _stage_node }} [{{ stage_template_storage }}]"

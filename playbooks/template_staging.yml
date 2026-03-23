@@ -1,0 +1,57 @@
+---
+# =============================================================================
+# CDX-E Playbook: Template Staging (Phase 1b — standalone)
+# =============================================================================
+# Purpose: Ensure RAID-local copies of required Packer templates exist on the
+#          target Proxmox node. This is Phase 1b in the pipeline, normally
+#          appended to template_deployment.yml. Run this playbook standalone
+#          to re-stage templates without rebuilding them (e.g. after manually
+#          deleting stale RAID copies following a QNAP master update).
+#
+# Templates flagged qnap_direct: true in template_registry are skipped.
+#
+# Usage:
+#   # Stage templates for a specific exercise (uses scenario.proxmox.node)
+#   ansible-playbook playbooks/template_staging.yml \
+#     -e "exercise=DC_303" \
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
+#
+#   # Stage to a specific node regardless of scenario default
+#   ansible-playbook playbooks/template_staging.yml \
+#     -e "exercise=DC_303" \
+#     -e "proxmox_node_override=cdx-pve-02" \
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Main play: stage templates to RAID
+# ----------------------------------------------------------------------------
+- name: Stage Templates to RAID (Phase 1b)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [staging, templates]
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from controller
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+  roles:
+    - stage_templates

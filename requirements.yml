@@ -1,7 +1,14 @@
 ---
 collections:
   - name: community.general
-    version: ">=8.0.0"
+    version: ">=8.0.0,<10.0.0"
+  - name: community.proxmox
+  - name: ansible.windows
+    version: ">=2.0.0,<3.0.0"
+  - name: community.windows
+    version: ">=2.0.0,<3.0.0"
+  - name: ansible.posix
+    version: ">=1.5.0"
 
 # Python dependencies (install on control node):
 #   pip install proxmoxer requests

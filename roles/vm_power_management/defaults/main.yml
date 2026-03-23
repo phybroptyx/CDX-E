@@ -1,0 +1,25 @@
+---
+# =============================================================================
+# Role: vm_power_management - Default Variables
+# =============================================================================
+# vm_power_wait_timeout and vm_power_wait_sleep have moved to:
+#   inventory/group_vars/all.yml
+# =============================================================================
+
+# Whitelist: if non-empty, only VMs whose ansible_group is in this list are
+# processed. Used to target specific groups per pipeline phase:
+#   Phase 2b  : ['routers', 'domain_controllers']
+#   Phase 4b  : ['servers', 'sql_servers', 'exchange_servers', 'sccm_servers']
+#   Phase 6a  : ['workstations']
+# Empty (default) = process all VMs in the effective list.
+vm_include_groups: []
+
+# Blacklist: exclude these groups even if they would otherwise be included.
+# Applied after vm_include_groups. Rarely needed when vm_include_groups is set.
+vm_skip_groups: []
+
+# WinRM HTTP 401 readiness poll timing.
+# Canonical values live in inventory/group_vars/all.yml — these defaults
+# ensure the role is self-contained if group_vars has not yet been updated.
+winrm_http_ready_retries: 60   # 60 × 10s = 10 minutes max
+winrm_http_ready_delay:   10

@@ -1,0 +1,13 @@
+---
+# =============================================================================
+# configure_proxmox_nodes — defaults
+# =============================================================================
+
+# Packages installed on each Proxmox node during cluster bootstrap.
+#   openvswitch-switch — provides ovs-vsctl and the OVS kernel module;
+#                        required for exercise VLAN bridge fabric
+#   ifupdown2         — provides ifreload -a for non-disruptive interface
+#                        reconfiguration without a full networking restart
+proxmox_node_packages:
+  - openvswitch-switch
+  - ifupdown2

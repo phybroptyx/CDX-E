@@ -1,0 +1,21 @@
+---
+# =============================================================================
+# Connection variables — Windows exercise VMs
+# =============================================================================
+# Applied to all hosts in the windows_hosts group (written by inventory_refresh).
+# ansible_password must be set at runtime via secrets/credentials.yml.
+# =============================================================================
+
+ansible_connection: winrm
+ansible_port: 5985
+ansible_winrm_transport: ntlm
+ansible_winrm_server_cert_validation: ignore
+ansible_winrm_kerberos_delegation: false
+
+ansible_user:     cdxadmin
+ansible_password: "{{ vault_cloud_init_password }}"
+
+# SOCKS5 proxy — SSH dynamic forwarding tunnel established by the exercise
+# deployment playbook before any WinRM tasks run (see roles/relay_tunnel).
+# The ACN opens: ssh -D 1080 -N -f cdxadmin@<relay> and tears it down after.
+ansible_winrm_proxy: "socks5://127.0.0.1:{{ socks5_port | default(1080) }}"

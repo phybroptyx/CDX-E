@@ -1,0 +1,6 @@
+---
+# =============================================================================
+# Role: prestage_computers — Default Variables
+# =============================================================================
+# No configurable defaults. The role operates entirely from virtual_machines
+# (set by read_exercise_config) and scenario.domain (from scenario.yml).

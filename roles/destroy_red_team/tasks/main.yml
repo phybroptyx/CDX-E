@@ -1,0 +1,101 @@
+---
+# =============================================================================
+# Role: destroy_red_team
+# =============================================================================
+# Destroys Red Team VMs via Terraform and cleans up all generated artifacts.
+# Artifact cleanup (host_vars, .tf files) runs in an 'always:' block so it
+# executes even if Terraform destroy fails.
+#
+# Expects facts set by read_exercise_config + read_apt_config:
+#   scenario     — parsed scenario.yml
+#   exercise_dir — path to EXERCISES/<name>/
+#   apt_vms      — Red Team VM list from APTs/<apt>/vms.yaml
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight
+# ----------------------------------------------------------------------------
+- name: Assert required facts are present
+  ansible.builtin.assert:
+    that:
+      - scenario is defined
+      - exercise_dir is defined
+    fail_msg: "Required facts not found. Ensure exercise_initiation.yml runs first."
+
+- name: Check Terraform is available
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} version"
+  register: _tf_version
+  failed_when: _tf_version.rc != 0
+  changed_when: false
+
+# ----------------------------------------------------------------------------
+# Terraform destroy + artifact cleanup (always)
+# ----------------------------------------------------------------------------
+- block:
+
+    - name: Check Red Team Terraform state exists
+      ansible.builtin.stat:
+        path: "{{ exercise_dir }}/terraform_red_team/terraform.tfstate"
+      register: _tf_state_stat
+
+    - name: Warn if no Red Team Terraform state found
+      ansible.builtin.debug:
+        msg: >-
+          No Terraform state found at {{ exercise_dir }}/terraform_red_team/terraform.tfstate.
+          Skipping terraform destroy — Red Team VMs may need manual removal.
+      when: not _tf_state_stat.stat.exists
+
+    - name: Terraform destroy
+      ansible.builtin.command:
+        cmd: "{{ terraform_binary }} destroy -auto-approve -input=false"
+        chdir: "{{ exercise_dir }}/terraform_red_team"
+      register: _tf_destroy
+      changed_when: >-
+        'Destroy complete!' in _tf_destroy.stdout and
+        '0 destroyed' not in _tf_destroy.stdout
+      when: _tf_state_stat.stat.exists
+
+    - name: Show Terraform destroy output
+      ansible.builtin.debug:
+        msg: "{{ _tf_destroy.stdout_lines }}"
+      when: _tf_state_stat.stat.exists
+
+  always:
+
+    # --------------------------------------------------------------------------
+    # Artifact cleanup — unconditional; runs even if TF destroy fails
+    # --------------------------------------------------------------------------
+    - name: Remove host_vars files for Red Team VMs
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../inventory/host_vars/{{ item.name }}.yml"
+        state: absent
+      loop: "{{ apt_vms | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Remove generated Terraform configuration files
+      ansible.builtin.file:
+        path: "{{ exercise_dir }}/terraform_red_team/{{ item }}"
+        state: absent
+      loop:
+        - providers.tf
+        - main.tf
+        - outputs.tf
+        - .terraform.lock.hcl
+
+    - name: Remove Terraform plugin cache directory
+      ansible.builtin.file:
+        path: "{{ exercise_dir }}/terraform_red_team/.terraform"
+        state: absent
+
+    - name: Red Team VM teardown summary
+      ansible.builtin.debug:
+        msg: |
+          Red Team VM teardown complete.
+          Exercise: {{ scenario.exercise.name }}
+          State   : {{ exercise_dir }}/terraform_red_team/
+          Artifacts purged:
+            - inventory/host_vars/<vm>.yml ({{ apt_vms | default([]) | length }} VMs)
+            - {{ exercise_dir }}/terraform_red_team/{providers,main,outputs}.tf
+            - {{ exercise_dir }}/terraform_red_team/.terraform/

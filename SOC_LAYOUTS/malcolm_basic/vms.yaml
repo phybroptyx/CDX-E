@@ -1,0 +1,76 @@
+---
+# =============================================================================
+# SOC Layout VM Specification: malcolm_basic
+# =============================================================================
+# Malcolm-based Blue Team SOC infrastructure.
+# VMIDs 1001-1099 are reserved for Blue Team / SOC infrastructure.
+# =============================================================================
+
+virtual_machines:
+
+  # ---------------------------------------------------------------------------
+  # Malcolm Network Analysis Server
+  # Packer-baked template includes: Arkime, Zeek, Suricata, OpenSearch, Malcolm UI
+  # ---------------------------------------------------------------------------
+  - vmid: 1001
+    name: "SOC-MALCOLM-01"
+    template: "malcolm_server"
+    ansible_group: "soc"
+    resources:
+      memory_mb: 32768
+      cores: 8
+      sockets: 1
+    cloud_init:
+      ip: "10.0.1.10"
+      cidr: 24
+      gateway: "10.0.1.1"
+      nameserver: "10.0.0.10"
+
+  # ---------------------------------------------------------------------------
+  # Hedgehog Linux Network Sensor
+  # Captures traffic from mirror/SPAN port and forwards to Malcolm
+  # ---------------------------------------------------------------------------
+  - vmid: 1002
+    name: "SOC-HH-01"
+    template: "hh_sensor"
+    ansible_group: "soc"
+    resources:
+      memory_mb: 8192
+      cores: 4
+      sockets: 1
+    cloud_init:
+      ip: "10.0.1.11"
+      cidr: 24
+      gateway: "10.0.1.1"
+      nameserver: "10.0.0.10"
+
+  # ---------------------------------------------------------------------------
+  # OPNsense Perimeter Firewall
+  # Provides network segmentation, IDS/IPS, and traffic mirroring to Hedgehog
+  # ---------------------------------------------------------------------------
+  - vmid: 1010
+    name: "SOC-FW-01"
+    template: "opnsense"
+    ansible_group: "soc"
+    resources:
+      memory_mb: 4096
+      cores: 2
+      sockets: 1
+
+  # ---------------------------------------------------------------------------
+  # Kali Purple Analyst Workstation
+  # Pre-configured with SOC investigation tooling; connects to Malcolm UI
+  # ---------------------------------------------------------------------------
+  - vmid: 1020
+    name: "SOC-WKS-01"
+    template: "kali_purple"
+    ansible_group: "blue_team"
+    resources:
+      memory_mb: 8192
+      cores: 4
+      sockets: 1
+    cloud_init:
+      ip: "10.0.1.20"
+      cidr: 24
+      gateway: "10.0.1.1"
+      nameserver: "10.0.0.10"

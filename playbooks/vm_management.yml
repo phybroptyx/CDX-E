@@ -1,0 +1,66 @@
+---
+# =============================================================================
+# CDX-E Playbook: Virtual Machine Management
+# =============================================================================
+# Purpose: Deploy or destroy scenario-specific virtual machines in Proxmox
+#          using Hashicorp Terraform. VMs are left in a powered-off state
+#          after deployment; subsequent playbooks handle power-on and config.
+#
+# Roles:
+#   - deploy_scenario   (action=deploy)
+#   - destroy_scenario  (action=destroy)
+#
+# Usage:
+#   # Deploy
+#   ansible-playbook playbooks/vm_management.yml \
+#     -e "exercise=OBSIDIAN_DAGGER action=deploy" \
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
+#
+#   # Destroy
+#   ansible-playbook playbooks/vm_management.yml \
+#     -e "exercise=OBSIDIAN_DAGGER action=destroy" \
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Main play: deploy or destroy scenario VMs
+# ----------------------------------------------------------------------------
+- name: Virtual Machine Management
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [terraform, vms]
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  vars:
+    vm_action: "{{ action | default('deploy') }}"
+
+  pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip - terraform phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.terraform | default(true) | bool)
+
+  roles:
+    - role: deploy_scenario
+      when: vm_action == 'deploy'
+    - role: destroy_scenario
+      when: vm_action == 'destroy'

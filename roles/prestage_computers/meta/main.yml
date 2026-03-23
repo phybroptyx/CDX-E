@@ -1,0 +1,8 @@
+---
+galaxy_info:
+  role_name: prestage_computers
+  description: >-
+    Pre-stages Active Directory computer accounts in target OUs before
+    domain join. Runs on the primary DC after AD structure deployment.
+  min_ansible_version: "2.12"
+dependencies: []

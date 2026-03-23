@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  role_name: relay_tunnel
+  author: CDX-E
+  description: >-
+    Manages the SSH dynamic-forwarding SOCKS5 tunnel from the ACN to CDX-RELAY.
+    Required before any WinRM play when ansible_winrm_proxy_url is configured.
+  min_ansible_version: "2.14"
+
+dependencies: []

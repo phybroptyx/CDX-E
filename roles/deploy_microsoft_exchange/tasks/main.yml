@@ -1,0 +1,468 @@
+---
+# =============================================================================
+# Role: deploy_microsoft_exchange
+# =============================================================================
+# Installs Microsoft Exchange Server (2010, 2013, or 2016) unattended, then
+# performs AD preparation, post-install connector configuration, and optional
+# virtual directory external URL assignment.
+#
+# Exchange does NOT require SQL Server — all mailbox storage uses ESE.
+#
+# Version notes:
+#   2010 — Roles: Mailbox, ClientAccess, HubTransport
+#          Setup flag: /Roles (plural); registry key: v14
+#          No /InstallWindowsComponents support; UCMA not required
+#          Minimum OS: Windows Server 2008 R2 SP1
+#
+#   2013 — Roles: Mailbox, ClientAccess (HT merged into both roles)
+#          Setup flag: /Role (singular); registry key: v15
+#          Requires UCMA 4.0 (bundled at UCMARedist\ in Exchange media)
+#          Minimum OS: Windows Server 2008 R2 SP1 / 2012 / 2012 R2
+#
+#   2016 — Roles: Mailbox (ClientAccess merged into Mailbox)
+#          Setup flag: /Role (singular); registry key: v15
+#          Requires UCMA 4.0
+#          Minimum OS: Windows Server 2012 R2 / 2016
+#
+# AD preparation (PrepareSchema → PrepareAD → PrepareAllDomains) runs
+# run_once: true on the first Exchange host. Requires the executing user
+# to be a member of Schema Admins and Enterprise Admins.
+#
+# Setup media must be pre-staged on each target host (see exchange_setup_path).
+#
+# Called from:
+#   playbooks/exchange_management.yml → ansible_group: exchange_servers
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Section 1 — Phase gate + preflight
+# ----------------------------------------------------------------------------
+- name: Skip — Exchange service phase disabled in scenario
+  ansible.builtin.debug:
+    msg: >-
+      deploy_microsoft_exchange: scenario.phases.services.exchange is false
+      for {{ inventory_hostname }} — skipping.
+  when: not (scenario.phases.services.exchange | default(false) | bool)
+
+- name: End host — Exchange phase disabled
+  ansible.builtin.meta: end_host
+  when: not (scenario.phases.services.exchange | default(false) | bool)
+
+- name: Assert Exchange version is supported
+  ansible.builtin.assert:
+    that:
+      - exchange_version | string in ['2010', '2013', '2016']
+    fail_msg: >-
+      deploy_microsoft_exchange: exchange_version must be 2010, 2013, or 2016.
+      Got: '{{ exchange_version }}'
+
+- name: Assert required variables are defined
+  ansible.builtin.assert:
+    that:
+      - exchange_setup_path is defined and exchange_setup_path | length > 0
+      - exchange_org_name is defined and exchange_org_name | length > 0
+      - scenario.domain.name is defined
+    fail_msg: >-
+      deploy_microsoft_exchange requires exchange_setup_path,
+      exchange_org_name, and scenario.domain.name.
+
+# ----------------------------------------------------------------------------
+# Section 2 — Resolve version-specific derived facts
+# ----------------------------------------------------------------------------
+- name: Resolve version-specific facts
+  ansible.builtin.set_fact:
+    _ex_ver:             "{{ exchange_version | string }}"
+    _ex_roles: >-
+      {{
+        exchange_roles
+        if (exchange_roles | length > 0)
+        else exchange_version_map[exchange_version | string].roles
+      }}
+    _ex_role_flag:       "{{ exchange_version_map[exchange_version | string].role_flag }}"
+    _ex_registry_key:    "{{ exchange_version_map[exchange_version | string].registry_key }}"
+    _ex_win_components:  "{{ exchange_version_map[exchange_version | string].windows_components_flag }}"
+
+- name: Display Exchange deployment plan
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} — Exchange {{ _ex_ver }}
+      | roles={{ _ex_roles }}
+      | org={{ exchange_org_name }}
+      | domain={{ scenario.domain.name }}
+
+# ----------------------------------------------------------------------------
+# Section 3 — Check if Exchange is already installed
+# ----------------------------------------------------------------------------
+- name: Check Exchange installation state via registry
+  ansible.windows.win_shell: |
+    $key = 'HKLM:\SOFTWARE\Microsoft\ExchangeServer\{{ _ex_registry_key }}\Setup'
+    if (Test-Path $key) { Write-Output "installed" } else { Write-Output "absent" }
+  register: _ex_install_check
+  changed_when: false
+
+- name: Set Exchange installed fact
+  ansible.builtin.set_fact:
+    _exchange_installed: "{{ (_ex_install_check.stdout | trim) == 'installed' }}"
+
+- name: Display Exchange installation state
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} — Exchange {{ _ex_ver }}
+      {{ 'already installed — skipping install steps' if (_exchange_installed | bool) else 'not found — will install' }}
+
+# ----------------------------------------------------------------------------
+# Section 4 — Verify setup media is present
+# ----------------------------------------------------------------------------
+- name: Verify Exchange setup media exists on host
+  ansible.windows.win_stat:
+    path: "{{ exchange_setup_path }}"
+  register: _ex_setup_stat
+  when: not (_exchange_installed | bool)
+
+- name: Fail if Exchange setup media is missing
+  ansible.builtin.fail:
+    msg: >-
+      Exchange setup not found at '{{ exchange_setup_path }}' on
+      {{ inventory_hostname }}. Pre-stage the Exchange installation media
+      before running this role (see exchange_setup_path in defaults/main.yml).
+  when:
+    - not (_exchange_installed | bool)
+    - not (_ex_setup_stat.stat.exists | default(false))
+
+# ----------------------------------------------------------------------------
+# Section 5 — Install UCMA 4.0 prerequisite (Exchange 2013 and 2016 only)
+# ----------------------------------------------------------------------------
+- name: Install UCMA 4.0 (Exchange 2013/2016 prerequisite)
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+
+    # Check if UCMA 4.0 is already installed
+    $installed = Get-ItemProperty `
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' `
+        -ErrorAction SilentlyContinue |
+        Where-Object { $_.DisplayName -like 'Microsoft Unified Communications Managed API 4.0*' }
+
+    if ($installed) {
+        Write-Output "OK: UCMA 4.0 already installed"
+        exit 0
+    }
+
+    # Resolve UCMA installer path — use explicit override or auto-detect from media
+    $ucmaPath = '{{ exchange_ucma_path }}'
+    if (-not $ucmaPath) {
+        $mediaDir  = Split-Path -Parent '{{ exchange_setup_path }}'
+        $ucmaPath  = Join-Path $mediaDir 'UCMARedist\UcmaRuntimeSetup.exe'
+    }
+
+    if (-not (Test-Path $ucmaPath)) {
+        throw "UCMA 4.0 installer not found at '$ucmaPath'. Set exchange_ucma_path or ensure UCMARedist\ is present in the Exchange media directory."
+    }
+
+    $proc = Start-Process -FilePath $ucmaPath `
+        -ArgumentList '/passive', '/norestart' `
+        -Wait -PassThru -NoNewWindow
+    if ($proc.ExitCode -notin @(0, 3010)) {
+        throw "UCMA 4.0 install failed with exit code $($proc.ExitCode)"
+    }
+    Write-Output "CHANGED: Installed UCMA 4.0 (exit $($proc.ExitCode))"
+  register: _ucma_result
+  when:
+    - not (_exchange_installed | bool)
+    - _ex_ver in ['2013', '2016']
+  changed_when: "'CHANGED:' in (_ucma_result.stdout | default(''))"
+
+# ----------------------------------------------------------------------------
+# Section 6 — Active Directory preparation (run_once: true)
+# Requires Schema Admins + Enterprise Admins group membership.
+# Runs only once per forest regardless of how many Exchange hosts exist.
+# ----------------------------------------------------------------------------
+- name: Check if Exchange organisation already exists in AD
+  ansible.windows.win_shell: |
+    Import-Module ActiveDirectory -ErrorAction Stop
+    $configNC  = (Get-ADRootDSE).configurationNamingContext
+    $exchangeOrg = Get-ADObject `
+        -SearchBase "CN=Services,$configNC" `
+        -Filter { objectClass -eq 'msExchOrganizationContainer' } `
+        -ErrorAction SilentlyContinue
+    if ($exchangeOrg) { Write-Output "exists" } else { Write-Output "absent" }
+  register: _ex_org_check
+  changed_when: false
+  run_once: true
+
+- name: Set Exchange organisation existence fact
+  ansible.builtin.set_fact:
+    _ex_org_exists: "{{ (_ex_org_check.stdout | trim) == 'exists' }}"
+  run_once: true
+
+- name: AD Preparation — PrepareSchema
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $proc = Start-Process -FilePath '{{ exchange_setup_path }}' `
+        -ArgumentList '/PrepareSchema', '/IAcceptExchangeServerLicenseTerms' `
+        -Wait -PassThru -NoNewWindow
+    if ($proc.ExitCode -notin @(0, 3010)) {
+        throw "PrepareSchema failed with exit code $($proc.ExitCode)"
+    }
+    Write-Output "CHANGED: PrepareSchema completed (exit $($proc.ExitCode))"
+  register: _ex_schema_result
+  run_once: true
+  when: not (_ex_org_exists | bool)
+  changed_when: "'CHANGED:' in (_ex_schema_result.stdout | default(''))"
+  timeout: 1200  # Schema extension can take up to 20 minutes to replicate
+
+- name: AD Preparation — PrepareAD
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $proc = Start-Process -FilePath '{{ exchange_setup_path }}' `
+        -ArgumentList '/PrepareAD', '/OrganizationName:{{ exchange_org_name }}', '/IAcceptExchangeServerLicenseTerms' `
+        -Wait -PassThru -NoNewWindow
+    if ($proc.ExitCode -notin @(0, 3010)) {
+        throw "PrepareAD failed with exit code $($proc.ExitCode)"
+    }
+    Write-Output "CHANGED: PrepareAD completed (exit $($proc.ExitCode))"
+  register: _ex_prepAD_result
+  run_once: true
+  when: not (_ex_org_exists | bool)
+  changed_when: "'CHANGED:' in (_ex_prepAD_result.stdout | default(''))"
+  timeout: 1200
+
+- name: AD Preparation — PrepareAllDomains
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $proc = Start-Process -FilePath '{{ exchange_setup_path }}' `
+        -ArgumentList '/PrepareAllDomains', '/IAcceptExchangeServerLicenseTerms' `
+        -Wait -PassThru -NoNewWindow
+    if ($proc.ExitCode -notin @(0, 3010)) {
+        throw "PrepareAllDomains failed with exit code $($proc.ExitCode)"
+    }
+    Write-Output "CHANGED: PrepareAllDomains completed (exit $($proc.ExitCode))"
+  register: _ex_prepDomains_result
+  run_once: true
+  when: not (_ex_org_exists | bool)
+  changed_when: "'CHANGED:' in (_ex_prepDomains_result.stdout | default(''))"
+  timeout: 600
+
+- name: Display AD preparation summary
+  ansible.builtin.debug:
+    msg: >-
+      AD preparation:
+      org_already_existed={{ _ex_org_exists }} |
+      schema={{ _ex_schema_result.changed | default(false) }} |
+      prepAD={{ _ex_prepAD_result.changed | default(false) }} |
+      prepDomains={{ _ex_prepDomains_result.changed | default(false) }}
+  run_once: true
+
+# ----------------------------------------------------------------------------
+# Section 7 — Install Exchange Server
+# ----------------------------------------------------------------------------
+- name: Install Exchange Server {{ exchange_version }}
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+
+    $argList = @(
+        '/Mode:Install',
+        '{{ _ex_role_flag }}:{{ _ex_roles }}',
+        '/IAcceptExchangeServerLicenseTerms',
+        '/MdbName:{{ exchange_mdb_name }}'
+    )
+
+    # /InstallWindowsComponents available in Exchange 2013 and 2016
+    {% if exchange_version | int >= 2013 %}
+    $argList += '/InstallWindowsComponents'
+    {% endif %}
+
+    $proc = Start-Process -FilePath '{{ exchange_setup_path }}' `
+        -ArgumentList $argList `
+        -Wait -PassThru -NoNewWindow
+    if ($proc.ExitCode -notin @(0, 3010)) {
+        throw "Exchange setup failed with exit code $($proc.ExitCode)"
+    }
+    Write-Output "ExitCode=$($proc.ExitCode)"
+  register: _ex_install_result
+  failed_when: false   # Exit code checked above in PowerShell; win_shell rc reflects the exit call
+  changed_when: "'ExitCode=' in (_ex_install_result.stdout | default(''))"
+  timeout: 3600   # 60 minutes — Exchange installations are slow
+  when: not (_exchange_installed | bool)
+
+- name: Assert Exchange install succeeded
+  ansible.builtin.assert:
+    that:
+      - _ex_install_result.rc | default(0) == 0
+    fail_msg: >-
+      Exchange {{ exchange_version }} setup exited with rc={{ _ex_install_result.rc | default('n/a') }}.
+      Check the Exchange setup log at
+      C:\ExchangeSetupLogs\ExchangeSetup.log for details.
+  when: not (_exchange_installed | bool)
+
+- name: Reboot after Exchange installation if required
+  ansible.windows.win_reboot:
+    reboot_timeout: 600
+    post_reboot_delay: 60
+    msg: "Rebooting after Exchange {{ exchange_version }} installation (CDX-E)"
+  when:
+    - not (_exchange_installed | bool)
+    - >-
+      'ExitCode=3010' in (_ex_install_result.stdout | default(''))
+
+# ----------------------------------------------------------------------------
+# Section 8 — Wait for Exchange services to start
+# ----------------------------------------------------------------------------
+- name: Wait for Exchange Information Store / Transport services
+  ansible.windows.win_shell: |
+    $timeout = 180
+    $elapsed = 0
+    # Service names vary slightly by version — check for the Information Store
+    $svcName = if ('{{ _ex_ver }}' -eq '2010') { 'MSExchangeIS' } else { 'MSExchangeIS' }
+    while ($elapsed -lt $timeout) {
+        $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+        if ($svc -and $svc.Status -eq 'Running') {
+            Write-Output "ready"
+            exit 0
+        }
+        Start-Sleep -Seconds 15
+        $elapsed += 15
+    }
+    throw "Exchange Information Store did not reach Running state within $timeout seconds"
+  register: _ex_svc_ready
+  changed_when: false
+
+# ----------------------------------------------------------------------------
+# Section 9 — Post-install: default Internet send connector
+# Applies to Exchange 2013 and 2016 only.
+# Exchange 2010 HubTransport creates a default send connector during setup.
+# ----------------------------------------------------------------------------
+- name: Create default Internet send connector (Exchange 2013/2016)
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Add-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction SilentlyContinue
+
+    $existing = Get-SendConnector -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -eq '{{ exchange_send_connector_name }}' }
+    if ($existing) {
+        Write-Output "OK: Send connector '{{ exchange_send_connector_name }}' already exists"
+        exit 0
+    }
+
+    $transportSvcs = (Get-TransportService).Identity
+    New-SendConnector `
+        -Name '{{ exchange_send_connector_name }}' `
+        -Usage Internet `
+        -AddressSpaces '*' `
+        -IsScopedConnector $false `
+        -DNSRoutingEnabled $true `
+        -SourceTransportServers $transportSvcs `
+        -ErrorAction Stop | Out-Null
+    Write-Output "CHANGED: Created send connector '{{ exchange_send_connector_name }}'"
+  register: _ex_connector_result
+  run_once: true
+  when:
+    - exchange_create_send_connector | bool
+    - _ex_ver in ['2013', '2016']
+  changed_when: "'CHANGED:' in (_ex_connector_result.stdout | default(''))"
+
+# ----------------------------------------------------------------------------
+# Section 10 — Post-install: virtual directory external URLs (optional)
+# Only runs when exchange_external_fqdn is set.
+# Configures OWA, ECP, EWS, OAB, and ActiveSync external URLs.
+# ----------------------------------------------------------------------------
+- name: Configure virtual directory external URLs
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Add-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction SilentlyContinue
+
+    $base    = 'https://{{ exchange_external_fqdn }}'
+    $server  = $env:COMPUTERNAME
+    $changes = @()
+
+    # OWA
+    $owaDir = Get-OwaVirtualDirectory -Server $server -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($owaDir -and $owaDir.ExternalUrl -ne "$base/owa") {
+        Set-OwaVirtualDirectory -Identity $owaDir.Identity -ExternalUrl "$base/owa" -ErrorAction Stop
+        $changes += "CHANGED: OWA ExternalUrl → $base/owa"
+    }
+
+    # ECP
+    $ecpDir = Get-EcpVirtualDirectory -Server $server -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($ecpDir -and $ecpDir.ExternalUrl -ne "$base/ecp") {
+        Set-EcpVirtualDirectory -Identity $ecpDir.Identity -ExternalUrl "$base/ecp" -ErrorAction Stop
+        $changes += "CHANGED: ECP ExternalUrl → $base/ecp"
+    }
+
+    # EWS
+    $ewsDir = Get-WebServicesVirtualDirectory -Server $server -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($ewsDir -and $ewsDir.ExternalUrl -ne "$base/EWS/Exchange.asmx") {
+        Set-WebServicesVirtualDirectory -Identity $ewsDir.Identity -ExternalUrl "$base/EWS/Exchange.asmx" -ErrorAction Stop
+        $changes += "CHANGED: EWS ExternalUrl → $base/EWS/Exchange.asmx"
+    }
+
+    # OAB
+    $oabDir = Get-OabVirtualDirectory -Server $server -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($oabDir -and $oabDir.ExternalUrl -ne "$base/OAB") {
+        Set-OabVirtualDirectory -Identity $oabDir.Identity -ExternalUrl "$base/OAB" -ErrorAction Stop
+        $changes += "CHANGED: OAB ExternalUrl → $base/OAB"
+    }
+
+    # ActiveSync
+    $asDir = Get-ActiveSyncVirtualDirectory -Server $server -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($asDir -and $asDir.ExternalUrl -ne "$base/Microsoft-Server-ActiveSync") {
+        Set-ActiveSyncVirtualDirectory -Identity $asDir.Identity -ExternalUrl "$base/Microsoft-Server-ActiveSync" -ErrorAction Stop
+        $changes += "CHANGED: ActiveSync ExternalUrl → $base/Microsoft-Server-ActiveSync"
+    }
+
+    if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
+    else { Write-Output "OK: External URLs already configured or not changed" }
+  register: _ex_vdir_result
+  when:
+    - exchange_external_fqdn | length > 0
+    - _ex_ver in ['2013', '2016']
+  changed_when: "'CHANGED:' in (_ex_vdir_result.stdout | default(''))"
+
+- name: Configure Exchange 2010 virtual directory external URLs
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    Add-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn -ErrorAction SilentlyContinue
+
+    $base    = 'https://{{ exchange_external_fqdn }}'
+    $server  = $env:COMPUTERNAME
+    $changes = @()
+
+    $owaDir = Get-OwaVirtualDirectory -Server $server -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($owaDir -and $owaDir.ExternalUrl -ne "$base/owa") {
+        Set-OwaVirtualDirectory -Identity $owaDir.Identity -ExternalUrl "$base/owa" -ErrorAction Stop
+        $changes += "CHANGED: OWA ExternalUrl → $base/owa"
+    }
+
+    $ewsDir = Get-WebServicesVirtualDirectory -Server $server -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($ewsDir -and $ewsDir.ExternalUrl -ne "$base/EWS/Exchange.asmx") {
+        Set-WebServicesVirtualDirectory -Identity $ewsDir.Identity -ExternalUrl "$base/EWS/Exchange.asmx" -ErrorAction Stop
+        $changes += "CHANGED: EWS ExternalUrl → $base/EWS/Exchange.asmx"
+    }
+
+    $oabDir = Get-OabVirtualDirectory -Server $server -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($oabDir -and $oabDir.ExternalUrl -ne "$base/OAB") {
+        Set-OabVirtualDirectory -Identity $oabDir.Identity -ExternalUrl "$base/OAB" -ErrorAction Stop
+        $changes += "CHANGED: OAB ExternalUrl → $base/OAB"
+    }
+
+    if ($changes.Count -gt 0) { $changes | ForEach-Object { Write-Output $_ } }
+    else { Write-Output "OK: External URLs already configured or not changed" }
+  register: _ex_vdir_2010_result
+  when:
+    - exchange_external_fqdn | length > 0
+    - _ex_ver == '2010'
+  changed_when: "'CHANGED:' in (_ex_vdir_2010_result.stdout | default(''))"
+
+# ----------------------------------------------------------------------------
+# Section 11 — Summary
+# ----------------------------------------------------------------------------
+- name: deploy_microsoft_exchange summary
+  ansible.builtin.debug:
+    msg: >-
+      deploy_microsoft_exchange complete for {{ inventory_hostname }}.
+      version={{ _ex_ver }} |
+      roles={{ _ex_roles }} |
+      was_installed={{ _exchange_installed }} |
+      install_ran={{ not (_exchange_installed | bool) }} |
+      ad_prep_ran={{ not (_ex_org_exists | default(true) | bool) }} |
+      connector={{ _ex_connector_result.changed | default(false) }}

@@ -1,0 +1,12 @@
+---
+# =============================================================================
+# Connection variables — Linux exercise VMs
+# =============================================================================
+# Applied to all hosts in the linux_hosts group (written by inventory_refresh).
+# Key-based auth — no ansible_password required.
+# =============================================================================
+
+ansible_connection: ssh
+ansible_port: 22
+ansible_ssh_private_key_file: "~/.ssh/id_ed25519"
+ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"

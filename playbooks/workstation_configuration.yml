@@ -1,0 +1,128 @@
+---
+# =============================================================================
+# CDX-E Playbook: Workstation Configuration
+# =============================================================================
+# Purpose: Apply base configuration and optional Windows features to scenario
+#          workstations (Windows 7, 10, 11 endpoints).
+#
+# Roles:
+#   - configure_vm           — hostname, timezone, WinRM, PS policy
+#   - join_domain            — domain join (before install_windowsfeature; skipped if domain_join: false)
+#   - install_windowsfeature — features from windows_feature_sets['workstations']
+#
+# Usage:
+#   ansible-playbook playbooks/workstation_configuration.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Pre-play: ensure SOCKS5 relay tunnel is open before WinRM connections
+# ----------------------------------------------------------------------------
+- name: Ensure Relay SOCKS5 Tunnel
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Ensure SOCKS5 relay tunnel is open
+      ansible.builtin.include_role:
+        name: relay_tunnel
+      vars:
+        relay_tunnel_action: open
+
+# ----------------------------------------------------------------------------
+# Pre-play: check pipeline checkpoint — skip if phase7 already completed
+# ----------------------------------------------------------------------------
+- name: Check Phase 7 Checkpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check pipeline checkpoint for phase7
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: check
+        pipeline_checkpoint_phase: phase7
+
+# ----------------------------------------------------------------------------
+# Main play: configure workstations
+# ----------------------------------------------------------------------------
+- name: Workstation Configuration
+  hosts: workstations
+  gather_facts: false
+  tags: [workstations, endpoints]
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: Set per-host OU and domain_join from vms.yaml
+      ansible.builtin.set_fact:
+        ou: >-
+          {{ (virtual_machines | selectattr('name', 'equalto', inventory_hostname) | first).ou | default('') }}
+        domain_join: >-
+          {{ (virtual_machines | selectattr('name', 'equalto', inventory_hostname) | first).domain_join | default(true) }}
+
+    - name: "[preflight] Skip — phase7 already completed (checkpoint)"
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']._phase_skip | default(false) | bool
+
+    - name: "[preflight] Skip — destroy workflow, no configuration to run"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
+    - name: "[preflight] Skip - workstations phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.workstations | default(true) | bool)
+
+    - name: "[preflight] Assert workstations group is populated"
+      ansible.builtin.assert:
+        that: groups['workstations'] | default([]) | length > 0
+        fail_msg: "workstations group is empty. Check inventory_refresh output."
+
+  roles:
+    - configure_vm
+    # Domain join runs AFTER configure_vm (hostname set + rebooted) but BEFORE
+    # install_windowsfeature. install_windowsfeature calls meta: end_host when
+    # no features are defined, which would silently skip post_tasks (including
+    # any join_domain call placed there). Running join_domain as a role here
+    # ensures it executes regardless of the feature install outcome.
+    # Renaming a domain-joined computer requires domain admin rights — hostname
+    # is set by configure_vm first while still in workgroup.
+    # Configurable per-VM via domain_join: true/false in vms.yaml (default: true).
+    - join_domain
+    - install_windowsfeature
+    - windows_activation
+
+# ----------------------------------------------------------------------------
+# Post-play: record phase7 completion in pipeline checkpoint
+# ----------------------------------------------------------------------------
+- name: Record Phase 7 Checkpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Record phase7 as complete
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: record_complete
+        pipeline_checkpoint_phase: phase7
+      when:
+        - not (_phase_skip | default(false) | bool)
+        - (action | default('deploy')) != 'destroy'

@@ -1,0 +1,24 @@
+---
+# =============================================================================
+# Role: pipeline_checkpoint — Default Variables
+# =============================================================================
+# Controls how the role interacts with the phase state file.
+#
+# pipeline_checkpoint_action:
+#   check           — read state file; set _phase_skip: true if phase is complete
+#   record_complete — write phase status 'complete' with timestamp
+#   record_failed   — write phase status 'failed' with timestamp
+#   reset           — delete the state file entirely
+#
+# pipeline_checkpoint_phase:
+#   Name of the phase key to read/write (e.g. 'phase4', 'phase6').
+#   Must be set by the caller via vars:.
+#
+# pipeline_checkpoint_file:
+#   Path to the state file. Defaults to the exercise directory so each exercise
+#   tracks its own pipeline state independently.
+# =============================================================================
+
+pipeline_checkpoint_action: check
+pipeline_checkpoint_phase: ""
+pipeline_checkpoint_file: "{{ exercise_dir }}/phase_state.yml"

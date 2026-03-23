@@ -1,0 +1,158 @@
+---
+# =============================================================================
+# Role: deploy_endpoint_agents
+# =============================================================================
+# Deploys SIEM endpoint agents to VMs tagged with monitor: true in vms.yaml.
+# Runs on the exercise VM inventory (servers, workstations, domain_controllers).
+# The SOC team and White Cell control monitoring scope via the monitor: flag.
+#
+# Expects facts set by read_exercise_config:
+#   virtual_machines — full VM list (used to check monitor: flag for this host)
+#   scenario         — parsed scenario.yml
+#
+# Supported agent platforms (set via endpoint_agent_platform):
+#   wazuh      — Wazuh agent (default); works on Windows and Linux
+#   elastic    — Elastic agent (requires Fleet server)
+#   splunk_uf  — Splunk Universal Forwarder
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight
+# ----------------------------------------------------------------------------
+- name: Assert required facts are present
+  ansible.builtin.assert:
+    that:
+      - virtual_machines is defined
+      - scenario is defined
+    fail_msg: >-
+      virtual_machines and scenario facts are not defined.
+      Ensure read_exercise_config runs before deploy_endpoint_agents.
+  run_once: true
+
+# ----------------------------------------------------------------------------
+# Determine if this host should be monitored
+# ----------------------------------------------------------------------------
+- name: Check monitor flag for this host
+  ansible.builtin.set_fact:
+    _monitor_this_host: >-
+      {{ (virtual_machines
+          | selectattr('name', 'equalto', inventory_hostname)
+          | map(attribute='monitor')
+          | first
+          | default(false)) | bool }}
+
+- name: Skip host if monitor is not enabled
+  ansible.builtin.meta: end_host
+  when: not _monitor_this_host
+
+# ----------------------------------------------------------------------------
+# Deploy agent — Wazuh
+# ----------------------------------------------------------------------------
+- name: Deploy Wazuh agent (Linux)
+  when:
+    - endpoint_agent_platform == 'wazuh'
+    - ansible_os_family in ['Debian', 'RedHat']
+  block:
+
+    - name: Check if Wazuh agent is already installed (Linux)
+      ansible.builtin.stat:
+        path: /var/ossec/bin/wazuh-agentd
+      register: _wazuh_installed
+
+    - name: Download Wazuh agent package (Debian/Ubuntu)
+      ansible.builtin.get_url:
+        url: "{{ wazuh_agent_deb_url }}"
+        dest: /tmp/wazuh-agent.deb
+      when:
+        - not _wazuh_installed.stat.exists
+        - ansible_os_family == 'Debian'
+
+    - name: Install Wazuh agent (Debian/Ubuntu)
+      ansible.builtin.apt:
+        deb: /tmp/wazuh-agent.deb
+      when:
+        - not _wazuh_installed.stat.exists
+        - ansible_os_family == 'Debian'
+
+    - name: Configure Wazuh agent manager address
+      ansible.builtin.lineinfile:
+        path: /var/ossec/etc/ossec.conf
+        regexp: '<address>.*</address>'
+        line: "    <address>{{ wazuh_manager_host }}</address>"
+        backrefs: true
+
+    - name: Enable and start Wazuh agent service (Linux)
+      ansible.builtin.systemd:
+        name: wazuh-agent
+        state: started
+        enabled: true
+
+- name: Deploy Wazuh agent (Windows)
+  when:
+    - endpoint_agent_platform == 'wazuh'
+    - ansible_os_family == 'Windows'
+  block:
+
+    - name: Check if Wazuh agent is already installed (Windows)
+      ansible.windows.win_service:
+        name: WazuhSvc
+      register: _wazuh_svc
+      failed_when: false
+
+    - name: Download Wazuh agent MSI (Windows)
+      ansible.windows.win_get_url:
+        url: "{{ wazuh_agent_msi_url }}"
+        dest: C:\Windows\Temp\wazuh-agent.msi
+      when: _wazuh_svc.exists is not defined or not _wazuh_svc.exists
+
+    - name: Install Wazuh agent silently (Windows)
+      ansible.windows.win_package:
+        path: C:\Windows\Temp\wazuh-agent.msi
+        arguments: >-
+          WAZUH_MANAGER="{{ wazuh_manager_host }}"
+          WAZUH_REGISTRATION_SERVER="{{ wazuh_manager_host }}"
+          WAZUH_REGISTRATION_PORT="{{ wazuh_registration_port }}"
+          /quiet
+        state: present
+      when: _wazuh_svc.exists is not defined or not _wazuh_svc.exists
+
+    - name: Start Wazuh agent service (Windows)
+      ansible.windows.win_service:
+        name: WazuhSvc
+        state: started
+        start_mode: auto
+
+# ----------------------------------------------------------------------------
+# Deploy agent — Elastic
+# ----------------------------------------------------------------------------
+- name: Deploy Elastic agent
+  when: endpoint_agent_platform == 'elastic'
+  block:
+
+    - name: Assert Elastic Fleet URL is configured
+      ansible.builtin.assert:
+        that:
+          - elastic_fleet_url | length > 0
+          - elastic_enrollment_token | length > 0
+        fail_msg: >-
+          elastic_fleet_url and elastic_enrollment_token must be set
+          when endpoint_agent_platform == 'elastic'.
+
+    - name: Install Elastic agent (Linux)
+      ansible.builtin.command:
+        cmd: >-
+          elastic-agent install
+          --url="{{ elastic_fleet_url }}"
+          --enrollment-token="{{ elastic_enrollment_token }}"
+          --non-interactive
+      when: ansible_os_family in ['Debian', 'RedHat']
+      register: _elastic_install
+      changed_when: "'Elastic Agent has been successfully installed' in _elastic_install.stdout"
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+- name: Endpoint agent deployment complete
+  ansible.builtin.debug:
+    msg: >-
+      {{ endpoint_agent_platform }} agent deployed on {{ inventory_hostname }}.

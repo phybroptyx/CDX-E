@@ -1,0 +1,51 @@
+---
+# =============================================================================
+# relay_tunnel: close
+# =============================================================================
+# Kills the SSH dynamic-forwarding tunnel and removes the PID file.
+# Idempotent — no-op if the tunnel is not running.
+# =============================================================================
+
+# ── Check current state ───────────────────────────────────────────────────────
+- name: Check if relay tunnel is running
+  ansible.builtin.shell:
+    cmd: >-
+      pgrep -f "ssh -D {{ relay_tunnel_port }}.*{{ relay_tunnel_user }}@{{ relay_tunnel_host }}"
+  register: _running_tunnel
+  failed_when: false
+  changed_when: false
+
+- name: Report no tunnel to close
+  ansible.builtin.debug:
+    msg: "No SOCKS5 relay tunnel found running on port {{ relay_tunnel_port }}. Nothing to close."
+  when: _running_tunnel.rc != 0
+
+# ── Kill tunnel ───────────────────────────────────────────────────────────────
+- name: Kill relay tunnel process(es)
+  ansible.builtin.shell:
+    cmd: >-
+      pkill -f "ssh -D {{ relay_tunnel_port }}.*{{ relay_tunnel_user }}@{{ relay_tunnel_host }}" || true
+  when: _running_tunnel.rc == 0
+  changed_when: true
+
+# ── Remove PID file ──────────────────────────────────────────────────────────
+- name: Remove tunnel PID file
+  ansible.builtin.file:
+    path: "{{ relay_tunnel_pid_file }}"
+    state: absent
+  when: _running_tunnel.rc == 0
+
+# ── Verify tunnel is gone ─────────────────────────────────────────────────────
+- name: Verify SOCKS5 port {{ relay_tunnel_port }} is no longer listening
+  ansible.builtin.wait_for:
+    host: "127.0.0.1"
+    port: "{{ relay_tunnel_port }}"
+    timeout: 5
+    state: stopped
+  when: _running_tunnel.rc == 0
+  ignore_errors: true
+
+- name: Report tunnel closed
+  ansible.builtin.debug:
+    msg: "SOCKS5 relay tunnel on port {{ relay_tunnel_port }} closed."
+  when: _running_tunnel.rc == 0

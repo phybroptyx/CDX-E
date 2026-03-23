@@ -1,0 +1,263 @@
+---
+# =============================================================================
+# Role: destroy_scenario
+# =============================================================================
+# Destroys scenario VMs via Terraform and removes the exercise resource pool.
+# Artifact cleanup (phase_state.yml, host_vars, exercise_hosts.yml) runs in
+# an 'always:' block so it executes even if Terraform destroy fails.
+#
+# Expects facts set by read_exercise_config:
+#   scenario     — parsed scenario.yml
+#   exercise_dir — path to EXERCISES/<name>/
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight — facts must exist before anything else can run
+# ----------------------------------------------------------------------------
+- name: Assert required facts are present
+  ansible.builtin.assert:
+    that:
+      - scenario is defined
+      - exercise_dir is defined
+    fail_msg: "Required facts not found. Ensure exercise_initiation.yml runs first."
+
+# ----------------------------------------------------------------------------
+# Terraform destroy + resource pool cleanup (block) and
+# artifact cleanup (always — runs even on TF failure)
+# ----------------------------------------------------------------------------
+- block:
+
+    - name: Check Terraform is available
+      ansible.builtin.command:
+        cmd: "{{ terraform_binary }} version"
+      register: _tf_version
+      failed_when: _tf_version.rc != 0
+      changed_when: false
+
+    - name: Check Terraform state exists
+      ansible.builtin.stat:
+        path: "{{ exercise_dir }}/terraform/terraform.tfstate"
+      register: _tf_state_stat
+
+    - name: Report — no Terraform state (skipping destroy)
+      ansible.builtin.debug:
+        msg: >-
+          No Terraform state found at {{ exercise_dir }}/terraform/terraform.tfstate.
+          Skipping terraform destroy — VMs may need manual removal.
+      when: not _tf_state_stat.stat.exists
+
+    # Parse state to check whether any resources actually exist.
+    # Terraform state may exist but contain zero resources (e.g. after a previous
+    # destroy that removed all resources but left the state file in place).
+    - name: Read Terraform state content
+      ansible.builtin.slurp:
+        src: "{{ exercise_dir }}/terraform/terraform.tfstate"
+      register: _tf_state_raw
+      when: _tf_state_stat.stat.exists
+
+    - name: Check Terraform state has resources
+      ansible.builtin.set_fact:
+        _tf_has_resources: >-
+          {{ ((_tf_state_raw.content | b64decode | from_json).resources | default([])) | length > 0 }}
+      when: _tf_state_stat.stat.exists
+
+    - name: Report — state empty (skipping destroy)
+      ansible.builtin.debug:
+        msg: >-
+          Terraform state exists but contains no resources — all VMs already removed.
+          Skipping terraform destroy.
+      when: _tf_state_stat.stat.exists and not (_tf_has_resources | default(false) | bool)
+
+    # --------------------------------------------------------------------------
+    # Power off VMs — Proxmox requires VMs to be stopped before deletion
+    # --------------------------------------------------------------------------
+    - name: Power off VMs before destroy
+      ansible.builtin.uri:
+        url: >-
+          {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+             | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/status/stop
+        method: POST
+        headers:
+          Authorization: >-
+            PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+        validate_certs: "{{ proxmox_validate_certs }}"
+        status_code: [200, 500]   # 500 = already stopped — idempotent
+      loop: "{{ virtual_machines }}"
+      loop_control:
+        label: "{{ item.name }} (vmid={{ item.vmid }})"
+      ignore_errors: true   # VM may not exist or already be stopped
+      when:
+        - _tf_state_stat.stat.exists
+        - _tf_has_resources | default(false) | bool
+
+    - name: Wait for VMs to reach stopped state
+      ansible.builtin.uri:
+        url: >-
+          {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+             | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/status/current
+        method: GET
+        headers:
+          Authorization: >-
+            PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+        validate_certs: "{{ proxmox_validate_certs }}"
+        status_code: [200, 500]   # 500 = VM doesn't exist yet (already destroyed)
+      loop: "{{ virtual_machines }}"
+      loop_control:
+        label: "{{ item.name }} (vmid={{ item.vmid }})"
+      register: _vm_status
+      retries: 12
+      delay: 5
+      until: >-
+        _vm_status.status == 500 or
+        _vm_status.json.data.status | default('stopped') == 'stopped'
+      ignore_errors: true
+      when:
+        - _tf_state_stat.stat.exists
+        - _tf_has_resources | default(false) | bool
+
+    # --------------------------------------------------------------------------
+    # Snapshot cleanup — must run before terraform destroy while VMs still exist
+    # --------------------------------------------------------------------------
+    - name: List snapshots for all exercise VMs
+      ansible.builtin.uri:
+        url: >-
+          {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+             | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/snapshot
+        method: GET
+        headers:
+          Authorization: >-
+            PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+        validate_certs: "{{ proxmox_validate_certs }}"
+        status_code: [200, 404, 500]
+      loop: "{{ virtual_machines }}"
+      loop_control:
+        label: "{{ item.name }} (vmid={{ item.vmid }})"
+      register: _snap_list_results
+      ignore_errors: true
+      when:
+        - _tf_state_stat.stat.exists
+        - _tf_has_resources | default(false) | bool
+
+    - name: Build snapshot delete list (exclude 'current' state pointer)
+      ansible.builtin.set_fact:
+        _snaps_to_delete: >-
+          {%- set pairs = [] -%}
+          {%- for r in _snap_list_results.results | default([]) -%}
+            {%- if not (r.failed | default(false)) and r.status | default(0) == 200 -%}
+              {%- set vm = r.item -%}
+              {%- set node = (vm.proxmox | default({})).node | default(scenario.proxmox.node) -%}
+              {%- for snap in r.json.data | default([]) -%}
+                {%- if snap.name != 'current' -%}
+                  {%- set _ = pairs.append({'vmid': vm.vmid, 'vm_name': vm.name,
+                                            'node': node, 'snapname': snap.name}) -%}
+                {%- endif -%}
+              {%- endfor -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ pairs }}
+
+    - name: Delete snapshots for exercise VMs
+      ansible.builtin.uri:
+        url: >-
+          {{ proxmox_api_url }}/nodes/{{ item.node }}/qemu/{{ item.vmid }}/snapshot/{{ item.snapname }}
+        method: DELETE
+        headers:
+          Authorization: >-
+            PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+        validate_certs: "{{ proxmox_validate_certs }}"
+        status_code: [200, 404, 500]
+      loop: "{{ _snaps_to_delete | default([]) }}"
+      loop_control:
+        label: "{{ item.vm_name }} → {{ item.snapname }}"
+      ignore_errors: true
+      when: (_snaps_to_delete | default([])) | length > 0
+
+    # --------------------------------------------------------------------------
+    # Terraform destroy
+    # --------------------------------------------------------------------------
+    - name: Terraform destroy
+      ansible.builtin.command:
+        cmd: "{{ terraform_binary }} destroy -auto-approve -input=false"
+        chdir: "{{ exercise_dir }}/terraform"
+      register: _tf_destroy
+      changed_when: >-
+        'Destroy complete!' in _tf_destroy.stdout and
+        '0 destroyed' not in _tf_destroy.stdout
+      when:
+        - _tf_state_stat.stat.exists
+        - _tf_has_resources | default(false) | bool
+
+    - name: Show Terraform destroy output
+      ansible.builtin.debug:
+        msg: "{{ _tf_destroy.stdout_lines }}"
+      when:
+        - _tf_state_stat.stat.exists
+        - _tf_has_resources | default(false) | bool
+
+    # --------------------------------------------------------------------------
+    # Resource pool cleanup — after VMs are gone
+    # --------------------------------------------------------------------------
+    - name: Delete exercise resource pool
+      ansible.builtin.uri:
+        url: "{{ proxmox_api_url }}/pools/EX_{{ scenario.exercise.name }}"
+        method: DELETE
+        headers:
+          Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+        validate_certs: "{{ proxmox_validate_certs }}"
+        status_code: [200, 400, 404, 500]   # 400/404/500 = already gone, continue
+      when: _tf_state_stat.stat.exists
+
+  always:
+
+    # --------------------------------------------------------------------------
+    # Artifact cleanup — unconditional; runs even if TF destroy fails
+    # --------------------------------------------------------------------------
+    - name: Remove exercise_hosts.yml inventory file
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../inventory/exercise_hosts.yml"
+        state: absent
+
+    - name: Remove pipeline checkpoint state file
+      ansible.builtin.file:
+        path: "{{ exercise_dir }}/phase_state.yml"
+        state: absent
+
+    - name: Remove host_vars files for exercise VMs
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../inventory/host_vars/{{ item.name }}.yml"
+        state: absent
+      loop: "{{ virtual_machines }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    # --------------------------------------------------------------------------
+    # Terraform artifact cleanup — generated configs + plugin cache
+    # --------------------------------------------------------------------------
+    - name: Remove generated Terraform configuration files
+      ansible.builtin.file:
+        path: "{{ exercise_dir }}/terraform/{{ item }}"
+        state: absent
+      loop:
+        - providers.tf
+        - main.tf
+        - outputs.tf
+        - .terraform.lock.hcl
+
+    - name: Remove Terraform plugin cache directory
+      ansible.builtin.file:
+        path: "{{ exercise_dir }}/terraform/.terraform"
+        state: absent
+
+    - name: Scenario VM teardown summary
+      ansible.builtin.debug:
+        msg: |
+          Scenario VM teardown complete.
+          Exercise        : {{ scenario.exercise.name }}
+          Terraform state : {{ exercise_dir }}/terraform/
+          Snapshots purged: {{ (_snaps_to_delete | default([])) | length }}
+          Artifacts purged:
+            - inventory/exercise_hosts.yml
+            - inventory/host_vars/<vm>.yml ({{ virtual_machines | length }} VMs)
+            - {{ exercise_dir }}/phase_state.yml
+            - {{ exercise_dir }}/terraform/{providers,main,outputs}.tf
+            - {{ exercise_dir }}/terraform/.terraform/

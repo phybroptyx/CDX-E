@@ -1,0 +1,266 @@
+---
+# =============================================================================
+# configure_relay: assign_nics
+# =============================================================================
+# Hot-attaches exercise NICs (net2-4) to the relay VM via Proxmox API and
+# brings up the interfaces with assigned IPs and exercise routes.
+#
+# Called at the start of each exercise deployment (before configure_networking).
+#
+# Required vars:
+#   relay_nic_assignments  — list of {slot, bridge, ip, cidr}
+#   relay_routes           — list of {net, via}
+#
+# Interface name discovery:
+#   Debian 12 predictable naming means hot-plugged NICs are NOT named eth2/eth3.
+#   After hot-plug, each NIC's MAC address is read from the Proxmox VM config,
+#   then matched against /sys/class/net/<iface>/address on the relay to find the
+#   actual interface name. The enriched list (with .iface set) is stored as
+#   relay_nic_assignments_resolved for use in ip commands and the nftables template.
+# =============================================================================
+
+- name: Reset NIC assignment list
+  ansible.builtin.set_fact:
+    relay_nic_assignments_resolved: []
+
+- name: Assert relay_nic_assignments is not empty
+  ansible.builtin.assert:
+    that:
+      - relay_nic_assignments | length > 0
+    fail_msg: "relay_nic_assignments must be provided for relay_action=assign_nics"
+
+# --- Ensure relay VM is powered on ---
+# All tasks below this block are delegate_to: localhost so Ansible does not
+# attempt SSH to cdx-relay until after the wait_for confirms it is reachable.
+- name: Check CDX-RELAY power state
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ relay_proxmox_node }}/qemu/{{ relay_vmid }}/status/current"
+    method: GET
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  register: _relay_power_status
+  delegate_to: localhost
+  become: false
+
+- name: Power on CDX-RELAY (if not running)
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ relay_proxmox_node }}/qemu/{{ relay_vmid }}/status/start"
+    method: POST
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  delegate_to: localhost
+  become: false
+  when: _relay_power_status.json.data.status != 'running'
+
+- name: Wait for CDX-RELAY SSH to become available
+  ansible.builtin.wait_for:
+    host:    "{{ relay_management_ip }}"
+    port:    22
+    timeout: 120
+    sleep:   5
+  delegate_to: localhost
+  become: false
+  when: _relay_power_status.json.data.status != 'running'
+
+# --- Attach exercise NICs via Proxmox API ---
+- name: Attach exercise NICs to relay VM (Proxmox API)
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ relay_proxmox_node }}/qemu/{{ relay_vmid }}/config"
+    method: PUT
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    body_format: form-urlencoded
+    body: "{{ {'net' ~ item.slot: 'virtio,bridge=' ~ item.bridge ~ ',firewall=0'} }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  loop: "{{ relay_nic_assignments }}"
+  loop_control:
+    label: "net{{ item.slot }} → bridge={{ item.bridge }}"
+  delegate_to: localhost
+  become: false
+
+# Brief pause to allow Proxmox to hot-plug the virtual NICs
+- name: Wait for NIC hot-plug to settle
+  ansible.builtin.pause:
+    seconds: 5
+
+# --- Discover interface names by MAC address ---
+# Read the relay VM config to get the MAC address of each slot, then find the
+# matching interface in /sys/class/net by MAC. This is reliable regardless of
+# the predictable naming scheme Debian assigns.
+
+- name: Query relay VM config to get MAC addresses for hot-plugged NICs
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/nodes/{{ relay_proxmox_node }}/qemu/{{ relay_vmid }}/config"
+    method: GET
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  register: _relay_vm_config
+  delegate_to: localhost
+  become: false
+
+- name: Extract MAC addresses for each assigned NIC slot
+  ansible.builtin.set_fact:
+    _slot_macs: >-
+      {{ _slot_macs | default({}) | combine({
+           item.slot | string: (
+             _relay_vm_config.json.data['net' ~ item.slot]
+             | regex_findall('[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}')
+             | first | lower
+           )
+         }) }}
+  loop: "{{ relay_nic_assignments }}"
+  loop_control:
+    label: "net{{ item.slot }}"
+
+- name: Debug slot→MAC mapping
+  ansible.builtin.debug:
+    msg: "net{{ item.key }} MAC: {{ item.value }}"
+  loop: "{{ _slot_macs | dict2items }}"
+  loop_control:
+    label: "net{{ item.key }}"
+
+# --- Discover management (net0) and CDX-I (net1) interface names by MAC ---
+# provision.yml sets relay_mgmt_iface/relay_cdxi_iface from ansible_facts, but
+# assign_nics runs in a gather_facts: false play — so those defaults (eth0/eth1)
+# would produce an invalid nftables config on Debian 12 predictable naming.
+# Re-discover from the Proxmox VM config MACs using the same approach as above.
+- name: Extract MACs for management (net0) and CDX-I (net1) NICs
+  ansible.builtin.set_fact:
+    _net0_mac: >-
+      {{ _relay_vm_config.json.data['net0']
+         | regex_findall('[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}')
+         | first | lower }}
+    _net1_mac: >-
+      {{ _relay_vm_config.json.data['net1']
+         | regex_findall('[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}')
+         | first | lower }}
+
+- name: Discover management interface name (net0, by MAC)
+  ansible.builtin.shell:
+    cmd: >-
+      grep -rl "{{ _net0_mac }}" /sys/class/net/*/address 2>/dev/null
+      | head -1 | sed 's|/sys/class/net/||; s|/address||'
+  register: _mgmt_iface_disc
+  changed_when: false
+  failed_when: _mgmt_iface_disc.stdout | trim == ''
+
+- name: Discover CDX-I interface name (net1, by MAC)
+  ansible.builtin.shell:
+    cmd: >-
+      grep -rl "{{ _net1_mac }}" /sys/class/net/*/address 2>/dev/null
+      | head -1 | sed 's|/sys/class/net/||; s|/address||'
+  register: _cdxi_iface_disc
+  changed_when: false
+  failed_when: _cdxi_iface_disc.stdout | trim == ''
+
+- name: Set relay_mgmt_iface and relay_cdxi_iface from discovered names
+  ansible.builtin.set_fact:
+    relay_mgmt_iface: "{{ _mgmt_iface_disc.stdout | trim }}"
+    relay_cdxi_iface: "{{ _cdxi_iface_disc.stdout | trim }}"
+
+- name: Report management and CDX-I interface names
+  ansible.builtin.debug:
+    msg: "Management (net0): {{ relay_mgmt_iface }}  CDX-I (net1): {{ relay_cdxi_iface }}"
+
+# Find the interface name on the relay by matching its MAC address to /sys/class/net
+- name: Discover interface name for each NIC slot (by MAC)
+  ansible.builtin.shell:
+    cmd: >-
+      grep -rl "{{ _slot_macs[item.slot | string] }}"
+      /sys/class/net/*/address 2>/dev/null
+      | head -1
+      | sed 's|/sys/class/net/||; s|/address||'
+  register: _iface_discovery
+  loop: "{{ relay_nic_assignments }}"
+  loop_control:
+    label: "net{{ item.slot }} (MAC {{ _slot_macs[item.slot | string] }})"
+  changed_when: false
+  failed_when: _iface_discovery.stdout | trim == ''
+
+- name: Build resolved NIC assignment list (slot + bridge + ip + cidr + iface)
+  ansible.builtin.set_fact:
+    relay_nic_assignments_resolved: >-
+      {{ relay_nic_assignments_resolved | default([]) + [
+           item.item | combine({'iface': item.stdout | trim})
+         ] }}
+  loop: "{{ _iface_discovery.results }}"
+  loop_control:
+    label: "net{{ item.item.slot }} → {{ item.stdout | trim }}"
+
+- name: Report interface assignments
+  ansible.builtin.debug:
+    msg: "net{{ item.slot }} → {{ item.iface }}  bridge={{ item.bridge }}  ip={{ item.ip }}/{{ item.cidr }}"
+  loop: "{{ relay_nic_assignments_resolved }}"
+  loop_control:
+    label: "{{ item.iface }}"
+
+# --- Bring up interfaces with assigned IPs ---
+- name: Bring up exercise NIC links
+  ansible.builtin.command: ip link set dev {{ item.iface }} up
+  loop: "{{ relay_nic_assignments_resolved }}"
+  loop_control:
+    label: "{{ item.iface }}"
+  changed_when: true
+
+- name: Assign IPs to exercise NICs
+  ansible.builtin.command: >-
+    ip addr add {{ item.ip }}/{{ item.cidr }} dev {{ item.iface }}
+  loop: "{{ relay_nic_assignments_resolved }}"
+  loop_control:
+    label: "{{ item.iface }} {{ item.ip }}/{{ item.cidr }}"
+  register: _addr_result
+  changed_when: _addr_result.rc == 0
+  failed_when: >-
+    _addr_result.rc != 0
+    and 'RTNETLINK answers: File exists' not in (_addr_result.stderr | default(''))
+
+# --- Add exercise routes ---
+- name: Add exercise segment routes
+  ansible.builtin.command: ip route add {{ item.net }} dev {{ item.via }}
+  loop: "{{ relay_routes }}"
+  loop_control:
+    label: "{{ item.net }} via {{ item.via }}"
+  register: _route_result
+  changed_when: _route_result.rc == 0
+  failed_when: >-
+    _route_result.rc != 0
+    and 'RTNETLINK answers: File exists' not in (_route_result.stderr | default(''))
+  when: relay_routes | length > 0
+
+# --- Refresh nftables with inter-segment isolation rules ---
+# Uses relay_nic_assignments_resolved (which has .iface) so the template can
+# reference actual interface names instead of the legacy eth2/eth3 convention.
+- name: Redeploy nftables ruleset with exercise NIC isolation rules
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: '0640'
+  vars:
+    relay_nic_assignments: "{{ relay_nic_assignments_resolved }}"
+
+- name: Reload nftables
+  ansible.builtin.systemd:
+    name: nftables
+    state: reloaded
+
+- name: Show assigned relay NICs
+  ansible.builtin.debug:
+    msg: >-
+      Relay NIC assigned: {{ item.iface }}
+      bridge={{ item.bridge }}  ip={{ item.ip }}/{{ item.cidr }}
+  loop: "{{ relay_nic_assignments_resolved }}"
+  loop_control:
+    label: "{{ item.iface }}"

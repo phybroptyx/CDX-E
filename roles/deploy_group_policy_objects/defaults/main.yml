@@ -1,0 +1,9 @@
+---
+# =============================================================================
+# Role: deploy_group_policy_objects — Default Variables
+# =============================================================================
+
+# Staging directory on the DC where gpo.json and image files are temporarily
+# copied. Separate from ad_temp_path to avoid cross-role conflicts.
+# Cleaned up at the end of the role.
+gpo_temp_path: 'C:\Windows\Temp\cdx_gpo'

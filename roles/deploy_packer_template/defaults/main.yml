@@ -1,0 +1,13 @@
+---
+# =============================================================================
+# Role: deploy_packer_template - Default Variables
+# =============================================================================
+# All shared defaults (Proxmox API, Packer paths, template_registry) have
+# moved to: inventory/group_vars/all.yml
+# =============================================================================
+
+# Role-specific toggle: set true to rebuild templates that already exist
+force_rebuild: false
+
+# Proxmox resource pool all Packer-built templates are assigned to
+packer_template_pool: "CDX_TEMPLATES"

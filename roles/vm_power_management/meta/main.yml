@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: CDX
+  description: "Powers on scenario VMs via Proxmox API and waits for WinRM/SSH connectivity"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

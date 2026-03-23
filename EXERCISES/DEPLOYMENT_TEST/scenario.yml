@@ -1,0 +1,54 @@
+---
+# =============================================================================
+# CDX-E Scenario: DEPLOYMENT_TEST
+# =============================================================================
+# Template validation deployment. Deploys one or more VMs from Packer-built
+# templates to validate that templates boot and configure correctly.
+# No domain, no services — infrastructure validation only.
+# =============================================================================
+
+exercise:
+  name: DEPLOYMENT_TEST
+  description: "Template validation test deployment"
+  classification: UNCLASSIFIED
+  teams:
+    white_cell: true
+    red_team:   false
+    blue_team:  false
+    purple_team: false
+
+domain:
+  name: cdx.lab
+  netbios: CDX
+  functional_level: Win2019
+  admin_password: "{{ vault_domain_admin_password }}"
+  sites:
+    - name: Default-First-Site-Name
+      subnets: []
+
+phases:
+  packer:    false   # Templates assumed to already exist for validation runs
+  terraform: true
+  networking: false
+  domain:    false
+  servers:   false
+  services:
+    dhcp:     false
+    sql:      false
+    exchange: false
+    sccm:     false
+    iis:      false
+  workstations:       false
+  vulnerabilities: false
+  red_team:        false
+  blue_team:       false
+
+network:
+  management_vlan: 100
+  exercise_vlans:  []
+  dns_servers:
+    - 192.168.1.1
+
+proxmox:
+  node: cdx-pve-01
+  storage: QNAP

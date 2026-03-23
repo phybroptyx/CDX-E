@@ -1,0 +1,33 @@
+---
+# =============================================================================
+# Role: configure_relay
+# =============================================================================
+# Manages the CDX-RELAY VM lifecycle through a dispatch pattern.
+# relay_action controls which task file is included.
+#
+# relay_action values:
+#   provision    — first-time OS configuration (hostname, networking, danted,
+#                  nftables, SSH hardening). Idempotent — safe to re-run.
+#   assign_nics  — hot-attach exercise NICs via Proxmox API, assign IPs, add
+#                  routes. Called at the start of exercise deployment.
+#   release_nics — remove routes, deconfigure IPs, detach exercise NICs.
+#                  Called at exercise teardown.
+#   verify       — connectivity smoke test (SSH reachable, SOCKS5 port open,
+#                  ip_forward enabled, nftables active).
+#
+# Required vars (passed by calling play):
+#   relay_action          — dispatch selector
+#   relay_nic_assignments — list of {slot, bridge, ip, cidr}  (assign/release)
+#   relay_routes          — list of {net, via}                 (assign/release)
+# =============================================================================
+
+- name: Assert relay_action is valid
+  ansible.builtin.assert:
+    that:
+      - relay_action in ['provision', 'assign_nics', 'release_nics', 'verify']
+    fail_msg: >-
+      relay_action must be one of: provision, assign_nics, release_nics, verify
+      (got: '{{ relay_action }}')
+
+- name: "Dispatch configure_relay → {{ relay_action }}"
+  ansible.builtin.include_tasks: "{{ relay_action }}.yml"

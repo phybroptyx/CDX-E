@@ -1,0 +1,328 @@
+---
+# =============================================================================
+# Role: connectivity_test
+# =============================================================================
+# Runs comprehensive reachability tests across all exercise VMs using the
+# Proxmox QEMU guest-exec API. No WinRM or SSH connections are required —
+# all pings are issued from inside each VM via the virtio-serial channel.
+#
+# Test matrix by VM category:
+#
+#   Domain members (clients + servers)
+#     → gateway, SDP/edge internal interface, local DC, Internet
+#
+#   Domain controllers
+#     → gateway, PDC emulator, SDP/edge internal interface, Internet
+#
+#   Non-domain-joined systems
+#     → gateway, SDP/edge internal interface
+#     → Internet (only if nameserver is configured for the VM)
+#
+#   Routers (VyOS)   — skipped; connectivity validated by OSPF adjacency
+#   SOC / APT nodes  — skipped; addressed separately (see GitLab issue)
+#
+# Requires facts from read_exercise_config:
+#   virtual_machines, scenario, template_registry
+#
+# Requires Proxmox API credentials (from secrets/credentials.yml):
+#   proxmox_api_url, proxmox_api_user, proxmox_api_token_id,
+#   proxmox_api_token_secret, proxmox_validate_certs
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight
+# ----------------------------------------------------------------------------
+- name: Assert required facts are present
+  ansible.builtin.assert:
+    that:
+      - virtual_machines is defined
+      - scenario is defined
+      - template_registry is defined
+    fail_msg: >-
+      connectivity_test requires facts from read_exercise_config.
+      Ensure it runs as a pre-play before this role is invoked.
+
+- name: Initialize result accumulator and VM category lists
+  ansible.builtin.set_fact:
+    _ct_results:       []
+    _ct_domain_members:  []   # clients + servers (domain_join == true, non-DC)
+    _ct_domain_controllers: []
+    _ct_non_domain:    []   # domain_join == false, non-router, non-SOC/APT
+    _ct_skip_groups:   "{{ connectivity_test_skip_groups + ['routers'] }}"
+
+# ----------------------------------------------------------------------------
+# Categorize VMs
+# ----------------------------------------------------------------------------
+- name: Categorize domain controllers
+  ansible.builtin.set_fact:
+    _ct_domain_controllers: "{{ _ct_domain_controllers + [item] }}"
+  when: item.ansible_group == 'domain_controllers'
+  loop: "{{ virtual_machines }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Categorize domain-joined member VMs (clients + servers)
+  ansible.builtin.set_fact:
+    _ct_domain_members: "{{ _ct_domain_members + [item] }}"
+  when:
+    - item.ansible_group not in _ct_skip_groups
+    - item.ansible_group != 'domain_controllers'
+    - item.domain_join | default(true) | bool
+  loop: "{{ virtual_machines }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Categorize non-domain-joined VMs
+  ansible.builtin.set_fact:
+    _ct_non_domain: "{{ _ct_non_domain + [item] }}"
+  when:
+    - item.ansible_group not in _ct_skip_groups
+    - item.ansible_group != 'domain_controllers'
+    - not (item.domain_join | default(true) | bool)
+  loop: "{{ virtual_machines }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# ----------------------------------------------------------------------------
+# Discover shared targets
+# ----------------------------------------------------------------------------
+- name: Resolve SDP/edge internal interface IP (first router's exercise IP)
+  ansible.builtin.set_fact:
+    _ct_sdp_ip: >-
+      {{ (virtual_machines
+          | selectattr('ansible_group', 'equalto', 'routers')
+          | map(attribute='network_bootstrap')
+          | map(attribute='ip')
+          | list
+          | first) }}
+
+- name: Resolve primary DC IP (first domain controller's static IP)
+  ansible.builtin.set_fact:
+    _ct_primary_dc_ip: >-
+      {{ (_ct_domain_controllers
+          | map(attribute='cloud_init')
+          | map(attribute='ip')
+          | list
+          | first) }}
+  when: _ct_domain_controllers | length > 0
+
+# ----------------------------------------------------------------------------
+# Discover PDC emulator via WinRM
+# ----------------------------------------------------------------------------
+# WinRM is confirmed operational by the time connectivity_test runs (Phase 11).
+# Querying via win_shell gives the authoritative live role holder — correct
+# even if FSMO roles have been transferred. Falls back to deriving from
+# scenario config if the WinRM query fails.
+- name: Initialize PDC FQDN to empty
+  ansible.builtin.set_fact:
+    _ct_pdc_fqdn: ""
+
+- name: Query AD for PDC emulator role holder via WinRM
+  ansible.windows.win_shell: "(Get-ADDomain).PDCEmulator"
+  delegate_to: "{{ _ct_domain_controllers[0].name }}"
+  register: _ct_pdc_query
+  changed_when: false
+  ignore_errors: true
+  when: _ct_domain_controllers | length > 0
+
+- name: Set PDC FQDN from WinRM query result
+  ansible.builtin.set_fact:
+    _ct_pdc_fqdn: "{{ _ct_pdc_query.stdout | trim }}"
+  when:
+    - _ct_domain_controllers | length > 0
+    - _ct_pdc_query is not failed
+    - _ct_pdc_query.stdout | default('') | trim | length > 0
+
+- name: Fall back — derive PDC FQDN from scenario config if WinRM query failed
+  ansible.builtin.set_fact:
+    _ct_pdc_fqdn: "{{ (_ct_domain_controllers[0].name | lower) + '.' + scenario.domain.name }}"
+  when:
+    - _ct_domain_controllers | length > 0
+    - _ct_pdc_fqdn | length == 0
+
+- name: Show discovered targets
+  ansible.builtin.debug:
+    msg: |
+      Connectivity test targets:
+        SDP/Edge internal IP : {{ _ct_sdp_ip }}
+        Primary DC IP        : {{ _ct_primary_dc_ip | default('N/A') }}
+        PDC Emulator         : {{ _ct_pdc_fqdn | default('N/A (not discovered)') }}
+        Internet target      : {{ connectivity_test_internet_target }} (dns2.google.com)
+
+# ----------------------------------------------------------------------------
+# Section 1: Domain-joined member VMs (clients + servers)
+# Tests: gateway, SDP internal, local DC, Internet
+# ----------------------------------------------------------------------------
+- name: "Domain members: ping gateway"
+  ansible.builtin.include_tasks: ping_via_guest_exec.yml
+  vars:
+    _ping_vm:     "{{ item }}"
+    _ping_target: "{{ item.cloud_init.gateway | default(_ct_sdp_ip) }}"
+    _ping_label:  "gateway"
+  loop: "{{ _ct_domain_members }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "Domain members: ping SDP/edge internal interface"
+  ansible.builtin.include_tasks: ping_via_guest_exec.yml
+  vars:
+    _ping_vm:     "{{ item }}"
+    _ping_target: "{{ _ct_sdp_ip }}"
+    _ping_label:  "SDP internal"
+  loop: "{{ _ct_domain_members }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "Domain members: ping local domain controller"
+  ansible.builtin.include_tasks: ping_via_guest_exec.yml
+  vars:
+    _ping_vm:     "{{ item }}"
+    _ping_target: "{{ _ct_primary_dc_ip }}"
+    _ping_label:  "local DC"
+  loop: "{{ _ct_domain_members }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: _ct_primary_dc_ip is defined
+
+- name: "Domain members: ping Internet (dns2.google.com)"
+  ansible.builtin.include_tasks: ping_via_guest_exec.yml
+  vars:
+    _ping_vm:     "{{ item }}"
+    _ping_target: "{{ connectivity_test_internet_target }}"
+    _ping_label:  "Internet (dns2.google.com)"
+  loop: "{{ _ct_domain_members }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# ----------------------------------------------------------------------------
+# Section 2: Domain controllers
+# Tests: gateway, PDC emulator, SDP internal, Internet
+# ----------------------------------------------------------------------------
+- name: "Domain controllers: ping gateway"
+  ansible.builtin.include_tasks: ping_via_guest_exec.yml
+  vars:
+    _ping_vm:     "{{ item }}"
+    _ping_target: "{{ item.cloud_init.gateway | default(_ct_sdp_ip) }}"
+    _ping_label:  "gateway"
+  loop: "{{ _ct_domain_controllers }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "Domain controllers: ping PDC emulator"
+  ansible.builtin.include_tasks: ping_via_guest_exec.yml
+  vars:
+    _ping_vm:     "{{ item }}"
+    _ping_target: "{{ _ct_pdc_fqdn }}"
+    _ping_label:  "PDC emulator ({{ _ct_pdc_fqdn }})"
+  loop: "{{ _ct_domain_controllers }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - _ct_pdc_fqdn | default('') | length > 0
+    # Skip the test on the PDC emulator itself (pointless to ping self)
+    - not (item.name | upper in _ct_pdc_fqdn | upper)
+
+- name: "Domain controllers: ping SDP/edge internal interface"
+  ansible.builtin.include_tasks: ping_via_guest_exec.yml
+  vars:
+    _ping_vm:     "{{ item }}"
+    _ping_target: "{{ _ct_sdp_ip }}"
+    _ping_label:  "SDP internal"
+  loop: "{{ _ct_domain_controllers }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "Domain controllers: ping Internet (dns2.google.com)"
+  ansible.builtin.include_tasks: ping_via_guest_exec.yml
+  vars:
+    _ping_vm:     "{{ item }}"
+    _ping_target: "{{ connectivity_test_internet_target }}"
+    _ping_label:  "Internet (dns2.google.com)"
+  loop: "{{ _ct_domain_controllers }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# ----------------------------------------------------------------------------
+# Section 3: Non-domain-joined systems
+# Tests: gateway, SDP internal, Internet (if nameserver is configured)
+# ----------------------------------------------------------------------------
+- name: "Non-domain: ping gateway"
+  ansible.builtin.include_tasks: ping_via_guest_exec.yml
+  vars:
+    _ping_vm:     "{{ item }}"
+    _ping_target: "{{ item.cloud_init.gateway | default(_ct_sdp_ip) }}"
+    _ping_label:  "gateway"
+  loop: "{{ _ct_non_domain }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "Non-domain: ping SDP/edge internal interface"
+  ansible.builtin.include_tasks: ping_via_guest_exec.yml
+  vars:
+    _ping_vm:     "{{ item }}"
+    _ping_target: "{{ _ct_sdp_ip }}"
+    _ping_label:  "SDP internal"
+  loop: "{{ _ct_non_domain }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: "Non-domain: ping Internet (dns2.google.com) — only if DNS is configured"
+  ansible.builtin.include_tasks: ping_via_guest_exec.yml
+  vars:
+    _ping_vm:     "{{ item }}"
+    _ping_target: "{{ connectivity_test_internet_target }}"
+    _ping_label:  "Internet (dns2.google.com)"
+  loop: "{{ _ct_non_domain }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: (item.cloud_init | default({})).nameserver | default('') | length > 0
+
+# ----------------------------------------------------------------------------
+# Section 4: Skipped groups (log only)
+# ----------------------------------------------------------------------------
+- name: Log skipped VM groups
+  ansible.builtin.debug:
+    msg: >-
+      SKIPPED {{ item.name }} (group: {{ item.ansible_group }}) —
+      SOC/APT connectivity tests deferred to separate role.
+  loop: "{{ virtual_machines | selectattr('ansible_group', 'in', connectivity_test_skip_groups) | list }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# ----------------------------------------------------------------------------
+# Report: summary table + fail gate
+# ----------------------------------------------------------------------------
+- name: Display connectivity test results
+  ansible.builtin.debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════
+       Connectivity Test Results — {{ scenario.exercise.name }}
+      ═══════════════════════════════════════════════════════════
+      {% for r in _ct_results %}
+        [{{ 'PASS' if r.status == 'pass' else 'FAIL' }}]  {{ "%-20s" | format(r.vm | truncate(20, True, '', 0)) }}  {{ r.test }}
+      {% endfor %}
+      ───────────────────────────────────────────────────────────
+        Total : {{ _ct_results | length }}
+        Passed: {{ _ct_results | selectattr('status', 'equalto', 'pass') | list | length }}
+        Failed: {{ _ct_results | selectattr('status', 'equalto', 'fail') | list | length }}
+      ═══════════════════════════════════════════════════════════
+
+- name: Collect failed tests
+  ansible.builtin.set_fact:
+    _ct_failed: "{{ _ct_results | selectattr('status', 'equalto', 'fail') | list }}"
+
+- name: Set overall pass flag for downstream roles
+  ansible.builtin.set_fact:
+    connectivity_test_passed: "{{ _ct_failed | length == 0 }}"
+
+- name: Fail play if connectivity tests failed
+  ansible.builtin.fail:
+    msg: |
+      Connectivity test FAILED. {{ _ct_failed | length }} test(s) did not pass:
+      {% for f in _ct_failed %}
+        - {{ f.vm }}: {{ f.test }} (target: {{ f.target }})
+      {% endfor %}
+      Resolve connectivity issues before proceeding to snapshot.
+  when:
+    - connectivity_test_fail_on_error | bool
+    - _ct_failed | length > 0

@@ -1,0 +1,7 @@
+﻿---
+galaxy_info:
+  author: CDX
+  description: "Checks for and builds missing Proxmox VM templates using Packer"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

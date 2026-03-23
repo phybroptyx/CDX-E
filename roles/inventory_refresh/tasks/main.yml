@@ -1,0 +1,280 @@
+---
+# =============================================================================
+# Role: inventory_refresh
+# =============================================================================
+# Reads Terraform outputs from all three exercise state directories, merges
+# the VM IP maps, and writes a dynamic Ansible inventory file that maps every
+# VM to its ansible_group, IP address, OS type, and connection parameters.
+# Refreshes in-memory inventory so subsequent plays can target VMs by group.
+#
+# Expects facts set by read_exercise_config:
+#   virtual_machines — list of scenario VM objects from vms.yaml
+#   scenario         — parsed scenario.yml
+#   exercise_dir     — path to EXERCISES/<name>/
+#
+# Optional facts (from read_apt_config / read_soc_layout):
+#   apt_vms          — Red Team VMs; included only if terraform_red_team/ exists
+#   soc_vms          — Blue Team VMs; included only if terraform_blue_team/ exists
+#
+# State directories read:
+#   {{ exercise_dir }}/terraform/            — scenario VMs (required)
+#   {{ exercise_dir }}/terraform_red_team/   — red team VMs (optional)
+#   {{ exercise_dir }}/terraform_blue_team/  — blue team VMs (optional)
+#
+# Writes:
+#   inventory/exercise_hosts.yml  — dynamic inventory for this exercise run
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight
+# ----------------------------------------------------------------------------
+- name: Assert required facts are present
+  ansible.builtin.assert:
+    that:
+      - virtual_machines is defined
+      - scenario is defined
+      - exercise_dir is defined
+    fail_msg: "Required facts not found. Ensure read_exercise_config runs first."
+
+- name: Check scenario Terraform state directory exists
+  ansible.builtin.stat:
+    path: "{{ exercise_dir }}/terraform"
+  register: _tf_state_scenario
+
+- name: Fail if scenario Terraform state directory is missing
+  ansible.builtin.assert:
+    that: _tf_state_scenario.stat.exists and _tf_state_scenario.stat.isdir
+    fail_msg: >-
+      Scenario Terraform directory not found: {{ exercise_dir }}/terraform
+      Ensure deploy_scenario has run before inventory_refresh.
+
+# ----------------------------------------------------------------------------
+# Discover optional Terraform state directories
+# ----------------------------------------------------------------------------
+- name: Check Red Team Terraform state directory
+  ansible.builtin.stat:
+    path: "{{ exercise_dir }}/terraform_red_team"
+  register: _tf_state_red_team
+
+- name: Check Blue Team Terraform state directory
+  ansible.builtin.stat:
+    path: "{{ exercise_dir }}/terraform_blue_team"
+  register: _tf_state_blue_team
+
+- name: Report which state directories were found
+  ansible.builtin.debug:
+    msg: >-
+      Terraform states found:
+      scenario={{ _tf_state_scenario.stat.exists }},
+      red_team={{ _tf_state_red_team.stat.exists }},
+      blue_team={{ _tf_state_blue_team.stat.exists }}
+
+# ----------------------------------------------------------------------------
+# Read Terraform outputs
+# ----------------------------------------------------------------------------
+- name: Get Terraform outputs — scenario
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} output -json"
+    chdir: "{{ exercise_dir }}/terraform"
+  register: _tf_out_scenario
+  changed_when: false
+
+- name: Get Terraform outputs — Red Team
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} output -json"
+    chdir: "{{ exercise_dir }}/terraform_red_team"
+  register: _tf_out_red_team
+  changed_when: false
+  when: _tf_state_red_team.stat.exists
+
+- name: Get Terraform outputs — Blue Team
+  ansible.builtin.command:
+    cmd: "{{ terraform_binary }} output -json"
+    chdir: "{{ exercise_dir }}/terraform_blue_team"
+  register: _tf_out_blue_team
+  changed_when: false
+  when: _tf_state_blue_team.stat.exists
+
+# ----------------------------------------------------------------------------
+# Merge VM IP maps from all Terraform states
+# ----------------------------------------------------------------------------
+# Terraform vm_ips output format:
+#   { "vm_ips": { "value": { "VM-NAME": "x.x.x.x" } } }
+# Empty string for DHCP-assigned VMs.
+
+- name: Set base IP map from scenario Terraform outputs
+  ansible.builtin.set_fact:
+    _vm_ip_map: "{{ (_tf_out_scenario.stdout | from_json).vm_ips.value | default({}) }}"
+
+- name: Merge Red Team IP map
+  ansible.builtin.set_fact:
+    _vm_ip_map: "{{ _vm_ip_map | combine((_tf_out_red_team.stdout | from_json).vm_ips.value | default({})) }}"
+  when:
+    - _tf_state_red_team.stat.exists
+    - _tf_out_red_team is not skipped
+
+- name: Merge Blue Team IP map
+  ansible.builtin.set_fact:
+    _vm_ip_map: "{{ _vm_ip_map | combine((_tf_out_blue_team.stdout | from_json).vm_ips.value | default({})) }}"
+  when:
+    - _tf_state_blue_team.stat.exists
+    - _tf_out_blue_team is not skipped
+
+- name: Report IP resolution
+  ansible.builtin.debug:
+    msg: >-
+      IP map contains {{ _vm_ip_map | length }} entries.
+      Static IPs: {{ _vm_ip_map.values() | select('ne', '') | list | length }}.
+      DHCP (empty): {{ _vm_ip_map.values() | select('eq', '') | list | length }}.
+
+# ----------------------------------------------------------------------------
+# Build combined VM list from all deployed tiers
+# ----------------------------------------------------------------------------
+# apt_vms and soc_vms are only included if their Terraform states exist,
+# ensuring that team VMs which were never deployed are not added to inventory.
+- name: Build combined VM list (scenario + deployed teams)
+  ansible.builtin.set_fact:
+    _all_vms: >-
+      {{
+        virtual_machines +
+        (apt_vms  | default([]) if _tf_state_red_team.stat.exists  else []) +
+        (soc_vms  | default([]) if _tf_state_blue_team.stat.exists else [])
+      }}
+
+# ----------------------------------------------------------------------------
+# Build inventory data structures
+# ----------------------------------------------------------------------------
+- name: Initialize group membership map
+  ansible.builtin.set_fact:
+    _inventory_groups: {}
+
+- name: Build group membership map (primary group)
+  ansible.builtin.set_fact:
+    _inventory_groups: >-
+      {{ _inventory_groups | combine({
+        item.ansible_group: (_inventory_groups[item.ansible_group] | default([])) + [item.name]
+      }) }}
+  loop: "{{ _all_vms }}"
+  loop_control:
+    label: "{{ item.name }} → {{ item.ansible_group }}"
+
+- name: Build group membership map (additional_groups)
+  ansible.builtin.set_fact:
+    _inventory_groups: >-
+      {{ _inventory_groups | combine({
+        extra_group: (_inventory_groups[extra_group] | default([])) + [item.0.name]
+      }) }}
+  loop: "{{ _all_vms | subelements('additional_groups', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.0.name }} → {{ item.1 }}"
+  vars:
+    extra_group: "{{ item.1 }}"
+
+# Build per-OS name lists used by the inventory template to populate
+# the windows_hosts, linux_hosts, and vyos_hosts parent groups.
+- name: Initialize OS-type name lists
+  ansible.builtin.set_fact:
+    _vms_windows: []
+    _vms_linux:   []
+    _vms_vyos:    []
+
+- name: Build Windows VM name list
+  ansible.builtin.set_fact:
+    _vms_windows: "{{ _vms_windows + [item.name] }}"
+  when: template_registry[item.template].os_type == 'windows'
+  loop: "{{ _all_vms }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Build Linux VM name list
+  ansible.builtin.set_fact:
+    _vms_linux: "{{ _vms_linux + [item.name] }}"
+  when: template_registry[item.template].os_type in ['linux', 'opnsense']
+  loop: "{{ _all_vms }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Build VyOS VM name list
+  ansible.builtin.set_fact:
+    _vms_vyos: "{{ _vms_vyos + [item.name] }}"
+  when: template_registry[item.template].os_type == 'vyos'
+  loop: "{{ _all_vms }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# ----------------------------------------------------------------------------
+# Clean up pipeline state artifacts (destroy runs and fresh deploys)
+# ----------------------------------------------------------------------------
+# phase_state.yml persists across teardown/rebuild cycles. It must be removed
+# on every destroy so the next deploy starts from a clean checkpoint state.
+# Also removed on deploy runs with cleanup_host_vars=true (full reset).
+# destroy_scenario has an always: block that also removes this file, but that
+# runs later (after Terraform) and is inside a block that requires exercise_dir
+# to be asserted. This earlier, unconditional removal ensures it is always gone.
+- name: Remove pipeline checkpoint state file
+  ansible.builtin.file:
+    path: "{{ exercise_dir }}/phase_state.yml"
+    state: absent
+  when: (cleanup_host_vars | default(false) | bool) or ((action | default('deploy')) == 'destroy')
+
+# ----------------------------------------------------------------------------
+# Clean up stale exercise VM host_vars files
+# ----------------------------------------------------------------------------
+# host_vars/<name>.yml files are written by vm_power_management with the
+# exercise-network static IP. They persist on disk across teardown/rebuild
+# cycles and will contain stale Layer0 DHCP IPs from the previous run if not
+# cleaned. Deleting them here (before the inventory file is written and before
+# VMs boot) guarantees a clean state on every pipeline execution.
+# On deploy runs, vm_power_management re-creates them with the correct IP.
+# On destroy runs, the VMs are going away — no re-creation needed.
+- name: Remove stale exercise VM host_vars files
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../inventory/host_vars/{{ item.name }}.yml"
+    state: absent
+  loop: "{{ _all_vms | default(virtual_machines) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when:
+    - (template_registry[item.template].os_type | default('')) != 'vyos'
+    - (cleanup_host_vars | default(false) | bool) or ((action | default('deploy')) == 'destroy')
+
+# ----------------------------------------------------------------------------
+# Write inventory file
+# ----------------------------------------------------------------------------
+- name: Ensure inventory directory exists
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../inventory"
+    state: directory
+    mode: '0755'
+
+- name: Write dynamic exercise inventory
+  ansible.builtin.template:
+    src: exercise_inventory.yml.j2
+    dest: "{{ playbook_dir }}/../inventory/exercise_hosts.yml"
+    mode: '0644'
+
+# ----------------------------------------------------------------------------
+# Refresh in-memory inventory
+# ----------------------------------------------------------------------------
+- name: Refresh in-memory Ansible inventory
+  ansible.builtin.meta: refresh_inventory
+
+# ----------------------------------------------------------------------------
+# Summary
+# ----------------------------------------------------------------------------
+- name: Inventory refresh summary
+  ansible.builtin.debug:
+    msg: |
+      Inventory refresh complete.
+      Exercise     : {{ scenario.exercise.name }}
+      Written to   : inventory/exercise_hosts.yml
+      Total VMs    : {{ _all_vms | length }}
+        Scenario   : {{ virtual_machines | length }}
+        Red Team   : {{ (apt_vms | default([]) if _tf_state_red_team.stat.exists else []) | length }}
+        Blue Team  : {{ (soc_vms | default([]) if _tf_state_blue_team.stat.exists else []) | length }}
+      OS types     : Windows={{ _vms_windows | length }}, Linux={{ _vms_linux | length }}, VyOS={{ _vms_vyos | length }}
+      Groups       : {{ _inventory_groups.keys() | list | join(', ') }}
+      DHCP VMs (IP pending):
+        {{ _vm_ip_map | dict2items
+           | selectattr('value', 'eq', '')
+           | map(attribute='key') | list | join(', ') | default('none') }}
