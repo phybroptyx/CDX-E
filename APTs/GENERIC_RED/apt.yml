@@ -1,0 +1,35 @@
+---
+# =============================================================================
+# CDX-E APT Profile: GENERIC_RED
+# =============================================================================
+# Default Red Team adversary profile for CDX exercises.
+# Uses Adaptix C2 (open source) for C2 infrastructure.
+# Simulates a generic advanced persistent threat.
+# =============================================================================
+
+apt:
+  name: "GENERIC_RED"
+  description: >-
+    Generic Red Team adversary profile. Simulates a financially-motivated threat
+    actor using standard penetration testing tools and common Windows exploitation
+    techniques. Suitable for Blue Team training exercises at all skill levels.
+  ttps:
+    - "T1566.001 - Spearphishing Attachment"
+    - "T1059.001 - PowerShell"
+    - "T1078 - Valid Accounts"
+    - "T1071.001 - Web Protocols (C2)"
+    - "T1021.002 - SMB/Windows Admin Shares"
+    - "T1083 - File and Directory Discovery"
+    - "T1057 - Process Discovery"
+
+c2_platforms:
+  - name: adaptix
+    vm: "RT-C2-01"
+    listener_port: 443
+    listener_protocol: https
+    teamserver_password: "{{ vault_c2_teamserver_password | default('RedTeam2024!') }}"
+
+operator_vms:
+  - "RT-OPS-01"
+
+implant_staging: false

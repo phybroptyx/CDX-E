@@ -1,0 +1,221 @@
+---
+# =============================================================================
+# Role: snapshot_exercise
+# =============================================================================
+# Gracefully shuts down all exercise VMs in dependency order, then takes a
+# Proxmox snapshot of each VM via the Proxmox API. The snapshot represents a
+# clean, consistent deployment baseline suitable for exercise reset.
+#
+# Shutdown order (most expendable → most critical):
+#   workstations → servers → domain_controllers → routers
+#
+# Snapshot is taken with VMs powered off — no RAM state, fully consistent disk.
+#
+# Requires facts from read_exercise_config:
+#   virtual_machines, scenario
+#
+# Requires Proxmox API credentials (from secrets/credentials.yml):
+#   proxmox_api_url, proxmox_api_user, proxmox_api_token_id,
+#   proxmox_api_token_secret, proxmox_validate_certs
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Preflight
+# ----------------------------------------------------------------------------
+- name: Assert required facts are present
+  ansible.builtin.assert:
+    that:
+      - virtual_machines is defined
+      - scenario is defined
+    fail_msg: >-
+      snapshot_exercise requires facts from read_exercise_config.
+      Ensure it runs as a pre-play before this role is invoked.
+
+- name: Resolve effective VM list (apply skip_groups filter)
+  ansible.builtin.set_fact:
+    _snap_vms: >-
+      {{ virtual_machines
+         | rejectattr('ansible_group', 'in', snapshot_skip_groups)
+         | list }}
+
+- name: Show snapshot plan
+  ansible.builtin.debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════
+       Snapshot Plan — {{ scenario.exercise.name }}
+      ═══════════════════════════════════════════════════════════
+        Snapshot name  : {{ snapshot_name }}
+        Description    : {{ snapshot_description }}
+        Include RAM    : {{ snapshot_include_ram }}
+        VMs to process : {{ _snap_vms | length }}
+        Skipped groups : {{ snapshot_skip_groups | join(', ') | default('none') }}
+      ───────────────────────────────────────────────────────────
+      {% for vm in _snap_vms %}
+        {{ vm.name }} (vmid={{ vm.vmid }}, group={{ vm.ansible_group }})
+      {% endfor %}
+      ═══════════════════════════════════════════════════════════
+
+# ----------------------------------------------------------------------------
+# Initialize result accumulator
+# ----------------------------------------------------------------------------
+- name: Initialize snapshot result accumulator
+  ansible.builtin.set_fact:
+    _snap_results: []
+
+# ============================================================================
+# PHASE 1: Graceful shutdown (ordered, sequential per group)
+# ============================================================================
+
+- name: "Shutdown phase: process group order"
+  ansible.builtin.include_tasks: shutdown_group.yml
+  vars:
+    _shutdown_group: "{{ _group }}"
+    _shutdown_vms: >-
+      {{ _snap_vms | selectattr('ansible_group', 'equalto', _group) | list }}
+  loop: "{{ snapshot_shutdown_order }}"
+  loop_control:
+    loop_var: _group
+    label: "{{ _group }}"
+  when: >-
+    (_snap_vms | selectattr('ansible_group', 'equalto', _group) | list | length) > 0
+
+- name: Shutdown any remaining VMs not covered by shutdown_order
+  ansible.builtin.include_tasks: shutdown_group.yml
+  vars:
+    _shutdown_group: "remaining"
+    _shutdown_vms: >-
+      {{ _snap_vms | rejectattr('ansible_group', 'in', snapshot_shutdown_order) | list }}
+  when: >-
+    (_snap_vms | rejectattr('ansible_group', 'in', snapshot_shutdown_order) | list | length) > 0
+
+# ----------------------------------------------------------------------------
+# Verify all VMs are stopped before snapshotting
+# ----------------------------------------------------------------------------
+- name: Verify all VMs reached stopped state
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/status/current
+    method: GET
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  register: _snap_final_states
+  loop: "{{ _snap_vms }}"
+  loop_control:
+    label: "{{ item.name }} (vmid={{ item.vmid }})"
+
+- name: Fail if any VM is still running (snapshot would be inconsistent)
+  ansible.builtin.fail:
+    msg: >-
+      VM {{ item.item.name }} (vmid={{ item.item.vmid }}) is still in state
+      '{{ item.json.data.status }}' after shutdown phase. Cannot take a
+      consistent snapshot. Resolve and re-run.
+  when:
+    - item is not failed
+    - item.json.data.status | default('unknown') != 'stopped'
+  loop: "{{ _snap_final_states.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# ============================================================================
+# PHASE 2: Create snapshots
+# ============================================================================
+
+- name: "Create snapshot: {{ item.name }} (vmid={{ item.vmid }})"
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/snapshot
+    method: POST
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    body_format: json
+    body:
+      snapname:    "{{ snapshot_name }}"
+      description: "{{ snapshot_description }}"
+      vmstate:     "{{ snapshot_include_ram | int }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  register: _snap_create_results
+  loop: "{{ _snap_vms }}"
+  loop_control:
+    label: "{{ item.name }} (vmid={{ item.vmid }})"
+  ignore_errors: true
+
+# ----------------------------------------------------------------------------
+# Poll Proxmox task status for each snapshot (snapshot create returns a UPID)
+# ----------------------------------------------------------------------------
+- name: "Poll snapshot task: {{ item.item.name }}"
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/tasks/{{ item.json.data }}/status
+    method: GET
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  register: _snap_task_status
+  until: _snap_task_status.json.data.status | default('') == 'stopped'
+  retries: 24
+  delay: 5
+  when: item is not failed and item.json is defined
+  loop: "{{ _snap_create_results.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  ignore_errors: true
+
+# ----------------------------------------------------------------------------
+# Record snapshot results
+# ----------------------------------------------------------------------------
+- name: Record snapshot results
+  ansible.builtin.set_fact:
+    _snap_results: >-
+      {{ _snap_results + [{
+        'vm':     item.0.item.name,
+        'vmid':   item.0.item.vmid,
+        'status': 'pass' if (
+          item.0 is not failed and
+          item.0.json is defined and
+          item.1 is not failed and
+          item.1.json is defined and
+          item.1.json.data.exitstatus | default('') == 'OK'
+        ) else 'fail'
+      }] }}
+  loop: "{{ _snap_create_results.results | zip(_snap_task_status.results) | list }}"
+  loop_control:
+    label: "{{ item.0.item.name }}"
+
+# ============================================================================
+# Report
+# ============================================================================
+- name: Display snapshot results
+  ansible.builtin.debug:
+    msg: |
+      ═══════════════════════════════════════════════════════════
+       Snapshot Results — {{ scenario.exercise.name }}
+       Snapshot: {{ snapshot_name }}
+      ═══════════════════════════════════════════════════════════
+      {% for r in _snap_results %}
+        [{{ 'PASS' if r.status == 'pass' else 'FAIL' }}]  {{ r.vm }} (vmid={{ r.vmid }})
+      {% endfor %}
+      ───────────────────────────────────────────────────────────
+        Total : {{ _snap_results | length }}
+        Passed: {{ _snap_results | selectattr('status', 'equalto', 'pass') | list | length }}
+        Failed: {{ _snap_results | selectattr('status', 'equalto', 'fail') | list | length }}
+      ═══════════════════════════════════════════════════════════
+
+- name: Fail if any snapshot failed (hard error — baseline integrity required)
+  ansible.builtin.fail:
+    msg: |
+      Snapshot creation FAILED for {{ _snap_results | selectattr('status', 'equalto', 'fail') | list | length }} VM(s):
+      {% for f in _snap_results | selectattr('status', 'equalto', 'fail') | list %}
+        - {{ f.vm }} (vmid={{ f.vmid }})
+      {% endfor %}
+      A complete deployment baseline requires all VM snapshots to succeed.
+  when: _snap_results | selectattr('status', 'equalto', 'fail') | list | length > 0

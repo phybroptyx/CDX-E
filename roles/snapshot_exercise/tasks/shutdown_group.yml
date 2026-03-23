@@ -1,0 +1,65 @@
+---
+# =============================================================================
+# Include: shutdown_group.yml
+# =============================================================================
+# Sends ACPI shutdown signal to all VMs in a group, then polls until each
+# reaches 'stopped' state. Called once per group in dependency order.
+#
+# Required caller vars:
+#   _shutdown_group — group name (for logging)
+#   _shutdown_vms   — list of VM objects from virtual_machines
+# =============================================================================
+
+- name: "Shutdown group '{{ _shutdown_group }}' ({{ _shutdown_vms | length }} VMs)"
+  ansible.builtin.debug:
+    msg: >-
+      Sending ACPI shutdown to {{ _shutdown_vms | length }} VM(s)
+      in group '{{ _shutdown_group }}'.
+
+- name: "ACPI shutdown: {{ item.name }} (vmid={{ item.vmid }})"
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.vmid }}/status/shutdown
+    method: POST
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    body_format: json
+    body:
+      timeout: "{{ snapshot_shutdown_timeout }}"
+      forceStop: 0
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  loop: "{{ _shutdown_vms }}"
+  loop_control:
+    label: "{{ item.name }} (vmid={{ item.vmid }})"
+  register: _group_shutdown_results
+  ignore_errors: true
+
+- name: "Poll stopped state: {{ item.item.name }} (vmid={{ item.item.vmid }})"
+  ansible.builtin.uri:
+    url: >-
+      {{ proxmox_api_url }}/nodes/{{ (item.item.proxmox | default({})).node
+         | default(scenario.proxmox.node) }}/qemu/{{ item.item.vmid }}/status/current
+    method: GET
+    headers:
+      Authorization: >-
+        PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}
+    validate_certs: "{{ proxmox_validate_certs }}"
+    status_code: [200]
+  register: _group_vm_state
+  until: _group_vm_state.json.data.status | default('') == 'stopped'
+  retries: "{{ snapshot_shutdown_poll_retries }}"
+  delay:   "{{ snapshot_shutdown_poll_interval }}"
+  when: item is not failed
+  loop: "{{ _group_shutdown_results.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  ignore_errors: true
+
+- name: "Group '{{ _shutdown_group }}' shutdown complete"
+  ansible.builtin.debug:
+    msg: >-
+      Group '{{ _shutdown_group }}' shutdown complete.
+      {{ _shutdown_vms | length }} VM(s) stopped.

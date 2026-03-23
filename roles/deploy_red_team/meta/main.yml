@@ -1,0 +1,7 @@
+﻿---
+galaxy_info:
+  author: CDX
+  description: "Deploys Red Team / APT virtual machines via Terraform"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

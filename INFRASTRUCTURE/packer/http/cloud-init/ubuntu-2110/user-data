@@ -1,0 +1,40 @@
+#cloud-config
+# =============================================================================
+# Ubuntu 21.10 - Autoinstall Configuration (Packer Build)
+# =============================================================================
+# Served by Packer's built-in HTTP server during template creation.
+# This produces a minimal base image; all customization happens post-clone.
+# =============================================================================
+
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+
+  identity:
+    hostname: ubuntu-template
+    username: cdxadmin
+    # hashed with openssl passwd -6
+    password: "$6$ngSRdtSN4kU7NNE9$Zi8UFgchdsXHb4Aqxl5LxCeHr1DK78.y/XiTFT6p4CR5HEfPehlULVmF8c6CdOFPNtAyzfM52O3l4lQ8ixZiz/"
+
+  ssh:
+    install-server: true
+    allow-pw: true
+
+  storage:
+    layout:
+      name: lvm
+
+  packages:
+    - qemu-guest-agent
+    - spice-vdagent
+    - cloud-init
+    - openssh-server
+    - curl
+    - wget
+
+  late-commands:
+    - "echo 'cdxadmin ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/cdxadmin"
+    - "chmod 440 /target/etc/sudoers.d/cdxadmin"
+    - "systemctl enable qemu-guest-agent --root=/target"

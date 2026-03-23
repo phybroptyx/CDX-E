@@ -1,0 +1,8 @@
+---
+# Primary defaults live in inventory/group_vars/all.yml.
+# Role-level defaults below ensure self-contained operation if group_vars
+# has not yet been synced to the Ansible controller.
+
+# WinRM HTTP 401 readiness poll timing (Stage 2 readiness ladder).
+winrm_http_ready_retries: 60   # 60 × 10s = 10 minutes max
+winrm_http_ready_delay:   10

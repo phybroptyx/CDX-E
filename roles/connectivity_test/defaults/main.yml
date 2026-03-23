@@ -1,0 +1,24 @@
+---
+# =============================================================================
+# Role: connectivity_test — Default Variables
+# =============================================================================
+
+# IP of the CDX-I Internet target used for external reachability tests.
+# Default: dns2.google.com (8.8.4.4) — deployed in CDX-I as a recursive resolver.
+connectivity_test_internet_target: "8.8.4.4"
+
+# Ping parameters used in guest-exec ping commands.
+connectivity_test_ping_count: 4
+connectivity_test_ping_timeout_s: 2
+
+# If true, the role fails the play when any test reports a failure.
+# Set to false for warn-only mode (results still logged).
+connectivity_test_fail_on_error: true
+
+# ansible_group values to skip entirely (no tests run for VMs in these groups).
+# SOC/APT nodes are skipped by default — addressed in a separate issue.
+connectivity_test_skip_groups:
+  - soc
+  - apt
+  - blue_team
+  - red_team

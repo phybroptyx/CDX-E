@@ -1,0 +1,79 @@
+{
+  "_meta": {
+    "description": "CDX-E Services Template — defines DNS zones, DHCP scopes, and ancillary services.",
+    "usage": "Copy to EXERCISES/<EXERCISE_NAME>/services.json and configure for the exercise.",
+    "consumed_by": "configure_active_directory role / ad_deploy.ps1",
+    "version": "1.0",
+    "notes": [
+      "Replace __AD_DOMAIN__ with the exercise FQDN (e.g., example.cdx.lab).",
+      "Add one reverse zone per IP subnet used in the exercise.",
+      "DHCP scopes are optional — only needed if services.dhcp: true in scenario.yml.",
+      "SRV and CNAME records support exercise-specific service resolution."
+    ]
+  },
+
+  "dns": {
+    "zones": [
+
+      {
+        "name": "__AD_DOMAIN__",
+        "replicationScope": "Forest",
+        "description": "Active Directory integrated forward lookup zone (auto-created by AD)"
+      },
+
+      {
+        "_comment": "Add one reverse zone per subnet. Example: 10.0.0.0/24 → 0.0.10.in-addr.arpa",
+        "name": "0.0.10.in-addr.arpa",
+        "replicationScope": "Forest",
+        "description": "Reverse zone — Headquarters LAN (10.0.0.0/24)"
+      },
+
+      {
+        "_comment": "Example secondary forward zone for a CDX-I-routable external namespace.",
+        "name": "cdxi.lab",
+        "replicationScope": "Domain",
+        "description": "CDX-I virtual Internet namespace"
+      }
+
+    ],
+
+    "records": [
+      {
+        "_comment": "Example A record — add static records for servers not using cloud-init DNS registration.",
+        "zone": "__AD_DOMAIN__",
+        "type": "A",
+        "name": "intranet",
+        "value": "10.0.0.20",
+        "ttl": 3600
+      },
+      {
+        "_comment": "Example CNAME alias",
+        "zone": "__AD_DOMAIN__",
+        "type": "CNAME",
+        "name": "www",
+        "value": "intranet.__AD_DOMAIN__.",
+        "ttl": 3600
+      }
+    ]
+  },
+
+  "dhcp": {
+    "_comment": "Only consumed when services.dhcp: true in scenario.yml. Remove this section otherwise.",
+    "scopes": [
+      {
+        "name": "HQ LAN",
+        "subnet": "10.0.0.0",
+        "mask": "255.255.255.0",
+        "start": "10.0.0.100",
+        "end": "10.0.0.199",
+        "gateway": "10.0.0.1",
+        "dns": ["10.0.0.10", "10.0.0.11"],
+        "leaseDurationDays": 8,
+        "exclusions": [
+          { "start": "10.0.0.1",  "end": "10.0.0.19"  },
+          { "start": "10.0.0.200", "end": "10.0.0.254" }
+        ]
+      }
+    ]
+  }
+}

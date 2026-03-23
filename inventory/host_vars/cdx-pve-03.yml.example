@@ -1,0 +1,42 @@
+---
+# =============================================================================
+# cdx-pve-03 — Proxmox VE Host Network Configuration (EXAMPLE / TEMPLATE)
+# =============================================================================
+# Copy to cdx-pve-03.yml and fill in the actual addresses for your node.
+# Encrypt with: ansible-vault encrypt inventory/host_vars/cdx-pve-03.yml
+#
+# base_network is consumed by configure_networking and revert_networking to
+# render /etc/network/interfaces on this Proxmox host.
+# Exercise-specific OVS bridges are defined separately in vms.yaml →
+# network_topology and are NOT stored here.
+# =============================================================================
+
+base_network:
+  physical_interfaces:
+    - name: "<PHYSICAL_IFACE_1>"
+    - name: "<PHYSICAL_IFACE_2>"
+    - name: "<PHYSICAL_IFACE_3>"
+
+  soc_trunk:
+    interface: "<SOC_TRUNK_IFACE>"
+    bridge: "vmbr303"
+    trunks: "2-4094"
+
+  management:
+    bridge: "vmbr0"
+    port: "<MGMT_IFACE>"
+    vlan: <MGMT_VLAN>
+    address: "<MGMT_IP>/<PREFIX>"
+    gateway: "<MGMT_GW>"
+
+  cluster:
+    bridge: "vmbr1"
+    port: "<CLUSTER_IFACE>"
+    address: "<CLUSTER_IP>/<PREFIX>"
+    vlan: <CLUSTER_VLAN>
+
+  storage:
+    bridge: "vmbr2"
+    port: "<STORAGE_IFACE_OR_none>"
+    address: "<STORAGE_IP>/<PREFIX>"
+    vlan: <STORAGE_VLAN>

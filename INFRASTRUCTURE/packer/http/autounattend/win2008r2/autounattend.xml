@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Windows Server 2008 R2 - Unattended Install (Packer Build)
+
+  VirtIO SCSI driver loaded during WindowsPE for disk detection.
+  Uses VirtIO driver paths for 2k8R2 (virtio-win-0.1.160).
+  Legacy OS: PowerShell 2.0 — no -SkipNetworkProfileCheck.
+
+  Bootstrap strategy:
+    specialize pass (SYSTEM context, before user logon):
+      1. EnableLUA=0 — disables UAC for elevated FirstLogonCommands
+      2. .NET 4.0 — WMF 3.0 prerequisite; no reboot required
+      3. WMF 3.0 (KB2506143) — PowerShell 3.0; installed with /norestart
+      4. shutdown /r /t 0 — managed reboot (WillReboot=OnRequest);
+         Windows Setup resumes at oobeSystem after restart.
+
+    FirstLogonCommands (elevated, WMF 3.0 already installed):
+      cert pre-trust → QEMU drivers → SPICE pass1 → QEMU GA →
+      SPICE pass2 → ICMP/RDP/cdxadmin → static IP → WinRM → sentinel
+      Packer connects. No sysprep — template is not generalized.
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend"
+          xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+
+  <!-- WindowsPE: Load VirtIO drivers, partition disk -->
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS">
+      <SetupUILanguage>
+        <UILanguage>en-US</UILanguage>
+      </SetupUILanguage>
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Setup"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS">
+      <DiskConfiguration>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add">
+              <Order>1</Order>
+              <Size>350</Size>
+              <Type>Primary</Type>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>2</Order>
+              <Extend>true</Extend>
+              <Type>Primary</Type>
+            </CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add">
+              <Order>1</Order>
+              <PartitionID>1</PartitionID>
+              <Label>System</Label>
+              <Format>NTFS</Format>
+              <Active>true</Active>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>2</Order>
+              <PartitionID>2</PartitionID>
+              <Label>Windows</Label>
+              <Letter>C</Letter>
+              <Format>NTFS</Format>
+            </ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+      <ImageInstall>
+        <OSImage>
+          <InstallFrom>
+            <MetaData wcm:action="add">
+              <Key>/IMAGE/INDEX</Key>
+              <Value>5</Value>
+            </MetaData>
+          </InstallFrom>
+          <InstallTo>
+            <DiskID>0</DiskID>
+            <PartitionID>2</PartitionID>
+          </InstallTo>
+        </OSImage>
+      </ImageInstall>
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+      </UserData>
+    </component>
+  </settings>
+
+  <!-- Specialize: disable UAC, install .NET 4.0 + WMF 3.0, reboot.
+       Runs as SYSTEM before any user logon.
+       UAC (EnableLUA=0): cdxadmin is non-built-in admin — without this it
+       gets a filtered token at autologon and all system-level installs fail.
+       .NET 4.0: required by QEMU Guest Agent and WMF 3.0.
+       WMF 3.0 (KB2506143): installs PowerShell 3.0 with /norestart.
+       shutdown /r: WillReboot=OnRequest triggers a Windows Setup managed
+       reboot; Setup resumes at oobeSystem after restart. -->
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Deployment"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS">
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows\NT\CurrentVersion\Winlogon" /v EnableLUA /t REG_DWORD /d 0 /f</Path>
+          <Description>Disable UAC for elevated FirstLogonCommands</Description>
+          <WillReboot>Never</WillReboot>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>D:\dotNetFx40_Full_x86_x64.exe /q /norestart</Path>
+          <Description>Install .NET Framework 4.0 (WMF 3.0 and QEMU GA prerequisite)</Description>
+          <WillReboot>Never</WillReboot>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Path>wusa.exe D:\Windows6.1-KB2506143-x64.msu /quiet /norestart</Path>
+          <Description>Install WMF 3.0 / PowerShell 3.0 (KB2506143)</Description>
+          <WillReboot>Never</WillReboot>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Path>shutdown /r /t 0</Path>
+          <Description>Managed reboot to apply WMF 3.0 — Setup resumes at oobeSystem</Description>
+          <WillReboot>OnRequest</WillReboot>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+    </component>
+  </settings>
+
+  <!-- OOBE: Skip prompts, create admin account, run bootstrap -->
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS">
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <NetworkLocation>Work</NetworkLocation>
+      </OOBE>
+      <UserAccounts>
+        <AdministratorPassword>
+          <Value>IyTt+,uDhtR@.303</Value>
+          <PlainText>true</PlainText>
+        </AdministratorPassword>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>cdxadmin</Name>
+            <Group>Administrators</Group>
+            <Password>
+              <Value>IyTt+,uDhtR@.303</Value>
+              <PlainText>true</PlainText>
+            </Password>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <!-- LogonCount=2: bootstrap logon + Packer provisioner session -->
+        <LogonCount>2</LogonCount>
+        <Username>cdxadmin</Username>
+        <Password>
+          <Value>IyTt+,uDhtR@.303</Value>
+          <PlainText>true</PlainText>
+        </Password>
+      </AutoLogon>
+      <FirstLogonCommands>
+        <!-- Single-phase bootstrap: runs elevated (UAC disabled in specialize).
+             Installs all components and configures WinRM in one pass.
+             Packer connects when this script exits. -->
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <CommandLine>cmd /c D:\winrm-bootstrap.cmd</CommandLine>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+    </component>
+  </settings>
+</unattend>

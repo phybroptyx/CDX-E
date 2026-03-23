@@ -1,0 +1,56 @@
+---
+# =============================================================================
+# CDX-E SOC Layout Template
+# =============================================================================
+# Copy SOC_LAYOUTS/TEMPLATE/ to SOC_LAYOUTS/<LAYOUT_NAME>/ to create a new
+# Blue Team / SOC infrastructure layout.
+#
+# This file is loaded by read_soc_layout and exposed as the 'soc_layout' fact.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Layout Identity
+# -----------------------------------------------------------------------------
+soc_layout:
+  name: "SOC_TEMPLATE"               # REQUIRED — matches directory name
+  description: >-                    # REQUIRED — brief description of this SOC layout
+    Template SOC layout. Replace with a description of the SOC infrastructure
+    design, including tools, visibility scope, and intended training objectives.
+
+# -----------------------------------------------------------------------------
+# Malcolm Network Analysis Platform (OPTIONAL)
+# -----------------------------------------------------------------------------
+# Malcolm is CISA's open-source network traffic analysis toolset
+# (Arkime, Zeek, Suricata). Paired with Hedgehog Linux sensors.
+# malcolm:
+#   vm: "SOC-MALCOLM-01"             # VM hostname from vms.yaml
+#   web_port: 443                    # Web UI access port
+#   capture_interface: eth1          # Interface Malcolm listens on for direct capture
+#   sensor_network: "10.0.1.0/24"   # Network that Hedgehog sensors are on
+
+# Hedgehog Linux sensors forward captured traffic to Malcolm.
+# sensors:
+#   - vm: "SOC-HH-01"               # VM hostname from vms.yaml
+#     capture_interface: eth1        # Interface to capture traffic on
+#     malcolm_server: "SOC-MALCOLM-01"  # Malcolm server hostname
+
+# -----------------------------------------------------------------------------
+# Perimeter Firewall (OPTIONAL)
+# -----------------------------------------------------------------------------
+# OPNsense firewall providing network segmentation and traffic visibility.
+# firewall:
+#   vm: "SOC-FW-01"                  # VM hostname from vms.yaml
+#   management_ip: "10.0.1.1"       # OPNsense management interface IP
+#   mirror_interface: em2            # Interface to mirror traffic to sensors
+#   soc_network: "10.0.1.0/24"      # SOC management network CIDR
+
+# -----------------------------------------------------------------------------
+# Analyst Workstations (OPTIONAL)
+# -----------------------------------------------------------------------------
+# Kali Purple or similar analyst desktops pre-configured for SOC work.
+# analysts:
+#   - vm: "SOC-WKS-01"              # VM hostname from vms.yaml
+#     malcolm_url: "https://10.0.1.10"
+#     tools:                        # Additional tools to install
+#       - wireshark
+#       - burpsuite

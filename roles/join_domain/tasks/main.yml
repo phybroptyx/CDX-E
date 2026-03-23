@@ -1,0 +1,144 @@
+---
+# =============================================================================
+# Role: join_domain
+# =============================================================================
+# Joins a Windows VM to the exercise Active Directory domain.
+# Safe to call from post_tasks in server_configuration.yml and
+# workstation_configuration.yml after configure_vm has set the hostname
+# (renaming a domain-joined computer requires domain admin credentials —
+# setting the hostname first while still in workgroup avoids Access Denied).
+#
+# Idempotent: checks PartOfDomain via WMI before attempting the join.
+# If the machine is already joined to the correct domain the role exits cleanly.
+#
+# Gate variable:
+#   domain_join (default: true) — set false in host_vars or vms.yaml for
+#   standalone systems (external DNS resolvers, DMZ hosts, etc.).
+#
+# Required scenario variables (from read_exercise_config):
+#   scenario.domain.name          — FQDN of the exercise domain
+#   scenario.domain.admin_password — domain Administrator password
+#
+# Called from:
+#   playbooks/server_configuration.yml      → post_tasks (include_role)
+#   playbooks/workstation_configuration.yml → post_tasks (include_role)
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Section 1 — Gate: skip non-Windows, standalone, or unconfigured hosts
+# ----------------------------------------------------------------------------
+- name: Skip — non-Windows host
+  ansible.builtin.debug:
+    msg: "join_domain: {{ inventory_hostname }} is not a Windows host (os_type={{ ansible_os_type }}) — skipping."
+  when: ansible_os_type != 'windows'
+
+- name: End host — non-Windows
+  ansible.builtin.meta: end_host
+  when: ansible_os_type != 'windows'
+
+- name: Skip — domain_join disabled for this host
+  ansible.builtin.debug:
+    msg: "join_domain: domain_join=false for {{ inventory_hostname }} — standalone system, skipping."
+  when: not (domain_join | default(true) | bool)
+
+- name: End host — domain_join disabled
+  ansible.builtin.meta: end_host
+  when: not (domain_join | default(true) | bool)
+
+- name: Skip — no domain defined in scenario
+  ansible.builtin.debug:
+    msg: "join_domain: scenario.domain is not defined — skipping domain join for {{ inventory_hostname }}."
+  when: >-
+    scenario.domain is not defined or
+    scenario.domain.name is not defined
+
+- name: End host — no domain defined
+  ansible.builtin.meta: end_host
+  when: >-
+    scenario.domain is not defined or
+    scenario.domain.name is not defined
+
+# ----------------------------------------------------------------------------
+# Section 2 — Idempotency check: is this host already domain-joined?
+# ----------------------------------------------------------------------------
+- name: Check current domain membership
+  ansible.windows.win_shell: |
+    $cs = Get-WmiObject Win32_ComputerSystem
+    if ($cs.PartOfDomain) {
+        Write-Output "domain:$($cs.Domain)"
+    } else {
+        Write-Output "workgroup"
+    }
+  register: _domain_check
+  changed_when: false
+  no_log: false
+
+- name: Set domain membership facts
+  ansible.builtin.set_fact:
+    _already_joined: >-
+      {{
+        (_domain_check.stdout | trim).startswith('domain:') and
+        scenario.domain.name | lower in (_domain_check.stdout | trim | lower)
+      }}
+
+- name: Report — already domain-joined
+  ansible.builtin.debug:
+    msg: >-
+      join_domain: {{ inventory_hostname }} is already a member of
+      {{ scenario.domain.name }} — no action required.
+  when: _already_joined | bool
+
+- name: End host — already joined to correct domain
+  ansible.builtin.meta: end_host
+  when: _already_joined | bool
+
+# ----------------------------------------------------------------------------
+# Section 3 — Join domain
+# ----------------------------------------------------------------------------
+# Uses Add-Computer rather than win_domain_membership so that -OUPath can be
+# passed when the host has an 'ou' variable defined in vms.yaml. The pre-staged
+# computer account in the target OU is matched by name; Windows places the
+# machine object there automatically. When 'ou' is absent the join proceeds
+# without specifying a path (default Computers container).
+- name: Join domain — {{ scenario.domain.name }}
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $secPassword = ConvertTo-SecureString '{{ scenario.domain.admin_password }}' -AsPlainText -Force
+    $cred = New-Object System.Management.Automation.PSCredential(
+        'Administrator@{{ scenario.domain.name }}',
+        $secPassword
+    )
+    $joinParams = @{
+        DomainName = '{{ scenario.domain.name }}'
+        Credential = $cred
+        Force      = $true
+    }
+    $ouPath = '{{ ou | default("") }}'
+    if ($ouPath -ne '') {
+        $joinParams['OUPath'] = $ouPath + ',DC={{ scenario.domain.name | replace(".", ",DC=") }}'
+    }
+    Add-Computer @joinParams
+    Write-Output "CHANGED: Joined domain {{ scenario.domain.name }}"
+  register: _domain_join_result
+  no_log: true
+  changed_when: "'CHANGED:' in (_domain_join_result.stdout | default(''))"
+
+# ----------------------------------------------------------------------------
+# Section 4 — Reboot if required
+# ----------------------------------------------------------------------------
+- name: Reboot after domain join
+  ansible.windows.win_reboot:
+    reboot_timeout: 300
+    post_reboot_delay: 30
+    msg: "Rebooting after domain join (CDX-E join_domain role)"
+  when: _domain_join_result.changed | default(false) | bool
+
+# ----------------------------------------------------------------------------
+# Section 5 — Summary
+# ----------------------------------------------------------------------------
+- name: join_domain summary
+  ansible.builtin.debug:
+    msg: >-
+      join_domain complete for {{ inventory_hostname }}.
+      Domain: {{ scenario.domain.name }}.
+      Reboot was {{ 'required and performed' if (_domain_join_result.changed | default(false) | bool) else 'not required' }}.

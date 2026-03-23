@@ -1,0 +1,7 @@
+﻿---
+galaxy_info:
+  author: CDX
+  description: "Promotes DC, configures AD domain, Sites and Services, and populates AD"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

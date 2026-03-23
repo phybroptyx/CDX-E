@@ -1,0 +1,7 @@
+﻿---
+galaxy_info:
+  author: CDX
+  description: "Applies SDN and firewall/routing configuration for a scenario"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

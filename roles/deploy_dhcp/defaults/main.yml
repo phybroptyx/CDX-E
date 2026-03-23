@@ -1,0 +1,27 @@
+---
+# =============================================================================
+# Role: deploy_dhcp — Default Variables
+# =============================================================================
+
+# DHCP scopes to configure on this host.
+# Loaded from scenario.services.dhcp.scopes in the exercise scenario.yml.
+# Each scope entry must define:
+#   name               — Scope display name (shown in DHCP console)
+#   subnet_address     — Network address   (e.g. '68.27.129.0')
+#   subnet_mask        — Subnet mask       (e.g. '255.255.255.0')
+#   start_range        — First IP in the dynamic pool
+#   end_range          — Last IP in the dynamic pool
+#   router             — Default gateway pushed to clients (DHCP option 3)
+#   dns_servers        — List of DNS server IPs pushed to clients (DHCP option 6)
+#   domain_name        — DNS domain name pushed to clients (DHCP option 15)
+#   lease_duration_hours — Lease duration in hours (optional; falls back to dhcp_default_lease_hours)
+dhcp_scopes: "{{ scenario.services.dhcp.scopes | default([]) }}"
+
+# Authorize this DHCP server in Active Directory.
+# Must be true for the DHCP service to hand out leases on a domain network.
+# Requires the executing account to be a member of Domain Admins or
+# DHCP Administrators in the domain.
+dhcp_authorize_in_ad: true
+
+# Default lease duration (hours) applied to any scope that omits lease_duration_hours.
+dhcp_default_lease_hours: 8

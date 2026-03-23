@@ -1,0 +1,121 @@
+---
+# =============================================================================
+# CDX-E Playbook: Post-Deployment Validation and Snapshot
+# =============================================================================
+# Purpose: Validate full exercise connectivity after deployment, then take a
+#          clean baseline snapshot of every exercise VM in powered-down state.
+#
+# Execution order:
+#   1. Load exercise configuration (read_exercise_config)
+#   2. Ensure relay SOCKS5 tunnel is open
+#   3. Check/skip if phase_post_deployment already completed
+#   4. Run comprehensive connectivity tests (connectivity_test role)
+#      — All VMs tested via Proxmox guest-exec API (no WinRM/SSH dependency)
+#      — Play fails immediately if any test fails (gate for snapshot)
+#   5. Shut down all exercise VMs in dependency order
+#   6. Create Proxmox snapshot for each VM
+#   7. Record phase_post_deployment checkpoint
+#
+# Usage:
+#   ansible-playbook playbooks/post_deployment.yml \
+#     -e "exercise=DC_303" \
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
+#
+# Override examples:
+#   -e "snapshot_name=pre_exercise_day1"
+#   -e "connectivity_test_fail_on_error=false"   # warn-only, proceed to snapshot
+#   -e "snapshot_include_ram=true"
+#   -e "snapshot_skip_groups=['routers']"
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Pre-play: ensure SOCKS5 relay tunnel is open
+# ----------------------------------------------------------------------------
+- name: Ensure Relay SOCKS5 Tunnel
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Ensure SOCKS5 relay tunnel is open
+      ansible.builtin.include_role:
+        name: relay_tunnel
+      vars:
+        relay_tunnel_action: open
+
+# ----------------------------------------------------------------------------
+# Pre-play: check pipeline checkpoint
+# ----------------------------------------------------------------------------
+- name: Check Post-Deployment Checkpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check pipeline checkpoint for phase_post_deployment
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: check
+        pipeline_checkpoint_phase: phase_post_deployment
+
+# ----------------------------------------------------------------------------
+# Main play: connectivity test + snapshot
+# ----------------------------------------------------------------------------
+- name: Post-Deployment Validation and Snapshot
+  hosts: localhost
+  gather_facts: false
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — post_deployment phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.post_deployment | default(false) | bool)
+
+    - name: "[preflight] Skip — phase_post_deployment already completed"
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']._phase_skip | default(false) | bool
+
+    - name: "[preflight] Skip — destroy workflow"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
+  roles:
+    # Phase 1: Connectivity tests (fails play if any test fails,
+    #          blocking snapshot from running on a broken deployment)
+    - role: connectivity_test
+
+    # Phase 2: Shutdown all VMs + create baseline snapshot
+    - role: snapshot_exercise
+
+# ----------------------------------------------------------------------------
+# Post-play: record phase_post_deployment completion
+# ----------------------------------------------------------------------------
+- name: Record Post-Deployment Checkpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Record phase_post_deployment as complete
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: record_complete
+        pipeline_checkpoint_phase: phase_post_deployment
+      when:
+        - not (hostvars['localhost']._phase_skip | default(false) | bool)
+        - (action | default('deploy')) != 'destroy'

@@ -1,0 +1,92 @@
+---
+# =============================================================================
+# Role: windows_activation
+# =============================================================================
+# Activates Windows via KMS using the CDX-I vlmcsd container.
+# KMS server: activation.windows.com (52.164.206.106, port 1688).
+#
+# Idempotent — checks LicenseStatus via WMI before attempting activation.
+# Uses cscript //nologo to invoke slmgr.vbs for console-readable output.
+#
+# Prerequisites:
+#   - Host has network connectivity to the KMS server.
+#   - DNS resolves activation.windows.com to the CDX-I vlmcsd container.
+#   - Windows has a KMS client setup key installed (standard on volume/eval ISOs).
+#
+# Defaults (overridable):
+#   kms_server: activation.windows.com
+#   kms_port:   1688
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Section 1 — Check current activation status
+# ----------------------------------------------------------------------------
+- name: Check Windows activation status via WMI
+  ansible.windows.win_shell: |
+    $product = Get-WmiObject SoftwareLicensingProduct `
+        -Filter "PartialProductKey IS NOT NULL" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "Windows*" } |
+        Select-Object -First 1
+    if ($product -and $product.LicenseStatus -eq 1) {
+        Write-Output "ACTIVATED"
+    } else {
+        $status = if ($product) { $product.LicenseStatus } else { "unknown" }
+        Write-Output "NOT_ACTIVATED:$status"
+    }
+  register: _activation_status
+  changed_when: false
+
+- name: Display current activation status
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} — activation status: {{ _activation_status.stdout | trim }}"
+
+# ----------------------------------------------------------------------------
+# Section 2 — Set KMS server and activate
+# ----------------------------------------------------------------------------
+- name: Set KMS server and activate Windows
+  ansible.windows.win_shell: |
+    $ErrorActionPreference = 'Stop'
+    $slmgr = 'C:\Windows\System32\slmgr.vbs'
+
+    # Set KMS server
+    $setResult = & cscript //nologo $slmgr /skms "{{ kms_server }}:{{ kms_port }}" 2>&1
+    Write-Output "KMS server: $setResult"
+
+    # Attempt activation
+    $atoResult = & cscript //nologo $slmgr /ato 2>&1
+    Write-Output "Activation: $atoResult"
+
+    Write-Output "CHANGED: KMS activation attempted against {{ kms_server }}:{{ kms_port }}"
+  register: _activation_result
+  changed_when: true
+  when: (_activation_status.stdout | trim) != 'ACTIVATED'
+
+- name: Display activation result
+  ansible.builtin.debug:
+    msg: "{{ _activation_result.stdout_lines }}"
+  when: _activation_result is not skipped
+
+# ----------------------------------------------------------------------------
+# Section 3 — Verify
+# ----------------------------------------------------------------------------
+- name: Verify activation status post-attempt
+  ansible.windows.win_shell: |
+    $product = Get-WmiObject SoftwareLicensingProduct `
+        -Filter "PartialProductKey IS NOT NULL" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "Windows*" } |
+        Select-Object -First 1
+    if ($product -and $product.LicenseStatus -eq 1) {
+        Write-Output "ACTIVATED"
+    } else {
+        $status = if ($product) { $product.LicenseStatus } else { "unknown" }
+        Write-Output "NOT_ACTIVATED:$status"
+    }
+  register: _activation_verify
+  changed_when: false
+  when: _activation_result is not skipped
+
+- name: windows_activation summary
+  ansible.builtin.debug:
+    msg: >-
+      windows_activation complete for {{ inventory_hostname }} —
+      {{ _activation_verify.stdout | default(_activation_status.stdout) | trim }}

@@ -1,0 +1,8 @@
+---
+# networking_scope controls which parts of configure_networking run:
+#   all     — Part 1 (Proxmox SDN bridges) + Part 2 (VyOS config)  [default]
+#   bridges — Part 1 only; safe to run before VMs are powered on
+#   vyos    — Part 2 only; assumes bridges already exist and VyOS is running
+networking_scope: "all"
+
+# All other defaults live in inventory/group_vars/all.yml.

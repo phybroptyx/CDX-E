@@ -1,0 +1,171 @@
+---
+# =============================================================================
+# CDX-E Playbook: Domain Management
+# =============================================================================
+# Purpose: Configure the first domain controller, deploy the Active Directory
+#          domain (DC promotion, Sites and Services, AD population), and
+#          promote additional domain controllers as required by the scenario.
+#          serial: 1 ensures DCs are promoted one at a time to prevent
+#          replication conflicts.
+#
+# Roles:
+#   - configure_vm           — hostname, timezone, WinRM, PS policy
+#   - install_windowsfeature — AD-Domain-Services, DNS, GPMC, RSAT-AD-*
+#   - configure_active_directory — promotion + AD structure population
+#   - deploy_group_policy_objects
+#
+# Usage:
+#   ansible-playbook playbooks/domain_management.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration on the Ansible controller
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Pre-play: ensure SOCKS5 relay tunnel is open before WinRM connections
+# ----------------------------------------------------------------------------
+# The tunnel is opened at Phase 0 (exercise_initiation) but can die between
+# then and Phase 4. Re-opening is idempotent — already-running tunnels are
+# detected and left in place.
+- name: Ensure Relay SOCKS5 Tunnel
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Ensure SOCKS5 relay tunnel is open
+      ansible.builtin.include_role:
+        name: relay_tunnel
+      vars:
+        relay_tunnel_action: open
+
+# ----------------------------------------------------------------------------
+# Pre-play: check pipeline checkpoint — skip if phase4 already completed
+# ----------------------------------------------------------------------------
+- name: Check Phase 4 Checkpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Check pipeline checkpoint for phase4
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: check
+        pipeline_checkpoint_phase: phase4
+
+# ----------------------------------------------------------------------------
+# Main play: domain controller configuration
+# ----------------------------------------------------------------------------
+- name: Domain Management
+  hosts: domain_controllers
+  gather_facts: false
+  tags: [domain, active_directory]
+  serial: 1  # One DC at a time — prevents replication conflicts during promotion
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  pre_tasks:
+    # Import exercise facts from controller (read_exercise_config ran on localhost)
+    - name: Import exercise facts from controller
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — phase4 already completed (checkpoint)"
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']._phase_skip | default(false) | bool
+
+    - name: "[preflight] Skip — destroy workflow, no configuration to run"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
+    - name: "[preflight] Skip — domain phase disabled in scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.domain | default(true) | bool)
+
+    - name: "[preflight] Assert domain_controllers group is populated"
+      ansible.builtin.assert:
+        that: groups['domain_controllers'] | default([]) | length > 0
+        fail_msg: >-
+          domain_controllers group is empty. Check inventory_refresh output
+          and ensure vms.yaml has VMs with ansible_group: domain_controllers.
+
+    - name: "[preflight] Assert domain configuration is defined"
+      ansible.builtin.assert:
+        that:
+          - scenario.domain.name is defined
+          - scenario.domain.netbios is defined
+          - scenario.domain.admin_password is defined
+        fail_msg: >-
+          scenario.domain.{name,netbios,admin_password} must all be defined
+          in scenario.yml for domain_management.yml to run.
+
+  roles:
+    - configure_vm
+    - install_windowsfeature
+    - configure_active_directory
+    - deploy_group_policy_objects
+    - windows_activation
+
+# ----------------------------------------------------------------------------
+# Post-play: pre-stage computer accounts in target OUs
+# ----------------------------------------------------------------------------
+# Runs on the primary DC after AD structure (OUs, users, groups, GPOs) is
+# fully deployed. Creates computer accounts in the correct OUs so that member
+# servers and workstations land in the right place when they join the domain.
+# Idempotent — existing accounts are skipped.
+- name: Pre-stage Computer Accounts
+  hosts: domain_controllers[0]
+  gather_facts: false
+  tags: [domain, active_directory]
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from controller
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip — phase4 already completed (checkpoint)"
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']._phase_skip | default(false) | bool
+
+    - name: "[preflight] Skip — destroy workflow"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
+  roles:
+    - prestage_computers
+
+# ----------------------------------------------------------------------------
+# Post-play: record phase4 completion in pipeline checkpoint
+# ----------------------------------------------------------------------------
+# Runs on localhost after all DC configuration succeeds. serial: 1 means the
+# main play runs multiple times (once per DC); this play runs once after all
+# serial batches complete. Only records if the phase was not already skipped.
+- name: Record Phase 4 Checkpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Record phase4 as complete
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: record_complete
+        pipeline_checkpoint_phase: phase4
+      when:
+        - not (_phase_skip | default(false) | bool)
+        - (action | default('deploy')) != 'destroy'

@@ -1,0 +1,173 @@
+---
+# =============================================================================
+# Role: configure_proxmox_nodes
+# =============================================================================
+# One-time cluster bootstrap: installs OVS/networking prerequisites on all
+# Proxmox cluster nodes and deploys the base /etc/network/interfaces from
+# each node's vault-encrypted host_vars.base_network. Idempotent — safe to
+# re-run at any time, including after adding a new node to the cluster.
+#
+# This role is exercise-agnostic. It does NOT require read_exercise_config.
+# Run it once during initial cluster setup or when onboarding a new node.
+#
+# All node operations are delegated from localhost via SSH.
+# Proxmox nodes must be in inventory/hosts.yml → proxmox_cluster.
+# host_vars/<node>.yml must be populated (copy from .yml.example) and
+# vault-encrypted before running this role.
+#
+# Steps:
+#   1. Preflight — assert hostvars and base_network completeness
+#   2. Display bootstrap plan
+#   3. Install prerequisite packages (openvswitch-switch, ifupdown2)
+#   4. Deploy base /etc/network/interfaces (no exercise bridges)
+#   5. Pre-create CDX-I OVS bridge (vmbr303) + SOC trunk port
+#   6. Reload networking on nodes where the interfaces file changed
+#   7. Verify Proxmox API is reachable
+#   8. Summary
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Step 1 — Preflight
+# ----------------------------------------------------------------------------
+- name: "[preflight] Assert proxmox_hosts is defined"
+  ansible.builtin.assert:
+    that:
+      - proxmox_hosts is defined
+      - proxmox_hosts | length > 0
+    fail_msg: >-
+      proxmox_hosts must be defined in inventory/group_vars/all.yml.
+      Expected format: proxmox_hosts: [cdx-pve-01, cdx-pve-02, cdx-pve-03]
+
+- name: "[preflight] Assert base_network is complete for each node"
+  ansible.builtin.assert:
+    that:
+      - hostvars[item].base_network is defined
+      - hostvars[item].base_network.management is defined
+      - hostvars[item].base_network.cluster is defined
+      - hostvars[item].base_network.storage is defined
+      - hostvars[item].base_network.soc_trunk is defined
+      - hostvars[item].base_network.physical_interfaces is defined
+    fail_msg: >-
+      base_network is missing or incomplete for node '{{ item }}'.
+      Copy inventory/host_vars/{{ item }}.yml.example to
+      inventory/host_vars/{{ item }}.yml, fill in the real addresses,
+      and encrypt with: ansible-vault encrypt inventory/host_vars/{{ item }}.yml
+  loop: "{{ proxmox_hosts }}"
+
+# ----------------------------------------------------------------------------
+# Step 2 — Display bootstrap plan
+# ----------------------------------------------------------------------------
+- name: Display cluster bootstrap plan
+  ansible.builtin.debug:
+    msg: |
+      Configure Proxmox Nodes — Cluster Bootstrap
+      Nodes     : {{ proxmox_hosts | join(', ') }} ({{ proxmox_hosts | length }} total)
+      Packages  : {{ proxmox_node_packages | join(', ') }}
+      Template  : configure_networking/templates/interfaces.j2 (base only)
+      OVS bridge: vmbr303 (CDX-I) + SOC trunk port per node
+
+# ----------------------------------------------------------------------------
+# Step 3 — Install prerequisite packages
+# OVS provides the switch fabric for exercise VLANs.
+# ifupdown2 provides ifreload -a (atomic, non-disruptive interface reload).
+# ----------------------------------------------------------------------------
+- name: "Install OVS and networking prerequisites on {{ item }}"
+  ansible.builtin.apt:
+    name: "{{ proxmox_node_packages }}"
+    state: present
+    update_cache: false
+  delegate_to: "{{ item }}"
+  loop: "{{ proxmox_hosts }}"
+  loop_control:
+    label: "{{ item }}"
+
+# ----------------------------------------------------------------------------
+# Step 4 — Deploy base /etc/network/interfaces (exercise-agnostic)
+# Uses the shared configure_networking template with empty site/bridge lists.
+# This establishes the clean-slate network state that configure_networking
+# builds on top of when an exercise is deployed.
+# ----------------------------------------------------------------------------
+- name: "Deploy base /etc/network/interfaces on {{ item }}"
+  ansible.builtin.template:
+    src: "{{ role_path | dirname }}/configure_networking/templates/interfaces.j2"
+    dest: /etc/network/interfaces
+    owner: root
+    group: root
+    mode: '0644'
+    backup: true
+  delegate_to: "{{ item }}"
+  vars:
+    node_name: "{{ item }}"
+    node_sites: []
+    node_common_bridges: []
+    base_network: "{{ hostvars[item].base_network }}"
+    exercise_name: ""
+  loop: "{{ proxmox_hosts }}"
+  loop_control:
+    label: "{{ item }}"
+  register: _interfaces_results
+
+# ----------------------------------------------------------------------------
+# Step 5 — Pre-create CDX-I OVS bridge and SOC trunk port (idempotent)
+# vmbr303 must exist before ifreload -a runs: OVS needs to know about the
+# bridge before ifupdown2 tries to reconcile the interfaces file.
+# --may-exist makes both commands safe to re-run.
+# ----------------------------------------------------------------------------
+- name: "Pre-create vmbr303 and SOC trunk on {{ item }}"
+  ansible.builtin.shell:
+    cmd: |
+      ovs-vsctl --may-exist add-br vmbr303
+      ovs-vsctl --may-exist add-port vmbr303 {{ hostvars[item].base_network.soc_trunk.interface }}
+  delegate_to: "{{ item }}"
+  changed_when: false
+  loop: "{{ proxmox_hosts }}"
+  loop_control:
+    label: "{{ item }}"
+
+# ----------------------------------------------------------------------------
+# Step 6 — Reload networking on nodes where interfaces file changed
+# ifreload -a applies the new config non-disruptively — it only modifies
+# interfaces that have actually changed, preserving active connections.
+# ----------------------------------------------------------------------------
+- name: "Reload networking on {{ item.item }}"
+  ansible.builtin.command: ifreload -a
+  delegate_to: "{{ item.item }}"
+  loop: "{{ _interfaces_results.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.changed | default(false)
+
+# ----------------------------------------------------------------------------
+# Step 7 — Verify Proxmox API is reachable after network changes
+# ----------------------------------------------------------------------------
+- name: "Verify Proxmox API reachable"
+  ansible.builtin.uri:
+    url: "{{ proxmox_api_url }}/version"
+    method: GET
+    headers:
+      Authorization: "PVEAPIToken={{ proxmox_api_user }}!{{ proxmox_api_token_id }}={{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+  register: _api_check
+
+- name: "Assert Proxmox API version check passed"
+  ansible.builtin.assert:
+    that:
+      - _api_check.status == 200
+      - _api_check.json.data is defined
+    fail_msg: >-
+      Proxmox API is unreachable after node configuration.
+      URL    : {{ proxmox_api_url }}/version
+      Status : {{ _api_check.status | default('no response') }}
+      Check that management networking is up and API credentials are correct.
+
+# ----------------------------------------------------------------------------
+# Step 8 — Summary
+# ----------------------------------------------------------------------------
+- name: configure_proxmox_nodes complete
+  ansible.builtin.debug:
+    msg: |
+      configure_proxmox_nodes complete.
+      Nodes configured  : {{ proxmox_hosts | length }}
+      Interfaces updated: {{ _interfaces_results.results | selectattr('changed') | list | length }} node(s)
+      Proxmox API       : PVE {{ _api_check.json.data.version | default('?') }} at {{ proxmox_api_url }}
+      Cluster is ready for exercise deployment.

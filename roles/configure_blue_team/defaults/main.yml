@@ -1,0 +1,26 @@
+---
+# =============================================================================
+# Role: configure_blue_team — Default Variables
+# =============================================================================
+
+# Malcolm web UI port
+malcolm_web_port: 443
+
+# Malcolm data retention (days) — 0 = unlimited
+malcolm_retention_days: 0
+
+# Hedgehog Linux sensor capture mode
+# full: capture all traffic on capture_interface
+# bpf:  apply BPF filter (set hedgehog_bpf_filter per host)
+hedgehog_capture_mode: full
+
+# OPNsense API defaults
+opnsense_api_port: 443
+opnsense_api_path: /api
+
+# Analyst workstation packages to install on Kali Purple
+blue_team_analyst_packages:
+  - wireshark
+  - tcpdump
+  - nmap
+  - curl

@@ -1,0 +1,13 @@
+---
+# =============================================================================
+# Role: inventory_refresh - Default Variables
+# =============================================================================
+
+# Default OS type assigned to VMs that don't specify one
+inventory_default_os_type: windows
+
+# Default WinRM connection port
+inventory_winrm_port: 5985
+
+# Default SSH connection port (Linux/VyOS)
+inventory_ssh_port: 22

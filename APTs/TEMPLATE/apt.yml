@@ -1,0 +1,81 @@
+---
+# =============================================================================
+# CDX-E APT Profile Template
+# =============================================================================
+# Copy APTs/TEMPLATE/ to APTs/<APT_NAME>/ to create a new adversary profile.
+# All fields marked REQUIRED must be populated. OPTIONAL fields may be removed.
+#
+# This file is loaded by read_apt_config and exposed as the 'apt_config' fact.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# APT Identity
+# -----------------------------------------------------------------------------
+apt:
+  name: "APT_TEMPLATE"                # REQUIRED — matches directory name, uppercase
+  description: >-                     # REQUIRED — brief description of this threat actor profile
+    Template adversary profile. Replace with a description of the simulated threat
+    actor, including their typical TTPs and objectives.
+  ttps:                               # OPTIONAL — MITRE ATT&CK technique references
+    - "T1566.001 - Spearphishing Attachment"
+    - "T1059.001 - PowerShell"
+    - "T1055 - Process Injection"
+    - "T1071.001 - Web Protocols (C2)"
+
+# -----------------------------------------------------------------------------
+# C2 Framework Configuration
+# -----------------------------------------------------------------------------
+# Each c2_platforms entry maps to a VM in this APT's vms.yaml.
+# The 'vm' field must match the 'name' of a VM in vms.yaml exactly.
+# Supported platforms: adaptix, cobalt_strike, sliver
+c2_platforms:
+  - name: adaptix                     # REQUIRED — platform identifier
+    vm: "RT-C2-01"                    # REQUIRED — VM hostname from vms.yaml that runs this C2
+    listener_port: 443                # OPTIONAL — default: 443
+    listener_protocol: https          # OPTIONAL — https / http / dns
+    teamserver_password: "{{ vault_c2_teamserver_password | default('changeme') }}"  # REQUIRED for teamserver auth
+
+  # Cobalt Strike example (requires license):
+  # - name: cobalt_strike
+  #   vm: "RT-CS-01"
+  #   listener_port: 50050
+  #   listener_protocol: https
+  #   teamserver_password: "{{ vault_c2_teamserver_password }}"
+  #   license_file: "/opt/cobaltstrike/.cobaltstrike.license"
+
+# -----------------------------------------------------------------------------
+# Operator Workstations
+# -----------------------------------------------------------------------------
+# List of VM names (from vms.yaml) used as Red Team operator workstations.
+# configure_red_team will install tooling and configure connections to C2 servers.
+operator_vms:
+  - "RT-OPS-01"                       # REQUIRED — at least one operator VM
+
+# -----------------------------------------------------------------------------
+# VPS / External Nodes (OPTIONAL)
+# -----------------------------------------------------------------------------
+# CDX-I facing nodes this APT uses for external simulation (redirectors, etc.)
+# These are vanilla Linux VMs deployed alongside other Red Team VMs.
+# vps_nodes: []
+
+# -----------------------------------------------------------------------------
+# Toolkit Staging (OPTIONAL)
+# -----------------------------------------------------------------------------
+# Files to stage from the Ansible controller to operator VMs.
+# Source path is relative to this APT directory.
+# toolkit:
+#   src_dir: "toolkit/"               # Local path relative to apt_dir
+#   dest_dir: "/opt/redteam"          # Destination on operator VMs
+#   files: []                         # If empty, the entire src_dir is synced
+
+# -----------------------------------------------------------------------------
+# Implant Staging (OPTIONAL)
+# -----------------------------------------------------------------------------
+# Pre-position implants on target VMs before exercise start.
+# Requires configure_red_team to run after target VMs are online.
+implant_staging: false                # Set true to enable pre-staging
+
+# implant_targets:
+#   - vm: "EX-WKS-01"                # Target VM hostname (must be in exercise inventory)
+#     type: powershell                # powershell / exe / dll
+#     path: "/opt/redteam/implants/beacon.ps1"

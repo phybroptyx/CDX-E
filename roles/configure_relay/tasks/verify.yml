@@ -1,0 +1,77 @@
+---
+# =============================================================================
+# configure_relay: verify
+# =============================================================================
+# Relay health smoke test — safe to call at any time.
+# Confirms SSH reachable, SOCKS5 port open, ip_forward enabled, nftables active.
+# =============================================================================
+
+- name: Verify SSH connectivity to relay (from ACN)
+  ansible.builtin.wait_for:
+    host: "{{ relay_management_ip }}"
+    port: 22
+    timeout: 10
+  delegate_to: localhost
+
+- name: Verify SOCKS5 proxy port is listening
+  ansible.builtin.wait_for:
+    host: "{{ relay_management_ip }}"
+    port: "{{ socks5_port }}"
+    timeout: 10
+  delegate_to: localhost
+
+- name: Check ip_forward value
+  ansible.builtin.command: sysctl -n net.ipv4.ip_forward
+  register: _ip_forward
+  changed_when: false
+
+- name: Assert ip_forward is enabled
+  ansible.builtin.assert:
+    that:
+      - _ip_forward.stdout | trim == '1'
+    fail_msg: >-
+      ip_forward is NOT enabled on the relay.
+      Run configure_relay with relay_action=provision to fix this.
+
+- name: Check nftables service state
+  ansible.builtin.systemd:
+    name: nftables
+  register: _nft_state
+
+- name: Assert nftables is active
+  ansible.builtin.assert:
+    that:
+      - _nft_state.status.ActiveState == 'active'
+    fail_msg: "nftables is not active on the relay (state: {{ _nft_state.status.ActiveState }})"
+
+- name: Check danted service state
+  ansible.builtin.systemd:
+    name: danted
+  register: _danted_state
+
+- name: Assert danted is active
+  ansible.builtin.assert:
+    that:
+      - _danted_state.status.ActiveState == 'active'
+    fail_msg: "danted is not active on the relay (state: {{ _danted_state.status.ActiveState }})"
+
+- name: Check assigned exercise NICs (if any)
+  ansible.builtin.command: ip addr show dev eth{{ item.slot }}
+  loop: "{{ relay_nic_assignments }}"
+  loop_control:
+    label: "eth{{ item.slot }}"
+  register: _nic_check
+  changed_when: false
+  failed_when: false
+  when: relay_nic_assignments | length > 0
+
+- name: Relay verify — summary
+  ansible.builtin.debug:
+    msg: |
+      CDX-RELAY health check PASSED
+        SSH (port 22)     : reachable at {{ relay_management_ip }}
+        SOCKS5 (port {{ socks5_port }}) : listening
+        ip_forward        : {{ _ip_forward.stdout | trim }}
+        nftables          : {{ _nft_state.status.ActiveState }}
+        danted            : {{ _danted_state.status.ActiveState }}
+        Exercise NICs     : {{ relay_nic_assignments | length }} assigned

@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: CDX
+  description: "Deploys SIEM endpoint agents to monitored VMs (monitor: true in vms.yaml)"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

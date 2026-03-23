@@ -1,0 +1,11 @@
+﻿---
+# =============================================================================
+# Role: check_network_paths
+# =============================================================================
+# Validates network connectivity across all scenario hosts
+# Replace these stubs with implementation tasks.
+# =============================================================================
+
+- name: Placeholder - implement check_network_paths tasks
+  ansible.builtin.debug:
+    msg: "Role check_network_paths is not yet implemented."

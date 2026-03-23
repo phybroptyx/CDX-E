@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: CDX
+  description: "Joins Windows VMs to the exercise Active Directory domain"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

@@ -1,0 +1,7 @@
+---
+galaxy_info:
+  author: CDX
+  description: "One-time cluster bootstrap: installs OVS prerequisites and deploys base network config on all Proxmox cluster nodes"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

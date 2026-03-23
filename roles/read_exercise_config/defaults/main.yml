@@ -1,0 +1,9 @@
+---
+# =============================================================================
+# Role: read_exercise_config - Default Variables
+# =============================================================================
+
+# Base path for exercise directories.
+# Uses ../EXERCISES because all playbooks live in playbooks/ subdir;
+# playbook_dir resolves to playbooks/, so ../EXERCISES reaches project root.
+exercises_base_dir: "{{ playbook_dir }}/../EXERCISES"

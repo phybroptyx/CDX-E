@@ -1,0 +1,42 @@
+---
+# =============================================================================
+# Role: snapshot_exercise — Default Variables
+# =============================================================================
+
+# Snapshot name written to Proxmox. Must match [a-zA-Z0-9_-]+.
+# Override per-run with -e "snapshot_name=pre_exercise_day1"
+snapshot_name: "post_deployment"
+
+# Human-readable description stored with the snapshot.
+snapshot_description: "CDX-E post-deployment baseline"
+
+# Whether to include RAM state in the snapshot. False is appropriate for a
+# powered-down baseline (faster, less storage, fully consistent disk state).
+snapshot_include_ram: false
+
+# Seconds to wait per VM for ACPI shutdown to complete before giving up.
+snapshot_shutdown_timeout: 120
+
+# Polling interval (seconds) when checking VM stopped state after shutdown.
+snapshot_shutdown_poll_interval: 5
+
+# Max poll retries after sending ACPI shutdown signal.
+# Total wait = snapshot_shutdown_timeout / snapshot_shutdown_poll_interval
+snapshot_shutdown_poll_retries: 24
+
+# Groups to exclude from shutdown and snapshot.
+# By default all exercise groups are included. Routers are intentionally
+# included — VyOS config is version-controlled but a disk snapshot provides
+# a clean rollback point.
+snapshot_skip_groups: []
+
+# Shutdown order — groups processed sequentially, most expendable first.
+# Remaining groups (not listed) are shut down last in arbitrary order.
+snapshot_shutdown_order:
+  - workstations
+  - servers
+  - sql_servers
+  - exchange_servers
+  - sccm_servers
+  - domain_controllers
+  - routers

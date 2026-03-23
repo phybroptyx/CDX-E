@@ -1,0 +1,91 @@
+{
+  "_meta": {
+    "description": "CDX-E User and Group Template — defines AD user accounts and security groups.",
+    "usage": "Copy to EXERCISES/<EXERCISE_NAME>/users.json and populate with exercise personas.",
+    "consumed_by": "ad_deploy.ps1 / configure_active_directory role",
+    "version": "1.0",
+    "notes": [
+      "sAMAccountName must be unique across all users.",
+      "ou must match an OU path that exists in exercise_template.json structure.",
+      "groups listed under a user must be defined in the groups array below.",
+      "password will be set at account creation; change in production/classified exercises."
+    ]
+  },
+
+  "users": [
+    {
+      "_comment": "Replace with exercise personas. Keep at least one domain admin account.",
+      "sAMAccountName": "svc.admin",
+      "numericId": "0000000001",
+
+      "givenName": "Service",
+      "sn": "Admin",
+      "initials": "A",
+      "displayName": "Admin, Service A",
+      "title": "Domain Administrator",
+
+      "streetAddress": "1 Corporate Drive",
+      "city": "Anytown",
+      "state": "VA",
+      "postalCode": "22000",
+      "country": "US",
+
+      "telephoneNumber": "+1 (555) 555-0001",
+
+      "ou": "OU=ServiceAccounts,OU=IT-Core,OU=HQ,OU=Sites",
+      "password": "P@ssw0rd123!",
+      "enabled": true,
+
+      "groups": [
+        "Domain Admins",
+        "IT-Admins"
+      ]
+    },
+    {
+      "_comment": "Standard user example — duplicate for each exercise persona.",
+      "sAMAccountName": "firstname.lastname",
+      "numericId": "0000000002",
+
+      "givenName": "First",
+      "sn": "Last",
+      "initials": "M",
+      "displayName": "Last, First M",
+      "title": "Job Title",
+
+      "streetAddress": "1 Corporate Drive",
+      "city": "Anytown",
+      "state": "VA",
+      "postalCode": "22000",
+      "country": "US",
+
+      "telephoneNumber": "+1 (555) 555-0002",
+
+      "ou": "OU=Users,OU=Operations,OU=HQ,OU=Sites",
+      "password": "P@ssw0rd123!",
+      "enabled": true,
+
+      "groups": [
+        "Ops-Users"
+      ]
+    }
+  ],
+
+  "groups": [
+    {
+      "name": "IT Administrators",
+      "sAMAccountName": "IT-Admins",
+      "description": "IT infrastructure administrators",
+      "groupScope": "Global",
+      "groupCategory": "Security",
+      "ou": "OU=Groups,OU=IT-Core,OU=HQ,OU=Sites"
+    },
+    {
+      "name": "Operations Users",
+      "sAMAccountName": "Ops-Users",
+      "description": "General operations staff",
+      "groupScope": "Global",
+      "groupCategory": "Security",
+      "ou": "OU=Groups,OU=Operations,OU=HQ,OU=Sites"
+    }
+  ]
+}

@@ -1,0 +1,329 @@
+---
+# =============================================================================
+# CDX-E Playbook: Domain Services Deployment
+# =============================================================================
+# Purpose: Conditional orchestrator for all domain-integrated services.
+#          Reads scenario.phases.services.* flags to determine which services
+#          to deploy. Each service is a separate play with its own host group
+#          and self-gates via meta: end_play if not required by the scenario.
+#
+# Entry point for full pipeline runs. Individual service playbooks
+# (dhcp_management.yml, sql_management.yml, etc.) remain available for
+# targeted standalone operations by White Cell.
+#
+# Usage:
+#   ansible-playbook playbooks/domain_services.yml \
+#     -e "exercise=OBSIDIAN_DAGGER" \
+#     -e "@../secrets/credentials.yml" --ask-vault-pass
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# Pre-play: load exercise configuration
+# ----------------------------------------------------------------------------
+- name: Load Exercise Configuration
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Load exercise configuration
+      ansible.builtin.import_role:
+        name: read_exercise_config
+
+# ----------------------------------------------------------------------------
+# Pre-play: ensure SOCKS5 relay tunnel is open before WinRM connections
+# ----------------------------------------------------------------------------
+- name: Ensure Relay SOCKS5 Tunnel
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Ensure SOCKS5 relay tunnel is open
+      ansible.builtin.include_role:
+        name: relay_tunnel
+      vars:
+        relay_tunnel_action: open
+
+# ----------------------------------------------------------------------------
+# Pre-play: check pipeline checkpoint
+# ----------------------------------------------------------------------------
+# domain_services_checkpoint_phase controls which checkpoint key is evaluated:
+#   phase4a_dhcp   — Phase 4a DHCP-only run (site.yml, pre-server-boot)
+#   phase6         — Phase 6 full domain services run (site.yml, post-Phase 5)
+#   (unset)        — Standalone targeted invocation; no checkpoint gate applied.
+#
+# Two skip facts are derived and left on localhost for service plays to consume:
+#
+#   _phase_skip      — true when the caller's own phase key is already complete.
+#                      Gates ALL service plays (DHCP + SQL + Exchange + SCCM + IIS).
+#                      Checked first; if true the DHCP skip is implied.
+#
+#   _dhcp_phase_skip — true when phase4a_dhcp is already complete.
+#                      Gates the DHCP play only during Phase 6 so DHCP is not
+#                      re-run if it completed in Phase 4a. Either this flag OR
+#                      _phase_skip being true causes the DHCP play to exit early.
+#
+# Evaluation order:
+#   1. Check phase4a_dhcp   → temporarily sets _phase_skip on localhost.
+#   2. Capture as _dhcp_phase_skip (snapshot before it is overwritten).
+#   3. If caller phase != phase4a_dhcp: re-check the caller's own phase key
+#      to restore _phase_skip to the correct value for the remaining service
+#      plays (SQL, Exchange, SCCM, IIS).
+#   If phase is unset (standalone run): _phase_skip and _dhcp_phase_skip are
+#   both set to false — all service plays run subject to their scenario flags.
+- name: Check Domain Services Checkpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+
+    # Step 1 — Check phase4a_dhcp to derive the DHCP-specific skip gate.
+    # Runs unconditionally when any phase is configured; for the phase4a_dhcp
+    # call itself this also sets the final _phase_skip value (Step 3 is skipped).
+    - name: Check phase4a_dhcp checkpoint (DHCP-specific gate)
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: check
+        pipeline_checkpoint_phase: phase4a_dhcp
+      when: domain_services_checkpoint_phase | default('') | length > 0
+
+    # Initialise both facts to false for unset (standalone) invocations so
+    # every subsequent task has a defined value to test.
+    - name: Initialise skip facts for unset (standalone) invocation
+      ansible.builtin.set_fact:
+        _phase_skip: false
+        _dhcp_phase_skip: false
+      when: domain_services_checkpoint_phase | default('') | length == 0
+
+    # Step 2 — Snapshot _phase_skip (set by step 1) into _dhcp_phase_skip.
+    # At this point _phase_skip reflects the phase4a_dhcp result; capture it
+    # before step 3 overwrites it with the caller's own phase result.
+    - name: Capture DHCP-specific skip fact from phase4a_dhcp check
+      ansible.builtin.set_fact:
+        _dhcp_phase_skip: "{{ _phase_skip | default(false) | bool }}"
+      when: domain_services_checkpoint_phase | default('') | length > 0
+
+    # Step 3 — Restore _phase_skip to the caller's own phase.
+    # Skipped when the caller IS phase4a_dhcp (step 1 already set it correctly).
+    - name: Check pipeline checkpoint for caller phase (restore _phase_skip)
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: check
+        pipeline_checkpoint_phase: "{{ domain_services_checkpoint_phase }}"
+      when:
+        - domain_services_checkpoint_phase | default('') | length > 0
+        - (domain_services_checkpoint_phase | default('')) != 'phase4a_dhcp'
+
+# --- DHCP ------------------------------------------------------------------ #
+- name: "Domain Services: DHCP"
+  hosts: dhcp_servers
+  gather_facts: false
+  tags: [services, dhcp]
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    # _phase_skip: full caller-phase already complete (phase6 or phase4a_dhcp).
+    # _dhcp_phase_skip: phase4a_dhcp specifically complete — skip DHCP in Phase 6
+    # even when phase6 itself still needs to run SQL/Exchange/SCCM/IIS.
+    - name: "[preflight] Skip DHCP — phase already completed (checkpoint)"
+      ansible.builtin.meta: end_play
+      when: >-
+        (hostvars['localhost']._phase_skip | default(false) | bool) or
+        (hostvars['localhost']._dhcp_phase_skip | default(false) | bool)
+
+    - name: "[preflight] Skip — destroy workflow, no configuration to run"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
+    - name: "[preflight] Skip DHCP - not required by scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.services.dhcp | default(false) | bool)
+
+    - name: "[preflight] Assert DHCP hosts are reachable"
+      ansible.builtin.assert:
+        that: groups['dhcp_servers'] | default([]) | length > 0
+        fail_msg: "dhcp_servers group is empty but DHCP phase is enabled."
+
+  roles:
+    - deploy_dhcp
+
+# --- SQL Server ------------------------------------------------------------ #
+- name: "Domain Services: SQL Server"
+  hosts: sql_servers
+  gather_facts: false
+  tags: [services, sql]
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip SQL — phase6 already completed (checkpoint)"
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']._phase_skip | default(false) | bool
+
+    - name: "[preflight] Skip — destroy workflow, no configuration to run"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
+    - name: "[preflight] Skip SQL - not required by scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.services.sql | default(false) | bool)
+
+    - name: "[preflight] Assert SQL hosts are reachable"
+      ansible.builtin.assert:
+        that: groups['sql_servers'] | default([]) | length > 0
+        fail_msg: "sql_servers group is empty but SQL phase is enabled."
+
+  roles:
+    - deploy_sql_server
+
+# --- Microsoft Exchange ---------------------------------------------------- #
+- name: "Domain Services: Microsoft Exchange"
+  hosts: exchange_servers
+  gather_facts: false
+  tags: [services, exchange]
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip Exchange — phase6 already completed (checkpoint)"
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']._phase_skip | default(false) | bool
+
+    - name: "[preflight] Skip — destroy workflow, no configuration to run"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
+    - name: "[preflight] Skip Exchange - not required by scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.services.exchange | default(false) | bool)
+
+    - name: "[preflight] Assert SQL is deployed before Exchange"
+      ansible.builtin.assert:
+        that: scenario.phases.services.sql | default(false) | bool
+        fail_msg: "Exchange requires SQL Server. Set scenario.phases.services.sql: true"
+
+    - name: "[preflight] Assert Exchange hosts are reachable"
+      ansible.builtin.assert:
+        that: groups['exchange_servers'] | default([]) | length > 0
+        fail_msg: "exchange_servers group is empty but Exchange phase is enabled."
+
+  roles:
+    - deploy_microsoft_exchange
+
+# --- SCCM ------------------------------------------------------------------ #
+- name: "Domain Services: SCCM"
+  hosts: sccm_servers
+  gather_facts: false
+  tags: [services, sccm]
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip SCCM — phase6 already completed (checkpoint)"
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']._phase_skip | default(false) | bool
+
+    - name: "[preflight] Skip — destroy workflow, no configuration to run"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
+    - name: "[preflight] Skip SCCM - not required by scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.services.sccm | default(false) | bool)
+
+    - name: "[preflight] Assert SQL is deployed before SCCM"
+      ansible.builtin.assert:
+        that: scenario.phases.services.sql | default(false) | bool
+        fail_msg: "SCCM requires SQL Server. Set scenario.phases.services.sql: true"
+
+    - name: "[preflight] Assert SCCM hosts are reachable"
+      ansible.builtin.assert:
+        that: groups['sccm_servers'] | default([]) | length > 0
+        fail_msg: "sccm_servers group is empty but SCCM phase is enabled."
+
+  roles:
+    - deploy_configuration_manager
+
+# --- IIS ------------------------------------------------------------------- #
+- name: "Domain Services: IIS"
+  hosts: iis_servers
+  gather_facts: false
+  tags: [services, iis]
+
+  vars_files:
+    - "../secrets/credentials.yml"
+
+  pre_tasks:
+    - name: Import exercise facts from pre-play
+      ansible.builtin.set_fact:
+        scenario:         "{{ hostvars['localhost'].scenario }}"
+        exercise_dir:     "{{ hostvars['localhost'].exercise_dir }}"
+        virtual_machines: "{{ hostvars['localhost'].virtual_machines }}"
+
+    - name: "[preflight] Skip IIS — phase6 already completed (checkpoint)"
+      ansible.builtin.meta: end_play
+      when: hostvars['localhost']._phase_skip | default(false) | bool
+
+    - name: "[preflight] Skip — destroy workflow, no configuration to run"
+      ansible.builtin.meta: end_play
+      when: (action | default('deploy')) == 'destroy'
+
+    - name: "[preflight] Skip IIS - not required by scenario"
+      ansible.builtin.meta: end_play
+      when: not (scenario.phases.services.iis | default(false) | bool)
+
+    - name: "[preflight] Assert IIS hosts are reachable"
+      ansible.builtin.assert:
+        that: groups['iis_servers'] | default([]) | length > 0
+        fail_msg: "iis_servers group is empty but IIS phase is enabled."
+
+  roles:
+    - install_windowsfeature   # IIS feature only — configure_vm runs in Phase 5
+
+# ----------------------------------------------------------------------------
+# Post-play: record phase completion in pipeline checkpoint
+# ----------------------------------------------------------------------------
+# Records whatever phase key the caller supplied (phase4a_dhcp or phase6).
+# Skipped when domain_services_checkpoint_phase is unset (standalone run) or
+# when _phase_skip is true (phase was already complete — nothing new to record).
+- name: Record Domain Services Checkpoint
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Record domain services phase as complete
+      ansible.builtin.include_role:
+        name: pipeline_checkpoint
+      vars:
+        pipeline_checkpoint_action: record_complete
+        pipeline_checkpoint_phase: "{{ domain_services_checkpoint_phase }}"
+      when:
+        - domain_services_checkpoint_phase | default('') | length > 0
+        - not (_phase_skip | default(false) | bool)
+        - (action | default('deploy')) != 'destroy'

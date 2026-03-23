@@ -1,0 +1,148 @@
+---
+# =============================================================================
+# configure_relay: provision
+# =============================================================================
+# First-time OS configuration for CDX-RELAY (Debian 12).
+# Idempotent — safe to re-run.
+#
+# Actions:
+#   - Set hostname to cdx-relay
+#   - Discover actual NIC names (predictable naming: ens18/ens19 not eth0/eth1)
+#   - Deploy /etc/network/interfaces (management static + CDX-I static)
+#   - Enable ip_forward via sysctl.d
+#   - Deploy nftables base ruleset (inter-segment isolation)
+#   - Install ACN SSH public key for cdxadmin
+#   - Harden SSH (disable password auth, enable pubkey)
+#
+# Note: Networking is NOT restarted during this play. The static IP (10.0.0.10)
+# is assigned by Play 4 of provision_relay.yml via QEMU guest-exec. The
+# interfaces config takes effect permanently on the next reboot.
+# =============================================================================
+
+# --- Essential packages ---
+- name: Install relay diagnostic and utility packages
+  ansible.builtin.apt:
+    name:
+      - netcat-openbsd   # nc — port checks and pipe-over-TCP
+      - curl             # HTTP-level WinRM / API testing
+      - tcpdump          # packet capture for connectivity debugging
+      - nmap             # port scanning
+      - dnsutils         # dig / nslookup
+      - iproute2         # ip, ss (routing and socket inspection)
+      - iputils-ping     # ping
+      - python3          # ad-hoc scripting
+    state: present
+    update_cache: true
+
+# --- Hostname ---
+- name: Set relay hostname
+  ansible.builtin.hostname:
+    name: cdx-relay
+
+- name: Update /etc/hosts with relay FQDN
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1'
+    line: "127.0.1.1  cdx-relay  cdx-relay.cdx.lab"
+
+# --- Discover actual NIC names ---
+# Debian 12 uses predictable interface names (ens18, ens19, …) instead of
+# eth0/eth1. Discover the management interface (the one with the active default
+# route from DHCP) and the CDX-I interface (the remaining non-loopback NIC).
+# These override the eth0/eth1 defaults for the templates deployed below.
+- name: Discover management interface (has active default route)
+  ansible.builtin.set_fact:
+    relay_mgmt_iface: "{{ ansible_default_ipv4.interface }}"
+
+- name: Discover CDX-I interface (first non-loopback interface other than management)
+  ansible.builtin.set_fact:
+    relay_cdxi_iface: >-
+      {{ ansible_interfaces
+         | reject('equalto', 'lo')
+         | reject('equalto', relay_mgmt_iface)
+         | sort | list | first }}
+
+- name: Report discovered interface names
+  ansible.builtin.debug:
+    msg: "Management: {{ relay_mgmt_iface }}  CDX-I: {{ relay_cdxi_iface }}"
+
+# --- Static networking ---
+# NOTE: no notify here. Restarting networking mid-play would change the IP
+# from DHCP to static (10.0.0.10/22), breaking the current SSH connection.
+# Play 4 in provision_relay.yml assigns the static IP via QEMU guest-exec.
+# On the next reboot networking starts clean with the static config.
+- name: Deploy /etc/network/interfaces
+  ansible.builtin.template:
+    src: interfaces.j2
+    dest: /etc/network/interfaces
+    owner: root
+    group: root
+    mode: '0644'
+
+# --- ip_forward ---
+- name: Deploy ip_forward sysctl configuration
+  ansible.builtin.template:
+    src: sysctl-relay.conf.j2
+    dest: /etc/sysctl.d/99-cdx-relay.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Apply sysctl settings immediately
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/99-cdx-relay.conf
+  changed_when: false
+
+# --- SOCKS5 proxy ---
+# dante-server is not used — the relay has no internet access to install it.
+# SOCKS5 is provided via SSH dynamic port forwarding (-D) from the ACN:
+#   ssh -D 1080 -N -f -i ~/.ssh/id_ed25519 cdxadmin@<relay_ip>
+# The exercise deployment playbook establishes this tunnel before WinRM tasks
+# and tears it down on completion. No daemon required on the relay.
+
+# --- nftables ---
+- name: Deploy nftables base ruleset
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: '0640'
+  notify: reload nftables
+
+- name: Enable and start nftables
+  ansible.builtin.systemd:
+    name: nftables
+    state: started
+    enabled: true
+
+# --- SSH public key ---
+# Install ACN key before disabling password auth — without this the relay
+# becomes permanently unreachable once PasswordAuthentication is set to no.
+- name: Install ACN SSH public key for cdxadmin
+  ansible.posix.authorized_key:
+    user: cdxadmin
+    state: present
+    key: "{{ vault_ssh_public_key }}"
+
+# --- SSH hardening ---
+- name: Disable SSH password authentication
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PasswordAuthentication'
+    line: 'PasswordAuthentication no'
+  notify: restart sshd
+
+- name: Enable SSH public key authentication
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PubkeyAuthentication'
+    line: 'PubkeyAuthentication yes'
+  notify: restart sshd
+
+# --- Flush handlers (sshd restart) ---
+- name: Flush handlers
+  ansible.builtin.meta: flush_handlers
+
+# Static IP verification is done in Play 4 of provision_relay.yml (guest-exec
+# assigns 10.0.0.10/22 and then wait_for confirms SSH at that address).
+# No verify step here — the static IP is not active until guest-exec runs.

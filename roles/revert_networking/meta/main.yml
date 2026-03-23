@@ -1,0 +1,7 @@
+﻿---
+galaxy_info:
+  author: CDX
+  description: "Reverts scenario SDN and firewall/routing configuration"
+  license: proprietary
+  min_ansible_version: '2.14'
+dependencies: []

@@ -1,90 +1,34 @@
-# CHILLED_ROCKET Configuration Files - Index
+# CHILLED_ROCKET — Stark Industries Exercise
 
-## 📥 Download These Files
-
-All files are ready for download and deployment to your Proxmox environment.
-
----
-
-## 🎯 Primary Configuration File
-
-### **[computers.json](computer:///mnt/user-data/outputs/computers.json)** (170 KB)
-
-**THE MAIN FILE** - Complete infrastructure configuration for all 343 virtual machines.
-
-**Contents:**
-- ✅ 48 servers (VM IDs 5001-5070)
-- ✅ 295 workstations (VM IDs 6001-6458)
-- ✅ All Windows 11 systems set to Professional edition
-- ✅ Proxmox template IDs for cloning
-- ✅ MAC addresses for all systems
-- ✅ **Network bridge assignments (stk100-stk140)**
-- ✅ **Network segmentation configuration**
-- ✅ VIP system markers
-
-**Use this file for:**
-- Automated VM provisioning
-- Network configuration
-- CDX-E deployment framework integration
-- Documentation reference
+Multi-site enterprise exercise. Domain: `stark-industries.midgard.mrvl`. 5 global sites,
+331 VMs, 12 VyOS routers, 41 OVS bridges (stk100–stk140).
 
 ---
 
-## 📚 Documentation Files
+## Configuration Files
 
-### 1. **[DEPLOYMENT_SUMMARY.md](computer:///mnt/user-data/outputs/DEPLOYMENT_SUMMARY.md)** (9.3 KB)
-
-Complete deployment guide with:
-- VM ID allocation strategy
-- Template mapping
-- VIP system details
-- Site-by-site breakdown
-- Hardware specifications
-- Pre/post deployment checklists
-- Integration with ad_deploy.ps1
-
-### 2. **[VM_ID_REFERENCE.md](computer:///mnt/user-data/outputs/VM_ID_REFERENCE.md)** (11 KB)
-
-Quick lookup reference:
-- Server VM IDs by site (5001-5070)
-- Workstation VM IDs by site and department (6001-6458)
-- VIP system quick reference
-- Deployment priority order
-- Proxmox command examples
-
-### 3. **[NETWORK_BRIDGE_REFERENCE.md](computer:///mnt/user-data/outputs/NETWORK_BRIDGE_REFERENCE.md)** (14 KB)
-
-**NEW** - Complete network architecture documentation:
-- All 41 network bridges (stk100-stk140)
-- Bridge-by-bridge system counts
-- Security zone design
-- IP address planning per site
-- Firewall rule recommendations
-- Traffic flow examples
-- Troubleshooting guide
-- Proxmox bridge creation commands
-
-### 4. **[CHANGES_SUMMARY.md](computer:///mnt/user-data/outputs/CHANGES_SUMMARY.md)** (7.2 KB)
-
-Update summary:
-- Network configuration changes (v2.1 → v2.2)
-- Bridge assignment logic
-- Most utilized networks
-- Validation results
-- Next steps for deployment
+| File | Purpose |
+|------|---------|
+| `scenario.yml` | Pipeline phase gates, domain, Proxmox defaults |
+| `vms.yaml` | VM inventory + network topology |
+| `exercise_template.json` | AD structure: sites, site links, OUs |
+| `users.json` | AD user accounts and security groups |
+| `gpo.json` | Group Policy Objects |
+| `services.json` | DNS zones and service configuration |
+| `VyOS/` | Per-router VyOS CLI config files (12 routers) |
 
 ---
 
-## 📊 Configuration Summary
+---
+
+## Configuration Summary
 
 ### Total Infrastructure
 ```
-Total VMs:        343
-├── Servers:      48 (14.0%)
-└── Workstations: 295 (86.0%)
-
+Total VMs:        331
 Network Bridges:  41 (stk100-stk140)
-VIP Systems:      3 (marked in JSON)
+VyOS Routers:     12
+VIP Systems:      3
 ```
 
 ### VM ID Allocation
@@ -92,12 +36,12 @@ VIP Systems:      3 (marked in JSON)
 Proxmox Resource Grouping:
 ├── 1-999      : CDX Management
 ├── 1000-1999  : Blue Team (SOC)
-├── 2000-2999  : Templates (10 OS templates defined)
-├── 3000-3999  : APT resources
+├── 2000-2999  : Templates (Packer-built)
+├── 3000-3999  : APT / Red Team resources
 ├── 4000-4999  : CDX Internet (grey space)
 └── 5000-6999  : Defended/Target ← CHILLED_ROCKET HERE
-    ├── 5000-5999 : Servers (48 systems)
-    └── 6000-6999 : Workstations (295 systems)
+    ├── 5000-5999 : Servers
+    └── 6000-6999 : Workstations
 ```
 
 ### Network Segmentation
@@ -127,37 +71,28 @@ Workstations:
 
 ---
 
-## 🚀 Quick Start Deployment
+## Quick Start Deployment
 
-### Step 1: Download Configuration
-Download **computers.json** (main file)
+Network bridges (stk100–stk140) are created automatically by the Ansible pipeline
+(`network_management.yml`). VM cloning is handled by Terraform via the `deploy_scenario`
+role. Do not create bridges or clone VMs manually.
 
-### Step 2: Create Proxmox Bridges
-See NETWORK_BRIDGE_REFERENCE.md for commands:
 ```bash
-# Example: HQ Core Servers
-auto stk100
-iface stk100 inet manual
-    bridge-ports none
-    bridge-stp off
-    bridge-fd 0
+# Full pipeline deployment
+ansible-playbook site.yml \
+  -e "exercise=CHILLED_ROCKET" \
+  -e "@secrets/credentials.yml" --ask-vault-pass
 ```
 
-### Step 3: Clone VMs from Templates
-```bash
-# Example: Domain Controller
-qm clone 2003 5001 --name STK-DC-01 --full
-qm set 5001 --net0 virtio=14:18:77:3A:2B:C1,bridge=stk100,firewall=1
-```
+For staged rollout, run individual phase playbooks — see `playbooks/README.md`.
 
-### Step 4: Deploy with CDX-E Framework
-```powershell
-.\ad_deploy.ps1 -ExerciseName "CHILLED_ROCKET" -GenerateStructure
-```
+> **Note:** CHILLED_ROCKET is a large exercise (331 VMs, 5 sites). Pilot the HQ site
+> only (`EXERCISES/10. CHILLED_ROCKET/vms.yaml` — filter to HQ VMs) before scaling
+> to all 5 sites.
 
 ---
 
-## 🔐 VIP Systems
+## VIP Systems
 
 Three critical executive workstations are marked in the configuration:
 
@@ -169,7 +104,7 @@ Three critical executive workstations are marked in the configuration:
 
 ---
 
-## 🏢 Site Distribution
+## Site Distribution
 
 ### HQ (New York) - 104 systems
 - **Network:** 66.218.180.0/22
@@ -203,58 +138,56 @@ Three critical executive workstations are marked in the configuration:
 
 ---
 
-## 📋 Template Mapping
+## Template Mapping
 
-Proxmox templates for VM cloning:
+Packer-built templates used by this exercise (QNAP master VMIDs):
 
-| Template ID | Operating System | Usage |
-|------------|------------------|-------|
-| **2001** | Windows Server 2025 | 5 servers (Malibu advanced) |
-| **2002** | Windows Server 2022 | 15 servers (NMS, WSUS, web, app) |
-| **2003** | Windows Server 2019 | 28 servers (DCs, file, DB) |
-| **2009** | Windows 11 Professional | 97 workstations |
-| **2010** | Windows 10 Enterprise | 169 workstations |
-| **2011** | Windows 8.1 Enterprise | 16 workstations (legacy) |
-| **2012** | Windows 7 Enterprise | 13 workstations (legacy) |
+| VMID | Template Key | Operating System | Usage |
+|------|-------------|-----------------|-------|
+| 2037 | `server_2025` | Windows Server 2025 | Malibu advanced servers |
+| 2033 | `server_2022` | Windows Server 2022 | NMS, WSUS, web, app servers |
+| 2031 | `server_2019` | Windows Server 2019 | DCs, file servers, DB servers |
+| 2036 | `windows_11` | Windows 11 | Workstations |
+| 2035 | `windows_10` | Windows 10 | Workstations |
+| 2028 | `windows_8.1` | Windows 8.1 | Legacy workstations |
+| 2025 | `windows_7` | Windows 7 | Legacy workstations |
 
 ---
 
-## 🛡️ Security Features
+## Security Architecture
 
 ### Network Segmentation
-- ✅ Separate bridges for core servers, DMZ, and departments
-- ✅ Firewall enabled on all 343 interfaces
-- ✅ Site-level network isolation
-- ✅ Department-level access control
+- Separate OVS bridges for core servers, DMZ, and departments
+- Site-level network isolation via CDX-I uplinks
+- Department-level traffic segmentation
 
-### Zone Isolation
+### Zone Design
 ```
-Internet → Boundary → DMZ → Core Servers → Departments
+CDX-I Internet → SDP Router → Boundary/DMZ → Core Servers → Departments
 ```
 
-### Monitoring Points
-- Per-bridge traffic monitoring
-- Per-zone firewall logging
-- VIP system enhanced monitoring
-- Critical server alerting (DCs marked)
+### Monitoring
+- VMs tagged `monitor: true` in `vms.yaml` receive SIEM endpoint agents (Phase 11)
+- VIP systems (Tony Stark, Pepper Potts, Happy Hogan) marked for enhanced monitoring
 
 ---
 
-## 🔧 Integration with CDX-E
+## CDX-E Integration
 
-This configuration is designed to work seamlessly with the CDX-E Active Directory Deployment Framework:
+Deployed via the Ansible pipeline defined in `site.yml`. Configuration files consumed by:
 
-**Repository:** https://github.com/phybroptyx/CDX-E
-
-**Compatible Files:**
-- ad_deploy.ps1 (master deployment script)
-- generate_structure.ps1 (topology generator)
-- computers.json (this file)
-- services.json, users.json, gpo.json (from repository)
+| File | Consumed by |
+|------|-------------|
+| `scenario.yml` | `read_exercise_config` role |
+| `vms.yaml` | `read_exercise_config` role |
+| `exercise_template.json` | `configure_active_directory` role (AD sites, OUs) |
+| `users.json` | `configure_active_directory` role (users, groups) |
+| `gpo.json` | `deploy_group_policy_objects` role |
+| `VyOS/*.conf` | `configure_networking` role (pushed via SSH) |
 
 ---
 
-## 📝 Configuration Version History
+## Configuration Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
@@ -264,42 +197,22 @@ This configuration is designed to work seamlessly with the CDX-E Active Director
 
 ---
 
-## ✅ Validation Checklist
+## Pre-Deployment Checklist
 
-Before deployment, verify:
-
-- [ ] All 10 Proxmox templates exist (2001, 2002, 2003, 2009-2012)
-- [ ] All 41 network bridges created (stk100-stk140)
-- [ ] Sufficient storage for 343 VMs
-- [ ] Network subnets configured per site
-- [ ] Firewall rules defined
-- [ ] DHCP scopes configured (optional)
-- [ ] Backup strategy in place
-- [ ] AD domain ready (or new forest planned)
+- [ ] All required Packer templates built (run `template_deployment.yml`)
+- [ ] `scenario.yml` created from `EXERCISES/TEMPLATE/scenario.yml` scaffold
+- [ ] `vms.yaml` populated (331 VMs — pilot HQ-only first before full 5-site deployment)
+- [ ] VyOS config files present in `VyOS/` for all 12 routers
+- [ ] Sufficient Proxmox storage for 331 linked-clone VMs
+- [ ] DHCP scopes defined in `scenario.yml → scenario.services.dhcp.scopes`
+- [ ] CDX-RELAY provisioned (`provision_relay.yml` run once)
 
 ---
 
-## 📞 Support & Resources
+## Resources
 
-- **Framework:** CDX-E v2.0
 - **Exercise:** CHILLED_ROCKET (Stark Industries)
-- **Repository:** https://github.com/phybroptyx/CDX-E
-- **Total VMs:** 343 systems across 5 global sites
+- **Domain:** stark-industries.midgard.mrvl
+- **Total VMs:** 331 systems across 5 global sites
+- **Pipeline docs:** `playbooks/README.md`, `roles/README.md`
 
----
-
-## 🎯 Files Overview
-
-| File | Size | Description |
-|------|------|-------------|
-| **computers.json** | 170 KB | ⭐ Main configuration file |
-| DEPLOYMENT_SUMMARY.md | 9.3 KB | Deployment guide |
-| VM_ID_REFERENCE.md | 11 KB | Quick VM ID lookup |
-| NETWORK_BRIDGE_REFERENCE.md | 14 KB | Network documentation |
-| CHANGES_SUMMARY.md | 7.2 KB | Update summary |
-
----
-
-**Generated:** 2025-11-24  
-**Configuration Version:** 2.2 (Network-Enabled)  
-**Status:** ✅ Ready for Deployment
